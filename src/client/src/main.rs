@@ -55,7 +55,7 @@ async fn connect(address: &str) -> Result<(), String> {
         process::exit(1);
     }).unwrap();
     
-    let mut socket = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).map_err(|error| {
+    let mut socket = UdpSocket::bind("0.0.0.0:0".parse().unwrap()).map_err(|error| {
         let err_msg = format!("Failed to bind the client socket: {}", error);
         error!("{}",&err_msg);
         err_msg
