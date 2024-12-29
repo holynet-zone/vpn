@@ -5,3 +5,22 @@ members = [
     "src/client",
     "src/server",
 ]
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+common = { path = "src/common" }
+tun = "0.7.*"
+mio = { version = "^1.0.*", features = ["os-poll", "os-ext", "net"] }
+
+# data
+chrono = "0.4.*"
+serde = { version = "1.0.*", features = ["derive"] }
+etherparse = "0.16.*"
+
+# logging
+log = "0.4.*"
+tracing = "0.1.*"
+tracing-subscriber = "0.3.*"
+tracing-appender = "0.2.*"
