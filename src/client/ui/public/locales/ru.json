@@ -1,0 +1,41 @@
+{
+  "connections": {
+      "label": "Соединение"
+  },
+  "settings": {
+    "label": "Настройки",
+    "network": {
+      "label": "Сеть"
+    },
+    "runtime": {
+      "label": "Среда выполнения",
+      "option_header": "Выберите среду выполнения",
+      "option_description": "Среда выполнения представляет собой технологию реализации VPN протокола"
+    },
+    "security": {
+      "label": "Безопасность"
+    },
+    "language": {
+      "label": "Язык",
+      "option_header": "Выберите язык"
+    },
+    "appearance": {
+      "label": "Внешний вид"
+    },
+    "about": {
+      "label": "О программе"
+    }
+  },
+  "new": {
+    "label": "Добавить",
+    "description": "Вставьте ключ, добавьте конфигурационный файл или отсканируйте QR-код",
+    "insert_placeholder": "Вставьте ключ",
+    "continue_button": "Продолжить"
+  },
+  "components": {
+    "input": {
+      "insert_button": "Вставить"
+    }
+  },
+  "greeting": "Привет, {name}!"
+}
