@@ -1,11 +1,21 @@
 [package]
 name = "server"
 version = "0.1.0"
-edition = "2021"
+edition = { workspace = true }
 
 [dependencies]
-common = { path = "../common" }
-log = "^0.4"
-env_logger = "^0.11"
-mio = { version = "^1.0", features = ["os-poll", "os-ext", "net"] }
-tun = "^0.6"
+common = { workspace = true }
+tun = { workspace = true }
+mio = { workspace = true }
+clap = { version = "4.5.*", features = ["cargo", "color", "derive"] }
+
+# data
+chrono = { workspace = true }
+serde = { workspace = true}
+etherparse = { workspace = true }
+
+# logging
+log = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
