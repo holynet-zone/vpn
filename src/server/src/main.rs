@@ -1,48 +1,56 @@
-use std::process;
-use std::io::{Read, Write};
-use std::net::SocketAddr;
+mod exceptions;
+mod handlers;
+mod cli;
+mod clients;
+
+use std::{process, thread};
+use std::io::Read;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::os::fd::AsRawFd;
-use std::sync::{Arc, Mutex};
-use log::{error, info, warn};
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::{error, info, warn};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_appender;
+
+use clap::Parser;
+use log::LevelFilter;
+use tun::AbstractDevice;
+use crate::cli::{Cli, Commands, DevCommands};
+use crate::exceptions::ServerExceptions;
+use crate::handlers::output_event;
+use common::net::{down_tun, set_ipv4_forwarding, setup_tun, tun_status};
+
 use mio::{Events, Interest, Poll, Token};
-use mio::net::UdpSocket;
-use tun::platform::Device;
-use common::{Body, DATA_SIZE, is_root, MAX_PACKET_SIZE};
+use mio::net::UdpSocket as MioUdpSocket;
+use common::{DATA_SIZE, MAX_PACKET_SIZE};
+use crate::clients::Clients;
 
 const INTERFACE_NAME: &str = "holynet0";
-
+const NETWORK_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 8, 0, 0));
+const NETWORK_PREFIX: u8 = 24;
+const EVENT_CAPACITY: usize = 1024;
 const UDP: Token = Token(0);
 const TUN: Token = Token(1);
 
-fn setup_tun(name: &str, mtu: usize) -> Result<Device, String> {
-    let mut config = tun::Configuration::default();
-    config.name(name);
-    config.address((10, 8, 0, 1));
-    config.netmask((255, 255, 255, 0));
-    config.mtu(mtu as i32);
-    config.up();
-    
-    let tun_device = tun::create(&config).map_err(|error| {
-        format!("Failed to create the TUN device: {}", error)
-    })?;
-    
-    Ok(tun_device)
-}
 
-fn start_server(address: &str) {
 
-    let address = address.parse().map_err(|error| {
+fn start(address: &str) {
+
+    let address: SocketAddr = address.parse().map_err(|error| {
         error!("Failed to parse the server address: {}", error);
         process::exit(1);
     }).unwrap();
 
-    let mut socket = UdpSocket::bind(address).map_err(|error| {
+    let socket = UdpSocket::bind(address).map_err(|error| {
         error!("Failed to bind the server socket: {}", error);
         process::exit(1);
     }).unwrap();
-    let clients: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None)); // todo: change to hashmap
+    let mut mio_socket = MioUdpSocket::from_std(socket);
+    let clients: Arc<Clients> = Arc::new(Clients::new(&Ipv4Addr::from_str(&NETWORK_IP.to_string()).unwrap(), &NETWORK_PREFIX)); // todo: to IpAddr (ipv6)
     
-    let mut tun = setup_tun(INTERFACE_NAME, DATA_SIZE).map_err(|error| {
+    let mut tun = setup_tun(INTERFACE_NAME, &DATA_SIZE, &NETWORK_IP, &NETWORK_PREFIX).map_err(|error| {
         error!("{}", error);
         process::exit(1);
     }).unwrap();
@@ -51,10 +59,13 @@ fn start_server(address: &str) {
 
     info!("Server started on {}", address);
 
+    info!("Enabling kernel's IPv4 forwarding.");
+    set_ipv4_forwarding(true).unwrap();
+
     let mut poll = Poll::new().unwrap();
-    let mut events = Events::with_capacity(1024);
+    let mut events = Events::with_capacity(EVENT_CAPACITY);
     poll.registry()
-        .register(&mut socket, UDP, Interest::READABLE).unwrap();
+        .register(&mut mio_socket, UDP, Interest::READABLE).unwrap();
     poll.registry()
         .register(&mut tunfd, TUN, Interest::READABLE).unwrap();
 
@@ -66,85 +77,139 @@ fn start_server(address: &str) {
         for event in events.iter() {
             match event.token() {
                 UDP => {
-                    match socket.recv_from(&mut udp_buffer) {
+                    match mio_socket.recv_from(&mut udp_buffer) {
                         Ok((n, client_addr)) => {
-                            // From server
-                            let packet = match Body::from_bytes(&udp_buffer[0..n]) {
-                                Ok(packet) => packet,
-                                Err(error) => {
-                                    warn!("Failed to deserialize packet: {}", error);
-                                    continue;
-                                }
-                            };
-                            udp_buffer.fill(0);
-                            
-                            match packet {
-                                Body::Data { data } => {
-                                    let mut clients_guard = clients.lock().unwrap();
-                                    if !clients_guard.is_some() {
-                                        info!("New client connected: {}", &client_addr);
-                                        clients_guard.replace(client_addr);
-                                    }
-                                    drop(clients_guard);
-                                    info!("Received {} bytes from {}", n, client_addr);
-                                    // To TUN
-                                    tun.write(&data).unwrap();
-                                }
-                            }
+                            handlers::input_event(
+                                &udp_buffer[0..n],
+                                &mut tun,
+                                &mut mio_socket,
+                                &client_addr,
+                                clients.clone(),
+                                DATA_SIZE
+                            ).unwrap_or_else(|error| match error {
+                                ServerExceptions::BadPacketRequest(msg) => warn!("{}", msg),
+                                _ => unreachable!()
+                            });
                         }
                         Err(e) => {
-                            error!("Failed to receive data: {}", e);
-                            break; // Todo check if just client error
+                            error!("Failed to receive data: {}", e); // Todo check if just client error
                         }
                     }
+                    udp_buffer.fill(0)
                 }
                 TUN => {
-                    // From TUN
-                    let n = tun.read(&mut tun_buffer).unwrap();
-                    let packet = Body::Data { data: tun_buffer[0..n].to_vec() };
-                    info!("Received {} bytes from TUN", n);
-                    tun_buffer.fill(0);
-                    
-                    let clients_guard = clients.lock().unwrap().clone();
-                    let client_addr = match clients_guard {  // todo: extract from udp header
-                        Some(client_addr) => client_addr,
-                        None => {
-                            warn!("No client connected");
-                            continue;
+                    match tun.read(&mut tun_buffer) {
+                        Ok(n) => {
+                            output_event(
+                                &tun_buffer[0..n],
+                                &mut mio_socket,
+                                clients.clone()
+                            ).unwrap_or_else(|error| match error {
+                                ServerExceptions::BadPacketRequest(msg) => warn!("{}", msg),
+                                ServerExceptions::IOError(msg) => error!("{}", msg),
+                                _ => {}
+                            });
+                        },
+                        Err(e) => {
+                            error!("Failed to receive data: {}", e); // Todo check if just client error
                         }
-                    };
-                    socket.send_to(&packet.to_bytes().unwrap(), client_addr).unwrap();
+                    }
+                    tun_buffer.fill(0)
                 }
                 _ => unreachable!(),
             }
         }
     }
-
-    
-    // // Clean up the tun0 interface when done
-    // let output = Command::new("sudo")
-    //     .arg("ip")
-    //     .arg("link")
-    //     .arg("delete")
-    //     .arg(INTERFACE_NAME)
-    //     .output()
-    //     .expect("Failed to execute command to delete TUN interface");
-    // 
-    // if !output.status.success() {
-    //     eprintln!("Failed to delete TUN interface: {}", String::from_utf8_lossy(&output.stderr));
-    // }
 }
 
 
-fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+fn main() {
+    let file_appender = tracing_appender::rolling::daily("logs", "server.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::registry()
+        .with(
+            fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false),
+        )
+        .with(fmt::layer().with_ansi(true))
+        .init();
 
-
-    if !is_root() {
-        error!("This program must be run as root");
-        process::exit(1);
+    let cli = Cli::parse();
+    match cli.debug {
+        true => log::set_max_level(LevelFilter::Debug),
+        false => log::set_max_level(LevelFilter::Info),
     }
-    
-    start_server("0.0.0.0:34254");
-    Ok(())
+
+    match cli.command {
+        Some(command) => match command {
+            Commands::Start { host, port } => {
+                start(&format!("{}:{}", host, port));
+            },
+            Commands::Dev { commands } => {
+                match commands {
+                    DevCommands::Tun {commands} => match commands {
+                        cli::TunCommands::Up => {
+                            let tun = setup_tun(
+                                INTERFACE_NAME, 
+                                &DATA_SIZE,
+                                &NETWORK_IP, 
+                                &NETWORK_PREFIX
+                            ).map_err(|error| {
+                                error!("{}", error);
+                                process::exit(1);
+                            }).unwrap();
+                            println!(
+                                "\n\tname: {}\n\tmtu: {}\n\taddr: {}\n\tnetmask: {}\n",
+                                tun.tun_name().unwrap_or("none".to_string()), 
+                                tun.mtu().map(|mtu| mtu.to_string()).unwrap_or("none".to_string()),
+                                tun.address().map(|addr| addr.to_string()).unwrap_or("none".to_string()),
+                                tun.netmask().map(|mask| mask.to_string()).unwrap_or("none".to_string())
+                            );
+                            println!(
+                                "|> TUN interface has been successfully raised and will remain in this state\
+                                \n|> until this application is terminated or 15 minutes have passed,\
+                                \n|> after which the interface will be automatically removed!"
+                            );
+                            thread::sleep(Duration::from_secs(60 * 15));
+                        },
+                        cli::TunCommands::Down => {
+                            down_tun(INTERFACE_NAME).map_err(|error| {
+                                error!("{}", error);
+                                process::exit(1);
+                            }).unwrap();
+                        },
+                        cli::TunCommands::Status => {
+                            let tun = tun_status(INTERFACE_NAME).map_err(|error| {
+                                error!("{}", error);
+                                process::exit(1);
+                            }).unwrap();
+                            println!(
+                                "\n\tname: {}\n\tstate: {:?}\n\tmtu: {}\n\taddr: {}\n\tnetmask: {}\n",
+                                tun.name, tun.state, tun.mtu, tun.ip, tun.netmask
+                            );
+                        }
+                    },
+                    DevCommands::Ipv4Forwarding { commands } => match commands {
+                        cli::Ipv4ForwardingCommands::True => {
+                            set_ipv4_forwarding(true).map_err(|error| {
+                                error!("{}", error);
+                                process::exit(1);
+                            }).unwrap();
+                        },
+                        cli::Ipv4ForwardingCommands::False => {
+                            set_ipv4_forwarding(false).map_err(|error| {
+                                error!("{}", error);
+                                process::exit(1);
+                            }).unwrap();
+                        }
+                    }
+                }
+            }
+        },
+        None => {
+            error!("No command provided");
+            process::exit(1);
+        }
+    }
 }
