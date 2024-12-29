@@ -1,12 +1,44 @@
 [package]
 name = "client"
 version = "0.1.0"
-edition = "2021"
+edition = { workspace = true }
+autobins = false
+
+[features]
+custom-protocol = [ "gui", "tauri/custom-protocol" ]
+gui = ["tauri", "tauri-build"]
+cli = []
+
+[[bin]]
+name = "client-cli"
+path = "src/bin/cli.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "client-gui"
+path = "src/bin/gui.rs"
+required-features = ["gui"]
+
 
 [dependencies]
+tauri = { version = "2.1.*", features = ["config-toml"],  optional = true }
+
+# common
 common = { path = "../common" }
-env_logger = "^0.11"
-mio = { version = "^1.0", features = ["os-poll", "os-ext", "net",] }
-log = "^0.4"
-tokio = { version = "^1.40", features = ["rt", "rt-multi-thread", "macros"] }
-tun = "^0.6"
+mio = { version = "1.0.*", features = ["os-poll", "os-ext", "net",] }
+tokio = { version = "1.42.*", features = ["rt", "rt-multi-thread", "macros"] }
+tun = "0.7.*"
+libc = "0.2.*"
+
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+# logging
+log = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+
+
+[build-dependencies]
+tauri-build = { version = "2.0.*", features = ["config-toml"], optional = true }
