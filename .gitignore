@@ -1,5 +1,7 @@
 target
 Cargo.lock
+logs
 
 # RustRover
 .idea/
+.ai
