@@ -2,7 +2,7 @@ use is_root::is_root as lib_is_root;
 
 pub mod net;
 pub mod exceptions;
-pub mod user_config;
+pub mod conn_config;
 pub mod sunbeam;
 
 /// Obviously max Ethernet frame size is ~ 1500 bytes
