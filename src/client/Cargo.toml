@@ -23,8 +23,8 @@ required-features = ["gui"]
 [dependencies]
 tauri = { version = "2.1.*", features = ["config-toml"],  optional = true }
 
-# common
-common = { path = "../common" }
+# core
+core = { workspace = true }
 mio = { version = "1.0.*", features = ["os-poll", "os-ext", "net",] }
 tokio = { version = "1.42.*", features = ["rt", "rt-multi-thread", "macros"] }
 tun = "0.7.*"

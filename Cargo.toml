@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "src/common",
+    "src/core",
     "src/client",
     "src/server",
 ]
@@ -10,7 +10,7 @@ members = [
 edition = "2021"
 
 [workspace.dependencies]
-common = { path = "src/common" }
+core = { path = "src/core" }
 tun = "0.7.*"
 mio = { version = "^1.0.*", features = ["os-poll", "os-ext", "net"] }
 
