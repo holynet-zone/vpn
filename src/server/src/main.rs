@@ -2,6 +2,7 @@ mod exceptions;
 mod handlers;
 mod cli;
 mod clients;
+mod config;
 
 use std::{process, thread};
 use std::io::Read;
@@ -20,11 +21,11 @@ use tun::AbstractDevice;
 use crate::cli::{Cli, Commands, DevCommands};
 use crate::exceptions::ServerExceptions;
 use crate::handlers::output_event;
-use common::net::{down_tun, set_ipv4_forwarding, setup_tun, tun_status};
+use core::{DATA_SIZE, MAX_PACKET_SIZE};
+use core::net::{down_tun, set_ipv4_forwarding, setup_tun, tun_status};
 
 use mio::{Events, Interest, Poll, Token};
 use mio::net::UdpSocket as MioUdpSocket;
-use common::{DATA_SIZE, MAX_PACKET_SIZE};
 use crate::clients::Clients;
 
 const INTERFACE_NAME: &str = "holynet0";
@@ -33,7 +34,8 @@ const NETWORK_PREFIX: u8 = 24;
 const EVENT_CAPACITY: usize = 1024;
 const UDP: Token = Token(0);
 const TUN: Token = Token(1);
-
+const UDP_BUFFER_SIZE: usize = 65536;
+const TUN_BUFFER_SIZE: usize = 65536;
 
 
 fn start(address: &str) {
@@ -69,8 +71,8 @@ fn start(address: &str) {
     poll.registry()
         .register(&mut tunfd, TUN, Interest::READABLE).unwrap();
 
-    let mut udp_buffer = [0u8; MAX_PACKET_SIZE];
-    let mut tun_buffer = [0u8; DATA_SIZE];
+    let mut udp_buffer = [0u8; UDP_BUFFER_SIZE];
+    let mut tun_buffer = [0u8; TUN_BUFFER_SIZE];
     
     loop {
         poll.poll(&mut events, None).unwrap();
