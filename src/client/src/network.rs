@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
 use libc;
 use log::info;
 use std::process::Command;
+use pnet::datalink;
 
 pub fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
@@ -192,5 +194,24 @@ pub fn set_dns(dns: &str) -> Result<String, String> {
         Ok(String::from_utf8(output.stdout).unwrap())
     } else {
         Err(String::from_utf8(output.stderr).unwrap())
+    }
+}
+
+pub fn find_available_ifname(base_name: &str) -> String {
+    let interfaces = datalink::interfaces();
+
+    let existing_names: HashSet<String> = interfaces
+        .into_iter()
+        .map(|iface| iface.name)
+        .collect();
+
+    let mut index = 0;
+    loop {
+        let candidate = format!("{}{}", base_name, index);
+        if !existing_names.contains(&candidate) {
+            return candidate;
+        }
+
+        index += 1;
     }
 }
