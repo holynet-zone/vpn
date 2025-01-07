@@ -1,8 +1,9 @@
-use crate::sunbeam::enc::BodyEnc;
-use crate::sunbeam::SESSION_KEY_SIZE;
+use crate::protocol::enc::BodyEnc;
+use crate::protocol::SESSION_KEY_SIZE;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use std::net::IpAddr;
+
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum ClientBody {
@@ -40,51 +41,65 @@ pub enum ClientBody {
         /// The size of this type is 1 byte
         enc: BodyEnc
     },
+    Disconnection
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum ConnectionState {
-    /// If the user data is correct, and it is possible to allocate a user session,
-    /// then the connection is considered successful - the server returns useful
-    /// data for configuration
-    /// 
-    /// The size of this type:  
-    /// * If holynet ipv4 and dns ipv4: 5 + 1 + 4 + 128 + 5 = 143 bytes
-    /// * If holynet ipv6 and dns ipv4: 17 + 1 + 4 + 128 + 5 = 155 bytes
-    /// * If holynet ipv4 and dns ipv6: 5 + 1 + 4 + 128 + 17 = 155 bytes
-    /// * If holynet ipv6 and dns ipv6: 17 + 1 + 4 + 128 + 17 = 167 bytes
-    Connected {
-        /// This field contains the IP address of the user VPN interface
-        ///
-        /// The size of this type is from (1+4) to (1+16) bytes.
-        /// Maximum size is 17 bytes
-        ip: IpAddr,
-        /// This field contains the prefix of the user VPN interface
-        ///
-        /// The size of this type is 1 byte
-        prefix: u8,
-        /// This field contains the numeric session identifier. 
-        /// There can be (4,294,967,295 - 1) active devices connected to one server at the same time. 
-        /// Note that `sid` with value `0` is reserved and is used only during authentication! 
-        /// The client cannot get `sid` with value `0`!
-        ///
-        /// The size of this type is 4 bytes
-        sid: u32,
-        /// This field contains the encryption key that the client should use for 
-        /// this session and the selected encryption algorithm (`BodyEnc`)
-        #[serde(with = "BigArray")]
-        key: [u8; SESSION_KEY_SIZE],
-        /// This field contains the MTU of the user VPN interface
-        ///
-        /// The size of this type is from (1+4) bytes to (1+16) bytes
-        dns: IpAddr,
-    },
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub enum SDState {
+    /// If the username or password is incorrect, the connection is refused
+    InvalidCredentials,
     /// The server administrator can limit the number of devices from which one can connect using
     /// one cred. By default, this is 10 devices - it is set at the stage of creating a client
-    MaxConnectedDevices,
-    /// If the username or password is incorrect, the connection is refused
-    InvalidCredentials
+    MaxConnectedDevices(u32),
+    /// If the number of available IP addresses or session identifiers has expired, 
+    /// the server cannot successfully establish a new connection
+    ServerOverloaded,
+    /// If the structure of the request was violated (for example, instead of the expected uid = 0, 
+    /// another identifier was specified),
+    InvalidPacketFormat,
+    /// When a server goes down, it must notify all active clients about it.
+    ServerShutdown
 }
+
+
+/// If the user data is correct, and it is possible to allocate a user session,
+/// then the connection is considered successful - the server returns useful
+/// data for configuration
+///
+/// The size of this type:  
+/// * If holynet ipv4 and dns ipv4: 5 + 1 + 4 + 128 + 5 = 143 bytes
+/// * If holynet ipv6 and dns ipv4: 17 + 1 + 4 + 128 + 5 = 155 bytes
+/// * If holynet ipv4 and dns ipv6: 5 + 1 + 4 + 128 + 17 = 155 bytes
+/// * If holynet ipv6 and dns ipv6: 17 + 1 + 4 + 128 + 17 = 167 bytes
+#[derive(Serialize, Deserialize)]
+pub struct Setup {
+    /// This field contains the IP address of the user VPN interface
+    ///
+    /// The size of this type is from (1+4) to (1+16) bytes.
+    /// Maximum size is 17 bytes
+    pub ip: IpAddr,
+    /// This field contains the prefix of the user VPN interface
+    ///
+    /// The size of this type is 1 byte
+    pub prefix: u8,
+    /// This field contains the numeric session identifier. 
+    /// There can be (4,294,967,295 - 1) active devices connected to one server at the same time. 
+    /// Note that `sid` with value `0` is reserved and is used only during authentication! 
+    /// The client cannot get `sid` with value `0`!
+    ///
+    /// The size of this type is 4 bytes
+    pub sid: u32,
+    /// This field contains the encryption key that the client should use for 
+    /// this session and the selected encryption algorithm (`BodyEnc`)
+    #[serde(with = "BigArray")]
+    pub key: [u8; SESSION_KEY_SIZE],
+    /// This field contains the MTU of the user VPN interface
+    ///
+    /// The size of this type is from (1+4) bytes to (1+16) bytes
+    pub dns: IpAddr,
+}
+
 
 #[derive(Serialize, Deserialize)]
 pub enum ServerBody {
@@ -107,7 +122,6 @@ pub enum ServerBody {
     /// instead of the expected uid = 0, another identifier was specified),
     /// the server will not expect a connection request, and upon receiving such a body,
     /// it will simply ignore it
-    /// 
-    /// The size of this type is 1- bytes
-    Connection(ConnectionState)
+    Connection(Setup),
+    Disconnection(SDState)
 }

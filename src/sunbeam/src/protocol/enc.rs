@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
+use clap::ValueEnum;
+use strum_macros::EnumIter;
+pub use strum::IntoEnumIterator;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ValueEnum, EnumIter)]
 pub enum AuthEnc {
     Aes128,
     Aes256,
@@ -8,7 +12,7 @@ pub enum AuthEnc {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, EnumIter)]
 pub enum BodyEnc {
     Aes128,
     Aes256,
@@ -38,6 +42,19 @@ pub mod kdf {
         hkdf.expand(info, &mut okm).unwrap();
         okm
     }
+    
+    pub fn derive_random_key(salt: &[u8], len: usize, info: &[u8]) -> Vec<u8> {
+        const MAX_OKM_LENGTH: usize = 255 * 32;
+        if len > MAX_OKM_LENGTH {
+            panic!("Requested key length {} exceeds maximum allowed length {}", len, MAX_OKM_LENGTH);
+        }
+        let ikm = rand::random::<[u8; 32]>();
+        let hkdf = Hkdf::<Sha256>::new(Some(salt), &ikm);
+        let mut okm = vec![0u8; len];
+        hkdf.expand(info, &mut okm).expect("HKDF expansion failed");
+        okm
+    }
+    
 }
 
 
@@ -59,12 +76,12 @@ pub mod aes128 {
         result
     }
 
-    pub fn decrypt(data: &[u8], key: &[u8; 16]) -> Vec<u8> {
+    pub fn decrypt(data: &[u8], key: &[u8; 16]) -> Option<Vec<u8>> {
         let key = Key::<Aes128Gcm>::from_slice(key);
         let (nonce_arr, ciphered_data) = data.split_at(12);
         let nonce = Nonce::from_slice(nonce_arr);
         let cipher = Aes128Gcm::new(key);
-        cipher.decrypt(nonce, ciphered_data).unwrap()
+        cipher.decrypt(nonce, ciphered_data).ok()
     }
 }
 
@@ -86,12 +103,12 @@ pub mod aes256 {
         result
     }
 
-    pub fn decrypt(data: &[u8], key: &[u8; 32]) -> Vec<u8> {
+    pub fn decrypt(data: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
         let key = Key::<Aes256Gcm>::from_slice(key);
         let (nonce_arr, ciphered_data) = data.split_at(12);
         let nonce = Nonce::from_slice(nonce_arr);
         let cipher = Aes256Gcm::new(key);
-        cipher.decrypt(nonce, ciphered_data).unwrap()
+        cipher.decrypt(nonce, ciphered_data).ok()
     }
 }
 
@@ -114,12 +131,12 @@ pub mod chacha20_poly1305 {
         result
     }
 
-    pub fn decrypt(data: &[u8], key: &[u8; 32]) -> Vec<u8> {
+    pub fn decrypt(data: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
         let key = Key::from_slice(key);
         let (nonce_arr, ciphered_data) = data.split_at(12);
         let nonce = Nonce::from_slice(nonce_arr);
         let cipher = ChaCha20Poly1305::new(key);
-        cipher.decrypt(nonce, ciphered_data).unwrap()
+        cipher.decrypt(nonce, ciphered_data).ok()
     }
 }
 
@@ -177,7 +194,7 @@ mod tests {
         let key = make_derive_key_128(&[0; 128], &[0; 255]);
         let data = rand::random::<[u8; 1500]>().to_vec();
         let encrypted = aes128::encrypt(&data, &key);
-        let decrypted = aes128::decrypt(&encrypted, &key);
+        let decrypted = aes128::decrypt(&encrypted, &key).unwrap();
         assert_eq!(data, decrypted);
     }
     
@@ -186,7 +203,7 @@ mod tests {
         let key = make_derive_key_256(&[0; 128], &[0; 255]);
         let data = rand::random::<[u8; 1500]>().to_vec();
         let encrypted = aes256::encrypt(&data, &key);
-        let decrypted = aes256::decrypt(&encrypted, &key);
+        let decrypted = aes256::decrypt(&encrypted, &key).unwrap();
         assert_eq!(data, decrypted);
     }
     
@@ -195,7 +212,7 @@ mod tests {
         let key = make_derive_key_256(&[0; 128], &[0; 255]);
         let data = rand::random::<[u8; 1500]>().to_vec();
         let encrypted = chacha20_poly1305::encrypt(&data, &key);
-        let decrypted = chacha20_poly1305::decrypt(&encrypted, &key);
+        let decrypted = chacha20_poly1305::decrypt(&encrypted, &key).unwrap();
         assert_eq!(data, decrypted);
     }
 }

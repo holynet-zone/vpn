@@ -1,16 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-    "src/core",
+    "src/sunbeam",
     "src/client",
     "src/server",
+    "src/shared",
 ]
 
 [workspace.package]
 edition = "2021"
 
 [workspace.dependencies]
-core = { path = "src/core" }
+sunbeam = { path = "src/sunbeam" }
+shared = { path = "src/shared" }
 tun = "0.7.*"
 mio = { version = "^1.0.*", features = ["os-poll", "os-ext", "net"] }
 

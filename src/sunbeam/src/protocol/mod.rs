@@ -14,11 +14,11 @@ pub mod body;
 pub mod bytes;
 pub mod enc;
 
-
 /// In bytes
 pub const USERNAME_SIZE: usize = 128;
 pub const AUTH_KEY_SIZE: usize = 128;
 pub const SESSION_KEY_SIZE: usize = 128;
+pub type SessionId = u32;
 
 
 /// ClientPacket  
@@ -33,7 +33,7 @@ pub struct ClientPacket {
     /// For the initial connection for authentication purposes, 
     /// it is set to *0*. This means that the value *0* is always 
     /// reserved and cannot be assigned to a user!
-    pub sid: u32,
+    pub sid: SessionId,
     /// Packet body  
     /// Contains the payload, may be encrypted
     pub body: Vec<u8>,
@@ -45,18 +45,18 @@ pub struct ClientPacket {
 /// ServerPacket  
 /// This type represents the structure of server responses
 #[derive(Serialize, Deserialize)]
-pub struct ServerPacket(body::ServerBody);
+pub struct ServerPacket(pub body::ServerBody);
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sunbeam::body::ClientBody;
-    use crate::sunbeam::body::ServerBody;
+    use crate::protocol::body::{ClientBody, Setup};
+    use crate::protocol::body::ServerBody;
     use std::net::{IpAddr, Ipv4Addr};
     use rand::random;
-    use crate::sunbeam::bytes::ToBytes;
-    use crate::sunbeam::enc::{aes128, aes256, chacha20_poly1305, kdf, AuthEnc, BodyEnc};
+    use crate::protocol::bytes::ToBytes;
+    use crate::protocol::enc::{aes128, aes256, chacha20_poly1305, kdf, AuthEnc, BodyEnc};
 
     fn make_client_body_data(len: usize) -> ClientBody {
         ClientBody::Data(vec![0; len])
@@ -91,7 +91,7 @@ mod tests {
     }
 
     fn make_server_body_connected(sid: u32) -> ServerBody {
-        ServerBody::Connection(body::ConnectionState::Connected {
+        ServerBody::Connection(Setup {
             ip: IpAddr::V4(Ipv4Addr::new(10, 8, 0, 1)),
             prefix: 24,
             sid,
@@ -133,7 +133,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_eq!(deserialized_packet.sid, 0);
-        let decrypted = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
         assert_eq!(client_body, deserialized_body);
         let server_body = make_server_body_connected(1);
@@ -161,7 +161,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_eq!(deserialized_packet.sid, 0);
-        let decrypted = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
         assert_eq!(client_body, deserialized_body);
         let server_body = make_server_body_connected(1);
@@ -189,7 +189,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_eq!(deserialized_packet.sid, 0);
-        let decrypted = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
         assert_eq!(client_body, deserialized_body);
         let server_body = make_server_body_connected(1);
@@ -219,7 +219,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
         assert_eq!(client_body, deserialized_body);
         let client_timestamp = match deserialized_body {
@@ -253,7 +253,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
         assert_eq!(client_body, deserialized_body);
         let client_timestamp = match deserialized_body {
@@ -287,7 +287,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
         assert_eq!(client_body, deserialized_body);
         let client_timestamp = match deserialized_body {
@@ -324,7 +324,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted_body = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted_body = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted_body).unwrap();
         assert_eq!(client_body, deserialized_body);
 
@@ -369,7 +369,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted_body = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted_body = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted_body).unwrap();
         assert_eq!(client_body, deserialized_body);
 
@@ -414,7 +414,7 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted_body = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap());
+        let decrypted_body = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
         let deserialized_body: ClientBody = bincode::deserialize(&decrypted_body).unwrap();
         assert_eq!(client_body, deserialized_body);
 

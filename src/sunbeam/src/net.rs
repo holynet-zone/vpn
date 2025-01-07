@@ -3,8 +3,9 @@ use std::process::Command;
 use tracing::info;
 use tun::Device;
 use serde::Deserialize;
+use crate::exceptions::RuntimeExceptions;
 
-pub fn set_ipv4_forwarding(value: bool) -> Result<(), String> {
+pub fn set_ipv4_forwarding(value: bool) -> Result<(), RuntimeExceptions> {
     let sysctl_arg = if cfg!(target_os = "linux") {
         format!("net.ipv4.ip_forward={}", if value { 1 } else { 0 })
     } else if cfg!(target_os = "macos") {
@@ -21,27 +22,26 @@ pub fn set_ipv4_forwarding(value: bool) -> Result<(), String> {
             info!("Ipv4 forwarding is {}", if value { "enabled" } else { "disabled" });
             Ok(())
         },
-        Err(error) => Err(format!("Failed to set ipv4 forwarding: {}", error))
+        Err(error) => Err(RuntimeExceptions::TunError(format!("Failed to set ipv4 forwarding: {}", error)))
     }
 }
 
-pub fn setup_tun(name: &str, mtu: &usize, ip: &IpAddr, prefix: &u8) -> Result<Device, String> {
+pub fn setup_tun(name: &str, mtu: &u16, ip: &IpAddr, prefix: &u8) -> Result<Device, RuntimeExceptions> {
     let mut config = tun::Configuration::default();
     config.tun_name(name);
     config.address(ip);
     config.netmask(prefix_to_address(prefix));
-    config.mtu(mtu.clone() as u16);
+    config.mtu(mtu.clone());
     config.up();
 
     let tun_device = tun::create(&config).map_err(|error| {
-        format!("Failed to create the TUN device: {}", error)
+        RuntimeExceptions::TunError(format!("Failed to create the TUN device: {}", error))
     })?;
     info!("TUN device {} is up", name);
-
     Ok(tun_device)
 }
 
-pub fn down_tun(name: &str) -> Result<(), String> {
+pub fn down_tun(name: &str) -> Result<(), RuntimeExceptions> {
     let output = Command::new("sudo")
         .arg("ip")
         .arg("link")
@@ -49,13 +49,13 @@ pub fn down_tun(name: &str) -> Result<(), String> {
         .arg(name)
         .output()
         .map_err(|error| {
-            format!("Failed to execute command to delete TUN interface: {}", error)
+            RuntimeExceptions::TunError(format!("Failed to execute command to delete TUN interface: {}", error))
         })?;
     if output.status.success() {
         info!("TUN interface {} is down", name);
         Ok(())
     } else {
-        Err(format!("Failed to delete TUN interface: {}", String::from_utf8_lossy(&output.stderr)))
+        Err(RuntimeExceptions::TunError(format!("Failed to delete TUN interface: {}", String::from_utf8_lossy(&output.stderr))))
     }
 }
 

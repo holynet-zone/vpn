@@ -2,17 +2,15 @@ use thiserror::Error;
 
 
 #[derive(Error, Debug)]
-pub enum CoreExceptions {
+pub enum RuntimeExceptions {
     #[error("TunError: {0}")]
     TunError(String),
-    #[error("BadPacketRequest: {0}")]
-    BadPacketRequest(String),
     #[error("IOError: {0}")]
     IOError(String),
 }
 
-impl From<std::io::Error> for CoreExceptions {
+impl From<std::io::Error> for RuntimeExceptions {
     fn from(err: std::io::Error) -> Self {
-        CoreExceptions::IOError(err.to_string())
+        RuntimeExceptions::IOError(err.to_string())
     }
 }
