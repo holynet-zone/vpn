@@ -7,7 +7,7 @@ autobins = false
 [features]
 custom-protocol = [ "gui", "tauri/custom-protocol" ]
 gui = ["tauri", "tauri-build"]
-cli = []
+cli = ["clap"]
 
 [[bin]]
 name = "client-cli"
@@ -21,23 +21,27 @@ required-features = ["gui"]
 
 
 [dependencies]
-tauri = { version = "2.1.*", features = ["config-toml"],  optional = true }
+tauri = { version = "2.2.*", features = ["config-toml"],  optional = true }
+clap = { version = "4.5.23", features = ["derive"], optional = true}
 
-# core
-core = { workspace = true }
+sunbeam = { workspace = true }
+shared = { workspace = true }
 mio = { version = "1.0.*", features = ["os-poll", "os-ext", "net",] }
 tokio = { version = "1.42.*", features = ["rt", "rt-multi-thread", "macros"] }
 tun = "0.7.*"
 libc = "0.2.*"
+pnet = "0.35.*"
+ctrlc = "3.4.*"
 
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-
+base64 = "0.22.*"
 # logging
 log = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
+thiserror = "2.0.*"
 
 
 [build-dependencies]
