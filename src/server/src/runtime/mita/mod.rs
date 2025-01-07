@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::{process, thread};
 use std::io::Read;
 use std::os::fd::AsRawFd;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use mio::{Events, Interest, Poll, Token};
 use mio::net::UdpSocket;
 use tracing::{error, info, warn};
@@ -12,6 +14,7 @@ use tun::{set_ipv4_forwarding, setup_tun};
 use sunbeam::protocol;
 use sunbeam::protocol::bytes::FromBytes;
 use rocksdb::{DB, Options};
+use crate::runtime::exceptions::RuntimeError;
 use crate::runtime::mita::handlers::device_event;
 
 mod handlers;
@@ -23,12 +26,16 @@ const UDP_BUFFER_SIZE: usize = 65536;
 const TUN_BUFFER_SIZE: usize = 65536;
 
 
-pub struct MitaRunner { stop_signal: (Sender<()>, Arc<Mutex<Receiver<()>>>) }
+pub struct MitaRunner {
+    stop_tx: Arc<Mutex<Sender<RuntimeError>>>,
+    stop_rx: Arc<Mutex<Receiver<RuntimeError>>>,
+}
 
 impl Run for MitaRunner {
     fn run(runtime: &Configurable<Self>) {
         info!("Starting the Mita runtime");
-        let stop_signal = runtime.runtime.stop_signal.1.clone();
+        let stop_tx = runtime.runtime.stop_tx.clone();
+        let stop_rx = runtime.runtime.stop_rx.clone();
         let config = match runtime.config.clone() {
             Some(config) => config,
             None => {
@@ -36,13 +43,20 @@ impl Run for MitaRunner {
                 return;
             }
         };
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let stop_flag_clone = Arc::clone(&stop_flag);
+
         thread::spawn(move || {
             loop {
-                if stop_signal.lock().unwrap().try_recv().is_ok() {
+                if let Some(error) = stop_rx.lock().unwrap().try_recv().ok() {
                     info!("Stopping the Mita runtime");
+                    stop_flag_clone.store(true, Ordering::Relaxed);
+                    error!("{}", error);
                     break;
                 }
-            } 
+                thread::sleep(Duration::from_secs(1));
+            }
         });
         thread::spawn(move || {
             let mut opts = Options::default();
@@ -87,6 +101,11 @@ impl Run for MitaRunner {
             let mut tun_buffer = [0u8; TUN_BUFFER_SIZE];
 
             loop {
+                if stop_flag.load(Ordering::Relaxed) {
+                    info!("SyncMio runtime stopped");
+                    break;
+                }
+                
                 poll.poll(&mut events, None).unwrap();
                 for event in events.iter() {
                     match event.token() {
@@ -103,7 +122,9 @@ impl Run for MitaRunner {
                                                 &mut clients,
                                                 config.network_prefix,
                                                 &db
-                                            ).unwrap(); // todo
+                                            ).unwrap_or_else(
+                                                |error| stop_tx.lock().unwrap().send(error).unwrap()
+                                            );
                                         },
                                         Err(e) => warn!("Failed to deserialize client packet: {}", e)
                                     }
@@ -119,7 +140,9 @@ impl Run for MitaRunner {
                                         &tun_buffer[0..n],
                                         &mut socket,
                                         &clients
-                                    ).unwrap(); // todo
+                                    ).unwrap_or_else(
+                                        |error| stop_tx.lock().unwrap().send(error).unwrap()
+                                    );
                                 },
                                 Err(e) => warn!("Failed to receive data: {}", e)
                             }
@@ -136,7 +159,9 @@ impl Run for MitaRunner {
 impl Stop for MitaRunner {
     fn stop(runtime: &Configurable<Self>) {
         info!("Stopping the Mita runtime");
-        runtime.runtime.stop_signal.0.send(()).unwrap();
+        runtime.runtime.stop_tx.lock().unwrap().send(
+            RuntimeError::StopSignal
+        ).unwrap();
     }
 }
 
@@ -148,7 +173,8 @@ impl Mita {
         Mita {
             config: None,
             runtime: MitaRunner {
-                stop_signal: (tx, Arc::new(Mutex::new(rx)))
+                stop_tx: Arc::new(Mutex::new(tx)),
+                stop_rx: Arc::new(Mutex::new(rx)),
             }
         }
     }
