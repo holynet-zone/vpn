@@ -1,14 +1,23 @@
 use std::net::SocketAddr;
 use std::time::Duration;
+use sunbeam::protocol::{
+    AUTH_KEY_SIZE,
+    enc::{AuthEnc, BodyEnc}
+};
 
 #[derive(Clone)]
 pub struct Config {
     pub server_addr: SocketAddr,
     pub client_addr: SocketAddr,
     pub interface_name: String,
+    pub mtu: u16,
     pub event_capacity: usize,
     pub event_timeout: Option<Duration>,
     pub keepalive: Option<Duration>,
+    pub username: String,
+    pub auth_key: [u8; AUTH_KEY_SIZE],
+    pub auth_enc: AuthEnc,
+    pub body_enc: BodyEnc,
 }
 
 pub struct Configurable<T> {
