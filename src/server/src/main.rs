@@ -10,7 +10,8 @@ mod network;
 use std::{process, thread};
 use std::time::Duration;
 use tracing::{error, info, warn};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, filter, reload, layer::SubscriberExt, util::SubscriberInitExt};
+
 use tracing_appender;
 
 use clap::Parser;
@@ -41,7 +42,10 @@ fn main() {
 
     let file_appender = tracing_appender::rolling::daily("logs", "server.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let filter = filter::LevelFilter::INFO;
+    let (filter, reload_handle) = reload::Layer::new(filter);
     tracing_subscriber::registry()
+        .with(filter)
         .with(
             fmt::layer()
                 .with_writer(non_blocking)
@@ -50,9 +54,7 @@ fn main() {
         .with(fmt::layer().with_ansi(true))
         .init();
     
-    log::set_max_level(LevelFilter::Error);
-    cli.debug.then(|| log::set_max_level(LevelFilter::Debug));
-    
+    cli.debug.then(|| reload_handle.modify(|filter| *filter = filter::LevelFilter::DEBUG));
     match cli.command {
         Some(command) => match command {
             Commands::Start { 
