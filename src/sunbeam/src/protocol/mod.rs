@@ -8,16 +8,16 @@
 /// ```
 ///
 
-use serde::{Deserialize, Serialize};
-
 pub mod body;
 pub mod bytes;
 pub mod enc;
+pub mod username;
+pub mod keys;
+pub mod password;
 
-/// In bytes
-pub const USERNAME_SIZE: usize = 128;
-pub const AUTH_KEY_SIZE: usize = 128;
-pub const SESSION_KEY_SIZE: usize = 128;
+use serde::{Deserialize, Serialize};
+use self::body::EncBody;
+
 pub type SessionId = u32;
 
 
@@ -36,27 +36,30 @@ pub struct ClientPacket {
     pub sid: SessionId,
     /// Packet body  
     /// Contains the payload, may be encrypted
-    pub body: Vec<u8>,
+    pub body: EncBody,
     /// The buffer may contain the username during authentication
     /// or other information
     pub buffer: Vec<u8>
 }
 
+
 /// ServerPacket  
 /// This type represents the structure of server responses
 #[derive(Serialize, Deserialize)]
-pub struct ServerPacket(pub body::ServerBody);
+pub struct ServerPacket(pub EncBody);
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::body::{ClientBody, Setup};
     use crate::protocol::body::ServerBody;
-    use std::net::{IpAddr, Ipv4Addr};
-    use rand::random;
+    use crate::protocol::body::{ClientBody, Setup};
     use crate::protocol::bytes::ToBytes;
-    use crate::protocol::enc::{aes128, aes256, chacha20_poly1305, kdf, AuthEnc, BodyEnc};
+    use crate::protocol::enc::EncAlg;
+    use crate::protocol::keys::auth::AuthKey;
+    use crate::protocol::keys::session::SessionKey;
+    use crate::protocol::username::Username;
+    use std::net::{IpAddr, Ipv4Addr};
 
     fn make_client_body_data(len: usize) -> ClientBody {
         ClientBody::Data(vec![0; len])
@@ -71,23 +74,14 @@ mod tests {
         )
     }
 
-    fn make_client_body_connection(enc: BodyEnc) -> ClientBody {
+    fn make_client_body_connection(enc: EncAlg) -> ClientBody {
         ClientBody::Connection {
             enc
         }
     }
     
-    fn make_creds(enc: AuthEnc) -> ([u8; USERNAME_SIZE], Vec<u8>) {
-        let tag = "holynet".as_bytes();
-        let username = random::<[u8; USERNAME_SIZE]>();
-        match enc {
-            AuthEnc::Aes128 => {
-                (username, kdf::derive_key_128(&username, &random::<[u8; 128]>().to_vec(), tag).to_vec())
-            },
-            AuthEnc::Aes256 | AuthEnc::ChaCha20Poly1305 => {
-                (username, kdf::derive_key_256(&username, &random::<[u8; 128]>().to_vec(), tag).to_vec())
-            }
-        }
+    fn make_creds() -> (Username, AuthKey) {
+        (Username::try_from("test".to_string()).unwrap(), AuthKey::generate())
     }
 
     fn make_server_body_connected(sid: u32) -> ServerBody {
@@ -95,7 +89,7 @@ mod tests {
             ip: IpAddr::V4(Ipv4Addr::new(10, 8, 0, 1)),
             prefix: 24,
             sid,
-            key: [0; SESSION_KEY_SIZE],
+            key: SessionKey::generate(),
             dns: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
         })
     }
@@ -118,42 +112,15 @@ mod tests {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////    Connection test    //////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////
-    #[test]
-    fn test_connection_aes128() {
-        // Client
-        let client_body = make_client_body_connection(BodyEnc::Aes128);
-        let (username, key) = make_creds(AuthEnc::Aes128);
-        let client_packet = ClientPacket {
-            sid: 0,
-            body: aes128::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
-            buffer: username.to_vec()
-        };
-        let client_serialized = client_packet.to_bytes().unwrap();
-
-        // Server
-        let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
-        assert_eq!(deserialized_packet.sid, 0);
-        let decrypted = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
-        assert_eq!(client_body, deserialized_body);
-        let server_body = make_server_body_connected(1);
-        let server_packet = ServerPacket(server_body);
-        let server_serialized = server_packet.to_bytes().unwrap();
-        println!(
-            "test_connection_aes128: \nClientPacketSize: {}\nServerPacketSize: {}\n",
-            client_serialized.len(),
-            server_serialized.len()
-        );
-    }
 
     #[test]
     fn test_connection_aes256() {
         // Client
-        let client_body = make_client_body_connection(BodyEnc::Aes128);
-        let (username, key) = make_creds(AuthEnc::Aes256);
+        let client_body = make_client_body_connection(EncAlg::Aes256);
+        let (username, key) = make_creds();
         let packet = ClientPacket {
             sid: 0,
-            body: aes256::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
+            body: EncBody::enchant(client_body.clone(), key.clone(), EncAlg::Aes256),
             buffer: username.to_vec()
         };
         let client_serialized = packet.to_bytes().unwrap();
@@ -161,10 +128,9 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_eq!(deserialized_packet.sid, 0);
-        let decrypted = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
+        let deserialized_body: ClientBody = deserialized_packet.body.disenchant(key.clone(), EncAlg::Aes256).unwrap();
         assert_eq!(client_body, deserialized_body);
-        let server_body = make_server_body_connected(1);
+        let server_body = EncBody::enchant(make_server_body_connected(1), key, EncAlg::Aes256);
         let server_packet = ServerPacket(server_body);
         let server_serialized = server_packet.to_bytes().unwrap();
         println!(
@@ -177,11 +143,11 @@ mod tests {
     #[test]
     fn test_connection_chacha20_poly1305() {
         // Client
-        let client_body = make_client_body_connection(BodyEnc::Aes128);
-        let (username, key) = make_creds(AuthEnc::ChaCha20Poly1305);
+        let client_body = make_client_body_connection(EncAlg::Aes256);
+        let (username, key) = make_creds();
         let packet = ClientPacket {
             sid: 0,
-            body: chacha20_poly1305::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
+            body: EncBody::enchant(client_body.clone(), key.clone(), EncAlg::ChaCha20Poly1305),
             buffer: username.to_vec()
         };
         let client_serialized = packet.to_bytes().unwrap();
@@ -189,10 +155,9 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_eq!(deserialized_packet.sid, 0);
-        let decrypted = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
+        let deserialized_body: ClientBody = deserialized_packet.body.disenchant(key.clone(), EncAlg::ChaCha20Poly1305).unwrap();
         assert_eq!(client_body, deserialized_body);
-        let server_body = make_server_body_connected(1);
+        let server_body = EncBody::enchant(make_server_body_connected(1), key, EncAlg::ChaCha20Poly1305);
         let server_packet = ServerPacket(server_body);
         let server_serialized = server_packet.to_bytes().unwrap();
         println!(
@@ -204,48 +169,15 @@ mod tests {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////    KeepAlive test    ///////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////
-    #[test]
-    fn test_keepalive_aes128() {
-        // Client
-        let client_body = make_client_body_keepalive();
-        let (_, key) = make_creds(AuthEnc::Aes128);
-        let packet = ClientPacket {
-            sid: 1,
-            body: aes128::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
-            buffer: vec![]
-        };
-        let client_serialized = packet.to_bytes().unwrap();
-
-        // Server
-        let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
-        assert_ne!(deserialized_packet.sid, 0);
-        let decrypted = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
-        assert_eq!(client_body, deserialized_body);
-        let client_timestamp = match deserialized_body {
-            ClientBody::KeepAlive(ts) => ts,
-            _ => panic!("Invalid body type")
-        };
-        let server_body = make_server_body_keepalive(client_timestamp);
-        let server_serialized = aes128::encrypt(
-            &ServerPacket(server_body).to_bytes().unwrap(),
-            &key.as_slice().try_into().unwrap()
-        );
-        println!(
-            "test_keepalive_aes128: \nClientPacketSize: {}\nServerPacketSize: {}\n",
-            client_serialized.len(),
-            server_serialized.len()
-        );
-    }
-
+    
     #[test]
     fn test_keepalive_aes256() {
         // Client
         let client_body = make_client_body_keepalive();
-        let (_, key) = make_creds(AuthEnc::Aes256);
+        let (_, key) = make_creds();
         let packet = ClientPacket {
             sid: 1,
-            body: aes256::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
+            body: EncBody::enchant(client_body.clone(), key.clone(), EncAlg::Aes256),
             buffer: vec![]
         };
         let client_serialized = packet.to_bytes().unwrap();
@@ -253,18 +185,14 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
+        let deserialized_body: ClientBody = deserialized_packet.body.disenchant(key.clone(), EncAlg::Aes256).unwrap();
         assert_eq!(client_body, deserialized_body);
         let client_timestamp = match deserialized_body {
             ClientBody::KeepAlive(ts) => ts,
             _ => panic!("Invalid body type")
         };
-        let server_body = make_server_body_keepalive(client_timestamp);
-        let server_serialized = aes256::encrypt(
-            &ServerPacket(server_body).to_bytes().unwrap(),
-            &key.as_slice().try_into().unwrap()
-        );
+        let server_body = EncBody::enchant(make_server_body_keepalive(client_timestamp), key, EncAlg::Aes256);
+        let server_serialized = ServerPacket(server_body).to_bytes().unwrap();
         println!(
             "test_keepalive_aes256: \nClientPacketSize: {}\nServerPacketSize: {}\n",
             client_serialized.len(),
@@ -276,10 +204,10 @@ mod tests {
     fn test_keepalive_chacha20_poly1305() {
         // Client
         let client_body = make_client_body_keepalive();
-        let (_, key) = make_creds(AuthEnc::ChaCha20Poly1305);
+        let (_, key) = make_creds();
         let packet = ClientPacket {
             sid: 1,
-            body: chacha20_poly1305::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
+            body: EncBody::enchant(client_body.clone(), key.clone(), EncAlg::ChaCha20Poly1305),
             buffer: vec![]
         };
         let client_serialized = packet.to_bytes().unwrap();
@@ -287,18 +215,14 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted).unwrap();
+        let deserialized_body: ClientBody = deserialized_packet.body.disenchant(key.clone(), EncAlg::ChaCha20Poly1305).unwrap();
         assert_eq!(client_body, deserialized_body);
         let client_timestamp = match deserialized_body {
             ClientBody::KeepAlive(ts) => ts,
             _ => panic!("Invalid body type")
         };
-        let server_body = make_server_body_keepalive(client_timestamp);
-        let server_serialized = chacha20_poly1305::encrypt(
-            &ServerPacket(server_body).to_bytes().unwrap(),
-            &key.as_slice().try_into().unwrap()
-        );
+        let server_body = EncBody::enchant(make_server_body_keepalive(client_timestamp), key, EncAlg::ChaCha20Poly1305);
+        let server_serialized = ServerPacket(server_body).to_bytes().unwrap();
         println!(
             "test_keepalive_chacha20_poly1305: \nClientPacketSize: {}\nServerPacketSize: {}\n",
             client_serialized.len(),
@@ -308,60 +232,16 @@ mod tests {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////    Data test    ////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////
-    #[test]
-    fn test_data_aes128() {
-        // Client
-        let tun_ip_size = 1500;
-        let client_body = make_client_body_data(tun_ip_size);
-        let (_, key) = make_creds(AuthEnc::Aes128);
-        let packet = ClientPacket {
-            sid: 1,
-            body: aes128::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
-            buffer: vec![]
-        };
-        let client_serialized = packet.to_bytes().unwrap();
-
-        // Server
-        let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
-        assert_ne!(deserialized_packet.sid, 0);
-        let decrypted_body = aes128::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted_body).unwrap();
-        assert_eq!(client_body, deserialized_body);
-
-        let server_body = make_server_body_data(tun_ip_size);
-        let server_serialized = aes128::encrypt(
-            &ServerPacket(server_body).to_bytes().unwrap(), 
-            &key.as_slice().try_into().unwrap()
-        );
-
-        println!(
-            "test_data_aes128: \
-            \nTunIpSize: {}\
-            \nClientPacketSize: {}\
-            \nClientEncBodySize: {}\
-            \nClientDecBodySize: {}\
-            \nClientPackDx: {}\
-            \nServer(packet/body)Size: {}\
-            \nServerPackDx: {}\n",
-            tun_ip_size,
-            client_serialized.len(),
-            deserialized_packet.body.len(),
-            decrypted_body.len(),
-            client_serialized.len() - tun_ip_size,
-            server_serialized.len(),
-            server_serialized.len() - tun_ip_size
-        );
-    }
-
+    
     #[test]
     fn test_data_aes256() {
         // Client
         let tun_ip_size = 1500;
         let client_body = make_client_body_data(tun_ip_size);
-        let (_, key) = make_creds(AuthEnc::Aes256);
+        let (_, key) = make_creds();
         let packet = ClientPacket {
             sid: 1,
-            body: aes256::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
+            body: EncBody::enchant(client_body.clone(), key.clone(), EncAlg::Aes256),
             buffer: vec![]
         };
         let client_serialized = packet.to_bytes().unwrap();
@@ -369,29 +249,23 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted_body = aes256::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted_body).unwrap();
-        assert_eq!(client_body, deserialized_body);
+        let decrypted_body = deserialized_packet.body.disenchant(key.clone(), EncAlg::Aes256).unwrap();
+        assert_eq!(client_body, decrypted_body);
 
-        let server_body = make_server_body_data(tun_ip_size);
-        let server_serialized = aes256::encrypt(
-            &ServerPacket(server_body).to_bytes().unwrap(),
-            &key.as_slice().try_into().unwrap()
-        );
+        let server_body = EncBody::enchant(make_server_body_data(tun_ip_size), key, EncAlg::Aes256);
+        let server_serialized = ServerPacket(server_body).to_bytes().unwrap();
 
         println!(
             "test_data_aes128: \
             \nTunIpSize: {}\
             \nClientPacketSize: {}\
             \nClientEncBodySize: {}\
-            \nClientDecBodySize: {}\
             \nClientPackDx: {}\
             \nServer(packet/body)Size: {}\
             \nServerPackDx: {}\n",
             tun_ip_size,
             client_serialized.len(),
             deserialized_packet.body.len(),
-            decrypted_body.len(),
             client_serialized.len() - tun_ip_size,
             server_serialized.len(),
             server_serialized.len() - tun_ip_size
@@ -403,10 +277,10 @@ mod tests {
         // Client
         let tun_ip_size = 1500;
         let client_body = make_client_body_data(tun_ip_size);
-        let (_, key) = make_creds(AuthEnc::ChaCha20Poly1305);
+        let (_, key) = make_creds();
         let packet = ClientPacket {
             sid: 1,
-            body: chacha20_poly1305::encrypt(&client_body.to_bytes().unwrap(), &key.as_slice().try_into().unwrap()),
+            body: EncBody::enchant(client_body.clone(), key.clone(), EncAlg::ChaCha20Poly1305),
             buffer: vec![]
         };
         let client_serialized = packet.to_bytes().unwrap();
@@ -414,29 +288,23 @@ mod tests {
         // Server
         let deserialized_packet: ClientPacket = bincode::deserialize(&client_serialized).unwrap();
         assert_ne!(deserialized_packet.sid, 0);
-        let decrypted_body = chacha20_poly1305::decrypt(&deserialized_packet.body, &key.as_slice().try_into().unwrap()).unwrap();
-        let deserialized_body: ClientBody = bincode::deserialize(&decrypted_body).unwrap();
-        assert_eq!(client_body, deserialized_body);
+        let decrypted_body = deserialized_packet.body.disenchant(key.clone(), EncAlg::ChaCha20Poly1305).unwrap();
+        assert_eq!(client_body, decrypted_body);
 
-        let server_body = make_server_body_data(tun_ip_size);
-        let server_serialized = chacha20_poly1305::encrypt(
-            &ServerPacket(server_body).to_bytes().unwrap(),
-            &key.as_slice().try_into().unwrap()
-        );
+        let server_body = EncBody::enchant(make_server_body_data(tun_ip_size), key, EncAlg::ChaCha20Poly1305);
+        let server_serialized = ServerPacket(server_body).to_bytes().unwrap();
 
         println!(
             "test_data_aes128: \
             \nTunIpSize: {}\
             \nClientPacketSize: {}\
             \nClientEncBodySize: {}\
-            \nClientDecBodySize: {}\
             \nClientPackDx: {}\
             \nServer(packet/body)Size: {}\
             \nServerPackDx: {}\n",
             tun_ip_size,
             client_serialized.len(),
             deserialized_packet.body.len(),
-            decrypted_body.len(),
             client_serialized.len() - tun_ip_size,
             server_serialized.len(),
             server_serialized.len() - tun_ip_size
