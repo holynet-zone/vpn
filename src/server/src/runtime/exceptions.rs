@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum RuntimeError {
     #[error("TunError: {0}")]
     TunError(String),
