@@ -1,8 +1,7 @@
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use etherparse::SlicedPacket;
-use log::debug;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 use mio::net::UdpSocket;
 use rocksdb::DB;
 use tun::{Device, ToAddress};
@@ -181,6 +180,7 @@ pub fn client_event(
         }
     }
     ////////////////////////////////////////////////////////////////////////////////////////////////
+    let mut start = std::time::Instant::now();
     let session = match sessions.get(&packet.sid) {
         Some(session) => session,
         None => {
@@ -188,7 +188,9 @@ pub fn client_event(
             return Ok(());
         }
     };
+    debug!("Session found for {} µs", start.elapsed().as_micros());
    
+    start = std::time::Instant::now();
     let client_body = match dec_by_body(&session.enc, &packet.body, &session.key) {
         Some(packet) => match body::ClientBody::from_bytes(&packet) {
             Ok(body) => body,
@@ -203,21 +205,22 @@ pub fn client_event(
             return Ok(());
         }
     };
-    
+    debug!("Decrypted and deserialized body for {} µs", start.elapsed().as_micros());
+    start = std::time::Instant::now();
     match client_body {
         body::ClientBody::KeepAlive(client_ts) => {
             let server_ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-            let response = ServerPacket(body::ServerBody::KeepAlive {
+            let response_raw = ServerPacket(body::ServerBody::KeepAlive {
                 server_ts,
                 client_ts
-            });
-            let response_bytes = response.to_bytes().unwrap();
-            udp.send_to(&response_bytes, *client_addr)?;
+            }).to_bytes().unwrap();
+            udp.send_to(&enc_by_body(&session.enc, &response_raw, &session.key), *client_addr)?;
             info!("Received keep-alive from {}; One-Way Delay (OWD) = {}", client_addr, server_ts - client_ts);
         },
         body::ClientBody::Data(data)=> {
             info!("Received {} bytes from {}", data.len(), client_addr);
             tun.write(&data)?;
+            debug!("Sent packet to tun for {} µs", start.elapsed().as_micros());
         },
         _ => {
             warn!("Failed to process client {}: InvalidPacketFormat - unsupported body", client_addr);
@@ -233,6 +236,7 @@ pub fn device_event(
 ) -> Result<(), RuntimeError> {
     info!("Received {} bytes from tun", data.len());
     
+    let mut start = std::time::Instant::now();
     let ip_packet = match SlicedPacket::from_ip(data) {
         Ok(packet) => match packet.net {
             Some(net) => match net {
@@ -252,6 +256,8 @@ pub fn device_event(
             return Ok(());
         }
     };
+    debug!("Parsed IP packet for {} µs", start.elapsed().as_micros());
+    start = std::time::Instant::now();
     
     let session = match sessions.get(&ip_packet.header().destination_addr().to_address().unwrap()) {
         Some(client_addr) => client_addr,
@@ -260,9 +266,14 @@ pub fn device_event(
             return Ok(());
         }
     };
+    debug!("Session found for {} µs", start.elapsed().as_micros());
+    start = std::time::Instant::now();
     
     let packet_raw = ServerPacket(body::ServerBody::Data(data.to_vec())).to_bytes().unwrap();
     let encrypted_body = enc_by_body(&session.enc, &packet_raw, &session.key);
+    debug!("Encrypted packet for {} µs", start.elapsed().as_micros());
+    
+    start = std::time::Instant::now();
     match udp.send_to(&encrypted_body, session.sock_addr) {
         Err(err) => {
             warn!("Failed to send packet to {}: {}", session.sock_addr, err);
@@ -270,6 +281,7 @@ pub fn device_event(
         },
         Ok(_) => {
             info!("Sent {} bytes to {} (holy client: {})", data.len(), session.sock_addr, session.holy_ip);
+            debug!("Sent packet for {} µs", start.elapsed().as_micros());
             Ok(())
         }
     }
