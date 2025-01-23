@@ -1,10 +1,10 @@
 use std::net::{IpAddr, SocketAddr};
 use std::time::Instant;
-use sunbeam::protocol::enc::BodyEnc;
+use sunbeam::protocol::enc::EncAlg;
+use sunbeam::protocol::keys::session::SessionKey;
 
 mod generators;
 pub mod single;
-pub mod threaded;
 pub mod future;
 mod utils;
 
@@ -17,6 +17,6 @@ pub struct Session {
     pub holy_ip: HolyIp,
     pub last_seen: Instant,
     pub username: String,
-    pub enc: BodyEnc,
-    pub key: Vec<u8>
+    pub enc: EncAlg,
+    pub key: SessionKey
 }

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::time::Instant;
-use sunbeam::protocol::enc::BodyEnc;
+use sunbeam::protocol::enc::EncAlg;
+use sunbeam::protocol::keys::session::SessionKey;
 use crate::session::generators::ipaddr::IpAddressGenerator;
 use crate::session::generators::session::SessionIdGenerator;
 use crate::session::utils::increment_ip;
@@ -30,7 +31,7 @@ impl Sessions {
         }
     }
 
-    pub fn add(&mut self, sock_addr: SocketAddr, username: String, enc: BodyEnc, key: Vec<u8>) -> Option<(SessionId, HolyIp)> {
+    pub fn add(&mut self, sock_addr: SocketAddr, username: String, enc: EncAlg, key: SessionKey) -> Option<(SessionId, HolyIp)> {
         let session_id = self.session_gen.next()?;
         let holy_ip = match self.ip_gen.next() {
             Some(ip) => ip,
