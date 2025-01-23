@@ -1,16 +1,13 @@
-use std::net::IpAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use derive_more::Display;
-use sunbeam::protocol::enc::AuthEnc;
 
 
 #[derive(Clone, Display)]
-#[display("{}\t{:?}", username, enc)]
+#[display("{}", username)]
 pub struct UserRow {
-    pub username: String,
-    pub enc: AuthEnc,
+    pub username: String
 }
 
 
@@ -68,9 +65,6 @@ pub enum Commands {
 pub enum UsersCommands {
     /// Add a new user
     Add {
-        /// enc type
-        #[arg(short, long)]
-        enc: Option<AuthEnc>,
         /// username
         #[arg(short, long)]
         username: Option<String>,
