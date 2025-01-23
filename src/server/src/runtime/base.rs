@@ -19,7 +19,7 @@ pub struct Configurable<T> {
 }
 
 pub trait Run {
-    fn run(r: &Configurable<Self>)
+    fn run(r: &mut Configurable<Self>)
     where
         Self: Sized;
 }
@@ -31,14 +31,14 @@ pub trait Stop {
 }  
 
 pub trait Runtime {
-    fn run(&self);
+    fn run(&mut self);
     fn stop(&self);
     fn set_config(&mut self, config: RuntimeConfig);
 }
 
 impl<T: Run + Stop> Runtime for Configurable<T> {
-    fn run(&self) {
-        <T as Run>::run(&self)
+    fn run(&mut self) {
+        <T as Run>::run(self)
     }
     fn stop(&self) {
         <T as Stop>::stop(&self)
