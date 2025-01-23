@@ -1,24 +1,21 @@
 use std::path::PathBuf;
-use sunbeam::protocol::enc::{AuthEnc, BodyEnc};
+use sunbeam::protocol::enc::EncAlg;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sunbeam::protocol::AUTH_KEY_SIZE;
-
+use serde::{Deserialize, Serialize};
+use sunbeam::protocol::keys::auth::AuthKey;
 
 #[derive(Serialize, Deserialize)]
 pub struct Server {
     pub host: String,
     pub port: u16,
-    pub enc: BodyEnc,
+    pub enc: EncAlg,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Credentials {
     pub username: String,
-    #[serde(serialize_with = "serialize_auth_key", deserialize_with = "deserialize_auth_key")]
-    pub auth_key: [u8; AUTH_KEY_SIZE],
-    pub enc: AuthEnc,
+    pub auth_key: AuthKey
 }
 
 #[derive(Serialize, Deserialize)]
@@ -70,35 +67,6 @@ impl ConnConfig {
     }
 }
 
-fn serialize_auth_key<S>(key: &[u8; AUTH_KEY_SIZE], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let base64 = STANDARD_NO_PAD.encode(key);
-    serializer.serialize_str(&base64)
-}
-
-fn deserialize_auth_key<'de, D>(deserializer: D) -> Result<[u8; AUTH_KEY_SIZE], D::Error>
-where
-    D: Deserializer<'de>,
-{
-    use serde::de::Error;
-
-    let base64 = String::deserialize(deserializer)?;
-    let bytes = STANDARD_NO_PAD.decode(&base64).map_err(Error::custom)?;
-    if bytes.len() != AUTH_KEY_SIZE {
-        return Err(Error::custom(format!(
-            "Invalid auth_key length: expected {}, got {}",
-            AUTH_KEY_SIZE,
-            bytes.len()
-        )));
-    }
-
-    let mut array = [0u8; AUTH_KEY_SIZE];
-    array.copy_from_slice(&bytes);
-    Ok(array)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,7 +76,7 @@ mod tests {
             server: Server {
                 host: "localhost".to_string(),
                 port: 8080,
-                enc: BodyEnc::ChaCha20Poly1305,
+                enc: EncAlg::ChaCha20Poly1305,
             },
             interface: Interface {
                 name: None,
@@ -116,8 +84,7 @@ mod tests {
             },
             credentials: Credentials {
                 username: "admin".to_string(),
-                auth_key: [0u8; AUTH_KEY_SIZE],
-                enc: AuthEnc::Aes128,
+                auth_key: AuthKey::generate()
             },
         }
     }
