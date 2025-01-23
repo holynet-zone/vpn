@@ -21,9 +21,14 @@ aes-gcm = "0.10.*"
 hkdf = "0.13.0-pre.4"
 sha2 = "0.11.0-pre.4"
 chacha20poly1305 = "0.10.*"
-rand = "0.9.0-beta.1"
 serde-big-array = "0.5.*"
 base64 = "0.22.*"
 clap = { version = "4.5.*", features = ["derive"] }
 strum = "0.26.*"
 strum_macros = "0.26.*"
+rand_core = "0.6.4"
+rand = "0.9.0-beta.3"
+anyhow = "1.0.95"
+
+[build-dependencies]
+rand = "0.8"
