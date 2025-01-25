@@ -27,13 +27,13 @@ pub fn set_ipv4_forwarding(value: bool) -> Result<(), RuntimeError> {
     }
 }
 
-pub fn setup_tun(name: &str, mtu: &u16, ip: &IpAddr, prefix: &u8) -> Result<AsyncDevice, RuntimeError> {
+pub async fn setup_tun(name: &str, mtu: &u16, ip: &IpAddr, prefix: &u8) -> Result<AsyncDevice, RuntimeError> {
     let mut config = tun_rs::Configuration::default();
     config.name(name);
     config.address_with_prefix(ip, *prefix);
     config.mtu(mtu.clone());
     config.up();
-    let dev = tun_rs::create_as_async(&config).map_err(|error| {
+    let dev = tun_rs::create_as_async(&config).map_err(|error| {  // todo: requires async runtime
         RuntimeError::TunError(format!("Failed to create the TUN device: {}", error))
     })?;
 

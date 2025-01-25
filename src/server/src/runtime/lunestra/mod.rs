@@ -51,12 +51,12 @@ impl Run for LunestraRunner {
             let sessions= Sessions::new(&config.network_ip, &config.network_prefix);
             let clients = Clients::new(db);
 
-            let tun = match setup_tun(
+            let tun = match rt.block_on(setup_tun(
                 &config.interface_name,
                 &config.mtu,
                 &config.network_ip,
                 &config.network_prefix
-            ) {
+            )) {
                 Ok(tun) => Arc::new(tun),
                 Err(e) => {
                     stop_tx.send(e).unwrap();
