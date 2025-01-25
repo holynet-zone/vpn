@@ -11,7 +11,7 @@ cli = ["clap"]
 
 [[bin]]
 name = "client-cli"
-path = "src/bin/cli.rs"
+path = "src/bin/cli/mod.rs"
 required-features = ["cli"]
 
 [[bin]]
@@ -27,7 +27,7 @@ clap = { version = "4.5.23", features = ["derive"], optional = true}
 sunbeam = { workspace = true }
 shared = { workspace = true }
 mio = { version = "1.0.*", features = ["os-poll", "os-ext", "net",] }
-tokio = { version = "1.42.*", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.43.*", features = ["rt", "rt-multi-thread", "macros"] }
 tun = "0.7.*"
 libc = "0.2.*"
 pnet = "0.35.*"
@@ -42,6 +42,7 @@ tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 thiserror = "2.0.*"
+anyhow = "1.0.95"
 
 
 [build-dependencies]
