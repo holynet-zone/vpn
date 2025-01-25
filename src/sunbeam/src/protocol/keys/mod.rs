@@ -47,6 +47,16 @@ impl<const SIZE: usize> TryFrom<&[u8]> for Key<SIZE> {
     }
 }
 
+impl<const SIZE: usize> TryFrom<&str> for Key<SIZE> {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let bytes = STANDARD_NO_PAD.decode(value).map_err(|error| error.to_string())?;
+        Self::try_from(bytes.as_slice())
+    }
+}
+
+
 impl<const SIZE: usize> Display for Key<SIZE> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{:?}", &self.0)
