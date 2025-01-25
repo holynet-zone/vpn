@@ -1,6 +1,28 @@
 [workspace]
 resolver = "2"
 members = [
+    "src/sunbeam",
     "src/client",
     "src/server",
+    "src/shared",
 ]
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+sunbeam = { path = "src/sunbeam" }
+shared = { path = "src/shared" }
+tun = "0.7.*"
+mio = { version = "^1.0.*", features = ["os-poll", "os-ext", "net"] }
+
+# data
+chrono = "0.4.*"
+serde = { version = "1.0.*", features = ["derive"] }
+etherparse = "0.16.*"
+
+# logging
+log = "0.4.*"
+tracing = "0.1.*"
+tracing-subscriber = "0.3.*"
+tracing-appender = "0.2.*"

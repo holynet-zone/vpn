@@ -1,6 +1,49 @@
 [package]
 name = "client"
 version = "0.1.0"
-edition = "2021"
+edition = { workspace = true }
+autobins = false
+
+[features]
+custom-protocol = [ "gui", "tauri/custom-protocol" ]
+gui = ["tauri", "tauri-build"]
+cli = ["clap"]
+
+[[bin]]
+name = "client-cli"
+path = "src/bin/cli/mod.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "client-gui"
+path = "src/bin/gui.rs"
+required-features = ["gui"]
+
 
 [dependencies]
+tauri = { version = "2.2.*", features = ["config-toml"],  optional = true }
+clap = { version = "4.5.23", features = ["derive"], optional = true}
+
+sunbeam = { workspace = true }
+shared = { workspace = true }
+mio = { version = "1.0.*", features = ["os-poll", "os-ext", "net",] }
+tokio = { version = "1.43.*", features = ["rt", "rt-multi-thread", "macros"] }
+tun = "0.7.*"
+libc = "0.2.*"
+pnet = "0.35.*"
+ctrlc = "3.4.*"
+
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+base64 = "0.22.*"
+# logging
+log = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+thiserror = "2.0.*"
+anyhow = "1.0.95"
+
+
+[build-dependencies]
+tauri-build = { version = "2.0.*", features = ["config-toml"], optional = true }
