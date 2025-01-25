@@ -56,15 +56,19 @@ impl DefaultGateway {
             default: default,
         }
     }
-}
 
-impl Drop for DefaultGateway {
-    fn drop(&mut self) {
+    pub fn delete(&mut self) {
         if self.default {
             delete_default_gateway().unwrap();
             set_default_gateway(&self.origin).unwrap();
         }
         delete_route(RouteType::Host, &self.remote).unwrap();
+    }
+}
+
+impl Drop for DefaultGateway {
+    fn drop(&mut self) {
+        self.delete();
     }
 }
 
