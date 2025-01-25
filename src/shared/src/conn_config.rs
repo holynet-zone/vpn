@@ -4,6 +4,7 @@ use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sunbeam::protocol::keys::auth::AuthKey;
+use sunbeam::protocol::username::Username;
 
 #[derive(Serialize, Deserialize)]
 pub struct Server {
@@ -14,7 +15,7 @@ pub struct Server {
 
 #[derive(Serialize, Deserialize)]
 pub struct Credentials {
-    pub username: String,
+    pub username: Username,
     pub auth_key: AuthKey
 }
 
@@ -83,7 +84,7 @@ mod tests {
                 mtu: 1460,
             },
             credentials: Credentials {
-                username: "admin".to_string(),
+                username: Username::try_from("test".to_string()).unwrap(),
                 auth_key: AuthKey::generate()
             },
         }
