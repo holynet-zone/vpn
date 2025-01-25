@@ -111,7 +111,7 @@ pub fn auth_event(
     let packet = ClientPacket {
         sid: 0,
         body: EncBody::enchant(
-            ClientBody::Connection { enc: body_enc.clone() }.to_bytes().unwrap(),
+            ClientBody::Connection { enc: body_enc.clone() },
             auth_key.clone(),
             EncAlg::Aes256
         ),
