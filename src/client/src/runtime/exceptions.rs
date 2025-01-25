@@ -11,12 +11,12 @@ pub enum RuntimeError {
     InvalidCredentials(String),
     #[error("MaxConnectedDevices: {0}")]
     MaxConnectedDevices(String),
-    #[error("ServerOverloaded: {0}")]
-    ServerOverloaded(String),
+    #[error("ServerOverloaded")]
+    ServerOverloaded,
     #[error("SessionExpired: {0}")]
     SessionExpired(String),
-    #[error("ServerShutdown: {0}")]
-    ServerShutdown(String),
+    #[error("ServerShutdown")]
+    ServerShutdown,
     #[error("UnexpectedError: {0}")]
     UnexpectedError(String),
     #[error("StopSignal")]

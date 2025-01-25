@@ -1,9 +1,13 @@
 use std::net::SocketAddr;
 use std::time::Duration;
+
 use sunbeam::protocol::{
-    AUTH_KEY_SIZE,
-    enc::{AuthEnc, BodyEnc}
+    enc::EncAlg,
+    keys::auth::AuthKey,
+    username::Username
 };
+
+
 
 #[derive(Clone)]
 pub struct Config {
@@ -14,10 +18,9 @@ pub struct Config {
     pub event_capacity: usize,
     pub event_timeout: Option<Duration>,
     pub keepalive: Option<Duration>,
-    pub username: String,
-    pub auth_key: [u8; AUTH_KEY_SIZE],
-    pub auth_enc: AuthEnc,
-    pub body_enc: BodyEnc,
+    pub username: Username,
+    pub auth_key: AuthKey,
+    pub body_enc: EncAlg
 }
 
 pub struct Configurable<T> {

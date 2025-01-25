@@ -1,11 +1,12 @@
 use sunbeam::protocol::{
-    SESSION_KEY_SIZE,
-    enc::BodyEnc,
+    keys::session::SessionKey,
+    enc::EncAlg,
     SessionId
 };
 
+
 pub struct Session {
     pub id: SessionId,
-    pub key: [u8; SESSION_KEY_SIZE],
-    pub enc: BodyEnc,
+    pub key: SessionKey,
+    pub enc: EncAlg,
 }
