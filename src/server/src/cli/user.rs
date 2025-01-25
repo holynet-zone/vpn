@@ -6,6 +6,8 @@ use sunbeam::protocol::{
     enc::EncAlg,
     keys::auth::AuthKey
 };
+use sunbeam::protocol::password::Password;
+use sunbeam::protocol::username::Username;
 use crate::cli::schema::UserRow;
 use crate::client::single::{Client, Clients};
 
@@ -15,60 +17,70 @@ pub fn add(
     password: Option<String>,
     host: Option<String>,
     port: Option<u16>,
-) {
-    let host = host.unwrap_or_else(|| {
+) -> anyhow::Result<()> {
+    let host = host.unwrap_or_else(|| loop {
         let host = inquire::Text::new("Enter a server host:")
             .with_default("127.0.0.1")
             .prompt()
             .unwrap();
         if host.is_empty() {
             error!("Host cannot be empty");
-            process::exit(1);
+            continue;
         }
-        host
+        break host;
     });
-    let port = port.unwrap_or_else(|| {
+    
+    let port = port.unwrap_or_else(|| loop {
         let port = inquire::Text::new("Enter a server port:")
             .with_default("26256")
             .prompt()
             .unwrap();
         if port.is_empty() {
             error!("Port cannot be empty");
-            process::exit(1);
+            continue;
         }
-        port.parse().unwrap()
+        match port.parse() {
+            Ok(port) => break port,
+            Err(error) => {
+                error!("Failed to parse port: {}", error);
+                continue;
+            }
+        }
     });
-    let username = username.unwrap_or_else(|| {
+    let username = Username::try_from(username.unwrap_or_else(|| loop {
         let username = inquire::Text::new("Enter a username (up to 128 characters):")
             .with_help_message("Username cannot be empty")
             .prompt()
             .unwrap();
         if username.is_empty() {
             error!("Username cannot be empty");
-            process::exit(1);
+            continue;
         }
-        username
-    });
-    let password = password.unwrap_or_else(|| {
+        break username;
+    })).map_err(|error| {
+        return anyhow::anyhow!("Failed to parse username: {}", error);
+    })?;
+    
+    let password = Password::from(password.unwrap_or_else(|| loop {
         let password = inquire::Password::new("Enter a password:")
             .with_help_message("Password cannot be empty")
             .prompt()
             .unwrap();
         if password.is_empty() {
             error!("Password cannot be empty");
-            process::exit(1);
+            continue;
         }
-        password
-    });
-    let key = AuthKey::derive_from(&password.as_bytes(), &username.as_bytes());
+        break password;
+    }));
+    let key = AuthKey::derive_from(&password.as_slice(), &username.as_slice());
     clients.save(
-        &username.as_bytes(),
+        &username.as_slice(),
         Client{
             auth_key: key.clone()
         }
     );
     println!("User {} has been successfully created!", username);
-    let config_file = username.clone() + ".toml";
+    let config_file = username.to_string() + ".toml";
     let config = ConnConfig {
         server: Server {
             host,
@@ -84,12 +96,13 @@ pub fn add(
             auth_key: key
         }
     };
-    config.save(&config_file.parse().unwrap()).map_err(|error| {
+    config.save(&config_file.parse()?).map_err(|error| {
         error!("Failed to save configuration: {}", error);
         process::exit(1);
     }).unwrap();
     println!("Configuration file has been saved to {}", config_file);
     println!("First insert: {}", config.to_base64().unwrap());
+    Ok(())
 }
 
 pub fn remove(clients: &Clients, username: String) {

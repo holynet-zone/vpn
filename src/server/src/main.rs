@@ -76,7 +76,10 @@ fn main() {
                             password,
                             host,
                             port
-                        ),
+                        ).map_err(|error| {
+                            error!("Failed to add user: {}", error);
+                            process::exit(1);
+                        }).unwrap(),
                         cli::schema::UsersCommands::Remove { username } => cli::user::remove(
                             &clients,
                             username
