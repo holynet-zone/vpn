@@ -61,6 +61,9 @@ pub mod aes256 {
     }
 
     pub fn decrypt(data: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
+        if data.len() < 12 {
+            return None;
+        }
         let key = Key::<Aes256Gcm>::from_slice(key);
         let (nonce_arr, ciphered_data) = data.split_at(12);
         let nonce = Nonce::from_slice(nonce_arr);
@@ -90,6 +93,9 @@ pub mod chacha20_poly1305 {
 
     pub fn decrypt(data: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
         let key = Key::from_slice(key);
+        if data.len() < 12 {
+            return None;
+        }
         let (nonce_arr, ciphered_data) = data.split_at(12);
         let nonce = Nonce::from_slice(nonce_arr);
         let cipher = ChaCha20Poly1305::new(key);
