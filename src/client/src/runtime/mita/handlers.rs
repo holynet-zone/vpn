@@ -81,7 +81,7 @@ pub fn device_event(
     let packet = ClientPacket {
         sid: session.id,
         body: EncBody::enchant(
-            ClientBody::Data(data.to_vec()).to_bytes().unwrap(),
+            ClientBody::Data(data.to_vec()),
             session.key.clone(),
             session.enc.clone()
         ),
@@ -170,7 +170,7 @@ pub fn keepalive_event(
         body: EncBody::enchant(
             ClientBody::KeepAlive(
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()
-            ).to_bytes().unwrap(),
+            ),
             session.key.clone(),
             session.enc.clone()
         ),

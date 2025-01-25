@@ -77,7 +77,7 @@ pub async fn client_event(
                                 sid: session_id,
                                 key: session_key.clone(),
                                 dns: IpAddr::from(Ipv4Addr::new(8, 8, 8, 8)) // todo
-                            }).to_bytes().unwrap(),
+                            }),
                             client.auth_key,
                             EncAlg::Aes256
                         );
@@ -139,7 +139,7 @@ pub async fn client_event(
                 ServerBody::KeepAlive {
                     server_ts: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(),
                     client_ts
-                }.to_bytes().unwrap(),
+                },
                 session.key,
                 session.enc
             );
@@ -173,7 +173,7 @@ pub async fn device_event(
     };
     
     let body = EncBody::enchant(
-        ServerBody::Data(data.to_vec()).to_bytes().unwrap(),
+        ServerBody::Data(data.to_vec()),
         session.key,
         session.enc
     );
