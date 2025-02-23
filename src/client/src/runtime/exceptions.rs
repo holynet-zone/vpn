@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum RuntimeError {
     #[error("TunError: {0}")]
     TunError(String),
@@ -19,6 +19,8 @@ pub enum RuntimeError {
     ServerShutdown,
     #[error("UnexpectedError: {0}")]
     UnexpectedError(String),
+    #[error("TimeoutError: {0}")]
+    TimeoutError(String),
     #[error("StopSignal")]
     StopSignal,
 }
