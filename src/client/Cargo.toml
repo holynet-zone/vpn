@@ -27,7 +27,9 @@ clap = { version = "4.5.23", features = ["derive"], optional = true}
 sunbeam = { workspace = true }
 shared = { workspace = true }
 mio = { version = "1.0.*", features = ["os-poll", "os-ext", "net",] }
-tokio = { version = "1.43.*", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.43.*", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
+tun-rs = { version = "1.5", features = ["async_tokio"] }
+socket2 = "0.5.8"
 tun = "0.7.*"
 libc = "0.2.*"
 pnet = "0.35.*"
