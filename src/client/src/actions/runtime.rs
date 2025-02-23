@@ -35,7 +35,7 @@ pub fn connect(
         return Err(anyhow::anyhow!("Invalid auth key"));
     }
     
-    let mut runtime = runtime::mita::SyncMio::new();
+    let mut runtime = runtime::burkeg::Burkeg::new();
     runtime.set_config(runtime::base::Config {
         server_addr,
         client_addr: client_addr.unwrap_or_else(|| SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 0)),

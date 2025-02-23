@@ -4,7 +4,7 @@ use sunbeam::protocol::{
     SessionId
 };
 
-
+#[derive(Clone)]
 pub struct Session {
     pub id: SessionId,
     pub key: SessionKey,
