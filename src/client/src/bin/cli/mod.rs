@@ -27,22 +27,22 @@ fn main() {
         .with(fmt::layer().with_ansi(true))
         .init();
     log::set_max_level(log::LevelFilter::Info);
-    if !is_root() {
-        eprintln!("This program must be run as root");
-        process::exit(1);
-    }
 
     let args = Cli::parse();
     args.debug.then(|| log::set_max_level(log::LevelFilter::Debug));
     match args.command {
-        Some(Commands::Connect {
-                 addr,
-                 username,
-                 auth_key,
-                 password,
-                 config,
-                 key
-             }) => {
+        Commands::Connect {
+             addr,
+             username,
+             auth_key,
+             password,
+             config,
+             key
+        } => {
+            if !is_root() {
+                eprintln!("This program must be run as root");
+                process::exit(1);
+            } // todo: remove it
             actions::connect(Commands::Connect {
                 addr,
                 username,
@@ -54,10 +54,6 @@ fn main() {
                 eprintln!("Failed to connect: {}", error);
                 process::exit(1);
             }).unwrap();
-        },
-        None => {
-            eprintln!("No command provided");
-            process::exit(1);
         }
     }
 }

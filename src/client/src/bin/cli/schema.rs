@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, arg_required_else_help = true)]
 pub struct Cli {
     /// Turn debugging information on
     #[arg(short, long, default_value = "false")]
     pub debug: bool,
 
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub command: Commands
 }
 
 #[derive(Subcommand)]
