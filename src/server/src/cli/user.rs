@@ -110,12 +110,18 @@ pub fn remove(clients: &Clients, username: String) {
     println!("User {} has been successfully removed", username);
 }
 
-pub fn choose_user(clients: &Clients) -> String {
-    let users = clients.get_all().iter().map(|(username, _)| {
+pub fn choose(clients: &Clients) -> String {
+    let users: Vec<_> = clients.get_all().iter().map(|(username, _)| {
         UserRow {
             username: username.clone()
         }
     }).collect();
+    
+    if users.is_empty() {
+        println!("No users found");
+        process::exit(1);
+    }
+    
     match Select::new("Choose a user:", users).prompt() {
         Ok(selected) => {
             selected.username
@@ -125,4 +131,11 @@ pub fn choose_user(clients: &Clients) -> String {
             process::exit(1);
         }
     }
+}
+
+
+pub fn list(clients: &Clients) -> String {
+    clients.get_all().iter().map(|(username, _)| {
+        username.clone()
+    }).collect::<Vec<String>>().join("\n")
 }
