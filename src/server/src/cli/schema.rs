@@ -12,14 +12,14 @@ pub struct UserRow {
 
 
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, arg_required_else_help = true)]
 pub struct Cli {
     /// Turn debugging information on
     #[arg(short, long, default_value = "false")]
-    pub(crate) debug: bool,
+    pub debug: bool,
 
     #[command(subcommand)]
-    pub(crate) command: Option<Commands>,
+    pub command: Commands,
 }
 
 #[derive(Subcommand)]
@@ -44,7 +44,7 @@ pub enum Commands {
     /// Users management
     Users {
         #[command(subcommand)]
-        commands: Option<UsersCommands>,
+        commands: UsersCommands,
     },
     /// Lists all running VPN servers
     Servers,
@@ -76,6 +76,8 @@ pub enum UsersCommands {
         #[arg(short, long)]
         port: Option<u16>
     },
+    /// List all users
+    List,
     /// Remove a user
     Remove {
         /// username

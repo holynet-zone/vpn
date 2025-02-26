@@ -38,65 +38,62 @@ fn main() {
     
     cli.debug.then(|| reload_handle.modify(|filter| *filter = filter::LevelFilter::DEBUG));
     match cli.command {
-        Some(command) => match command {
-            cli::schema::Commands::Start { 
-                host, 
-                port, 
-                iface, 
-                config, 
-                storage, 
-                daemon 
-            } => cli::start::start(
-                host,
-                port,
-                iface,
-                config,
-                storage,
-                daemon
-            ),
-            cli::schema::Commands::Users { commands } => {
-                let storage_path = std::env::var(STORAGE_PATH_ENV).unwrap_or_else(|_| "database".to_string()); // todo: from --storage
-                let mut opts = rocksdb::Options::default();
-                opts.create_if_missing(true);
-                let db = DB::open(&opts, storage_path).map_err(|error| {
-                    error!("Failed to open the database: {}", error);
+        cli::schema::Commands::Start { 
+            host, 
+            port, 
+            iface, 
+            config, 
+            storage, 
+            daemon 
+        } => cli::start::start(
+            host,
+            port,
+            iface,
+            config,
+            storage,
+            daemon
+        ),
+        cli::schema::Commands::Users { commands } => {
+            let storage_path = std::env::var(STORAGE_PATH_ENV).unwrap_or_else(|_| "database".to_string()); // todo: from --storage
+            let mut opts = rocksdb::Options::default();
+            opts.create_if_missing(true);
+            let db = DB::open(&opts, storage_path).map_err(|error| {
+                error!("Failed to open the database: {}", error);
+                process::exit(1);
+            }).unwrap();
+            let clients = Clients::new(db);
+            match commands {
+                cli::schema::UsersCommands::Add {
+                    username,
+                    password,
+                    host,
+                    port
+                } => cli::user::add(
+                    &clients,
+                    username,
+                    password,
+                    host,
+                    port
+                ).map_err(|error| {
+                    error!("Failed to add user: {}", error);
                     process::exit(1);
-                }).unwrap();
-                let clients = Clients::new(db);
-                match commands {
-                    Some(commands) => match commands {
-                        cli::schema::UsersCommands::Add {
-                            username,
-                            password,
-                            host,
-                            port
-                        } => cli::user::add(
-                            &clients,
-                            username,
-                            password,
-                            host,
-                            port
-                        ).map_err(|error| {
-                            error!("Failed to add user: {}", error);
-                            process::exit(1);
-                        }).unwrap(),
-                        cli::schema::UsersCommands::Remove { username } => cli::user::remove(
-                            &clients,
-                            username
-                        )
-                    },
-                    None => {
-                        cli::user::choose_user(&clients);
+                }).unwrap(),
+                cli::schema::UsersCommands::Remove { username } => cli::user::remove(
+                    &clients,
+                    username
+                ),
+                cli::schema::UsersCommands::List => {
+                    let raw_list = cli::user::list(&clients);
+                    if raw_list.is_empty() {
+                        println!("No users found");
+                        process::exit(1);
+                    } else {
+                        println!("{}", raw_list);
                     }
                 }
-
-            },
-            cli::schema::Commands::Servers => unimplemented!("Servers command is not implemented"),
-            cli::schema::Commands::Logs { id } => unimplemented!("Logs command is not implemented"),
+            }
         },
-        None => {
-            eprintln!("No command provided");
-            process::exit(1);
-        }
+        cli::schema::Commands::Servers => unimplemented!("Servers command is not implemented"),
+        cli::schema::Commands::Logs { id } => unimplemented!("Logs command is not implemented"),
     }
 }
