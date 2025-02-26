@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
 use libc;
-use log::info;
+use log::{info, warn};
 use std::process::Command;
 use pnet::datalink;
 
@@ -79,10 +79,9 @@ pub fn delete_route(route_type: RouteType, route: &str) -> Result<(), String> {
     };
     info!("Deleting route: {} {}.", mode, route);
     let status = if cfg!(target_os = "linux") {
-        Command::new("route")
-            .arg("-n")
+        Command::new("ip")
+            .arg("route")
             .arg("del")
-            .arg(mode)
             .arg(route)
             .status()
             .unwrap()
@@ -95,7 +94,7 @@ pub fn delete_route(route_type: RouteType, route: &str) -> Result<(), String> {
             .status()
             .unwrap()
     } else {
-        unimplemented!()
+        unimplemented!("Unsupported OS");
     };
     if status.success() {
         Ok(())
@@ -111,15 +110,26 @@ pub fn add_route(route_type: RouteType, route: &str, gateway: &str) -> Result<()
     };
     info!("Adding route: {} {} gateway {}.", mode, route, gateway);
     let status = if cfg!(target_os = "linux") {
-        Command::new("route")
-            .arg("-n")
-            .arg("add")
-            .arg(mode)
+        let check = Command::new("ip")
+            .arg("route")
+            .arg("show")
             .arg(route)
-            .arg("gw")
+            .output()
+            .unwrap();
+
+        if !check.stdout.is_empty() {
+            warn!("Route already exists");
+            return Ok(());
+        }
+
+        Command::new("ip")
+            .arg("route")
+            .arg("add")
+            .arg(route)
+            .arg("via")
             .arg(gateway)
             .status()
-            .unwrap() // todo: check if not install net-tools
+            .unwrap()
     } else if cfg!(target_os = "macos") {
         Command::new("route")
             .arg("-n")
@@ -130,7 +140,7 @@ pub fn add_route(route_type: RouteType, route: &str, gateway: &str) -> Result<()
             .status()
             .unwrap()
     } else {
-        unimplemented!()
+        unimplemented!("Unsupported OS");
     };
     if status.success() {
         Ok(())
