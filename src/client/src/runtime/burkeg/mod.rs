@@ -46,7 +46,7 @@ impl Run for BurkegRunner {
                 .unwrap();
 
 
-            let socket = match make_socket(config.client_addr) {
+            let socket = match rt.block_on(make_socket(config.client_addr)) {
                 Ok(socket) => Arc::new(socket),
                 Err(error) => {
                     stop_tx.send(RuntimeError::IOError(
@@ -180,7 +180,7 @@ impl Run for BurkegRunner {
     }
 }
 
-fn make_socket(bind_addr: SocketAddr) -> Result<UdpSocket, RuntimeError> {
+async fn make_socket(bind_addr: SocketAddr) -> Result<UdpSocket, RuntimeError> {
     let socket = Socket::new(
         if bind_addr.is_ipv4() {
             Domain::IPV4
