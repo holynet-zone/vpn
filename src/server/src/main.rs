@@ -13,6 +13,7 @@ use tracing_appender;
 
 use clap::Parser;
 use rocksdb::DB;
+use crate::cli::render_config;
 use crate::client::single::Clients;
 
 const CONFIG_PATH_ENV: &str = "CONFIG_PATH";
@@ -21,6 +22,7 @@ const STORAGE_PATH_ENV: &str = "STORAGE_PATH";
 
 fn main() {
     let cli = cli::schema::Cli::parse();
+    inquire::set_global_render_config(render_config());
 
     let file_appender = tracing_appender::rolling::daily("logs", "server.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
