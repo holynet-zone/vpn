@@ -25,7 +25,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// starts vpn server
+    /// Start vpn server
     Start {
         /// host to listen
         #[arg(short, long)]
