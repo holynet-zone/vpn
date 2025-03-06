@@ -19,8 +19,7 @@ fn main() {
     let file_appender = tracing_appender::rolling::daily("logs", "client.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::registry()
-        .with(
-            fmt::layer()
+        .with(fmt::layer()
                 .with_writer(non_blocking)
                 .with_ansi(false),
         )

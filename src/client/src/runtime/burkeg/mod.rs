@@ -248,7 +248,7 @@ async fn outgoing_udp(
             result = out_udp_rx.recv() => match result {
                 Some(data) => {
                     if let Err(e) = socket.send(&data).await {
-                        warn!("Failed to send data to the server: {}", e);
+                        warn!("Failed to send data to the server: {}", e); // todo remove error handling; abort runtime
                     }
                 },
                 None => break
