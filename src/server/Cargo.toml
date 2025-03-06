@@ -37,3 +37,4 @@ tun-rs = { version = "1.5", features = ["async_tokio"] }
 socket2 = "0.5.8"
 anyhow = "1.0.95"
 async-trait = "0.1.85"
+anstyle = "1.0.10"

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use derive_more::Display;
+use super::style::styles;
 
 
 #[derive(Clone, Display)]
@@ -12,7 +13,7 @@ pub struct UserRow {
 
 
 #[derive(Parser)]
-#[command(version, about, long_about = None, arg_required_else_help = true)]
+#[command(version, about, long_about = None, arg_required_else_help = true, styles=styles())]
 pub struct Cli {
     /// Turn debugging information on
     #[arg(short, long, default_value = "false")]
