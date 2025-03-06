@@ -1,5 +1,5 @@
 use std::process;
-use inquire::Select;
+use inquire::{required, PasswordDisplayMode, Select};
 use tracing::error;
 use shared::conn_config::{ConnConfig, Credentials, Interface, Server};
 use sunbeam::protocol::{
@@ -29,57 +29,40 @@ pub fn add(
         }
         break host;
     });
-    
-    let port = port.unwrap_or_else(|| loop {
-        let port = inquire::Text::new("Enter a server port:")
-            .with_default("26256")
+
+    let port = port.unwrap_or_else(|| {
+        inquire::CustomType::new("Enter a server port:")
+            .with_default(26256)
             .prompt()
-            .unwrap();
-        if port.is_empty() {
-            error!("Port cannot be empty");
-            continue;
-        }
-        match port.parse() {
-            Ok(port) => break port,
-            Err(error) => {
-                error!("Failed to parse port: {}", error);
-                continue;
-            }
-        }
+            .unwrap()
     });
-    let username = Username::try_from(username.unwrap_or_else(|| loop {
-        let username = inquire::Text::new("Enter a username (up to 128 characters):")
-            .with_help_message("Username cannot be empty")
-            .prompt()
-            .unwrap();
-        if username.is_empty() {
-            error!("Username cannot be empty");
-            continue;
-        }
-        break username;
-    })).map_err(|error| {
-        return anyhow::anyhow!("Failed to parse username: {}", error);
-    })?;
     
-    let password = Password::from(password.unwrap_or_else(|| loop {
-        let password = inquire::Password::new("Enter a password:")
-            .with_help_message("Password cannot be empty")
+    let username = Username::try_from(username.unwrap_or_else(
+        || inquire::Text::new(&format!("Enter a username (up to {} chars):", Username::SIZE))
+            .with_validator(required!("This field is required"))
+            .with_validator(inquire::validator::MinLengthValidator::new(1))
+            .with_validator(inquire::validator::MaxLengthValidator::new(Username::SIZE))
+            .with_placeholder("JKearnsl")
             .prompt()
-            .unwrap();
-        if password.is_empty() {
-            error!("Password cannot be empty");
-            continue;
-        }
-        break password;
-    }));
+            .unwrap()
+    )).map_err(|error| {
+        eprintln!("Failed to parse username: {}", error);
+        process::exit(1);
+    }).unwrap();
+    
+    let password = Password::from(password.unwrap_or_else(
+        || inquire::Password::new("Enter a password:")
+            .with_validator(required!("This field is required"))
+            .with_validator(inquire::validator::MinLengthValidator::new(1))
+            .with_display_mode(PasswordDisplayMode::Masked)
+            .prompt()
+            .unwrap()
+    ));
     let key = AuthKey::derive_from(&password.as_slice(), &username.as_slice());
-    clients.save(
-        &username.as_slice(),
-        Client{
-            auth_key: key.clone()
-        }
-    );
-    println!("User {} has been successfully created!", username);
+    
+    clients.save(&username.as_slice(), Client{ auth_key: key.clone()});
+    println!("\nUser {} has been successfully created!", username);
+    
     let config_file = username.to_string() + ".toml";
     let config = ConnConfig {
         server: Server {
@@ -97,11 +80,11 @@ pub fn add(
         }
     };
     config.save(&config_file.parse()?).map_err(|error| {
-        error!("Failed to save configuration: {}", error);
+        eprintln!("Failed to save configuration: {}", error);
         process::exit(1);
     }).unwrap();
-    println!("Configuration file has been saved to {}", config_file);
-    println!("First insert: {}", config.to_base64().unwrap());
+    println!("Configuration file has been saved as {}", config_file);
+    println!("\nKEY: {}", config.to_base64().unwrap());
     Ok(())
 }
 
