@@ -95,7 +95,7 @@ fn main() {
                 }
             }
         },
-        cli::schema::Commands::Servers => unimplemented!("Servers command is not implemented"),
-        cli::schema::Commands::Logs { id } => unimplemented!("Logs command is not implemented"),
+        cli::schema::Commands::Monitor => unimplemented!("Monitor command is not implemented"),
+        cli::schema::Commands::Logs => unimplemented!("Logs command is not implemented"),
     }
 }

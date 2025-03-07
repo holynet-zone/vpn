@@ -25,7 +25,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Start vpn server
+    /// Start VPN server
     Start {
         /// host to listen
         #[arg(short, long)]
@@ -47,14 +47,10 @@ pub enum Commands {
         #[command(subcommand)]
         commands: UsersCommands,
     },
-    /// Lists all running VPN servers
-    Servers,
-    /// Shows logs for a specific VPN server
-    Logs {
-        /// ID of the VPN server to show logs for
-        #[arg(short, long, value_name = "ID")]
-        id: u32,
-    },
+    /// Monitor VPN server
+    Monitor,
+    /// Shows VPN server logs
+    Logs
     // /// dev operations
     // Dev {
     //     #[command(subcommand)]
