@@ -1,15 +1,15 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
+use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-const USERNAME_SIZE: usize = 128;
 
 #[derive(Clone)]
-pub struct Username(pub [u8; USERNAME_SIZE]);
+pub struct Username(pub Vec<u8>);
 
 impl Username {
-    pub const SIZE: usize = USERNAME_SIZE;
+    pub const SIZE: usize = 128;
     
     pub fn as_slice(&self) -> &[u8] {
         &self.0
@@ -31,22 +31,32 @@ impl TryFrom<&[u8]> for Username {
         if slice.len() != Self::SIZE {
             return Err("invalid username size".to_string());
         }
-        let mut username = [0u8; Self::SIZE];
-        username.copy_from_slice(slice);
-        Ok(Self(username))
+        Ok(Self(slice.to_vec()))
     }
 }
 
 impl TryFrom<String> for Username {
-    type Error = String;
+    type Error = String;    // todo: anyhow
     
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        if s.len() > Self::SIZE {
-            return Err("username too long".to_string());
+        let bytes = s.as_bytes();
+        if bytes.len() > Self::SIZE {
+            return Err(format!("username too long, max {} chars", Self::SIZE));
         }
-        let mut username = [0u8; Self::SIZE];
-        username[..s.len()].copy_from_slice(s.as_bytes());
-        Ok(Self(username))
+        Ok(Self(bytes.to_vec()))
+    }
+}
+
+impl FromStr for Username {
+    type Err = anyhow::Error;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
+        if bytes.len() > Self::SIZE {
+            return Err(anyhow::Error::msg(format!("username too long, max {} chars", Self::SIZE)));
+        }
+        Ok(Self(bytes.to_vec()))
+
     }
 }
 
@@ -63,8 +73,7 @@ impl Serialize for Username {
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            let s = String::from_utf8_lossy(&self.0);
-            serializer.serialize_str(&s)
+            serializer.serialize_str(&String::from_utf8_lossy(&self.0))
         } else {
             serializer.serialize_bytes(&self.0)
         }
@@ -77,18 +86,15 @@ impl<'de> Deserialize<'de> for Username {
         D: Deserializer<'de>,
     {
         let bytes = if deserializer.is_human_readable() {
-            let s = String::deserialize(deserializer)?;
-            s.as_bytes().to_vec()
+            String::deserialize(deserializer)?.as_bytes().to_vec()
         } else {
             Vec::deserialize(deserializer)?
         };
         
         if bytes.len() > Self::SIZE {
-            return Err(serde::de::Error::custom("username too long"));
+            return Err(serde::de::Error::custom(format!("username too long, max {} chars", Self::SIZE)));
         }
         
-        let mut username = [0u8; Self::SIZE];
-        username[..bytes.len()].copy_from_slice(&bytes);
-        Ok(Self(username))
+        Ok(Self(bytes))
     }
 }

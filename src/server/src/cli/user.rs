@@ -1,5 +1,7 @@
 use std::process;
+use std::str::FromStr;
 use inquire::{required, PasswordDisplayMode, Select};
+use inquire::validator::Validation;
 use tracing::error;
 use shared::conn_config::{ConnConfig, Credentials, Interface, Server};
 use sunbeam::protocol::{
@@ -18,46 +20,41 @@ pub fn add(
     host: Option<String>,
     port: Option<u16>,
 ) -> anyhow::Result<()> {
-    let host = host.unwrap_or_else(|| loop {
-        let host = inquire::Text::new("Enter a server host:")
+    let host = if host.is_some() { host.unwrap() } else {
+        inquire::Text::new("Enter a server host:")
             .with_default("127.0.0.1")
-            .prompt()
-            .unwrap();
-        if host.is_empty() {
-            error!("Host cannot be empty");
-            continue;
-        }
-        break host;
-    });
+            .with_validator(required!("This field is required"))
+            .with_validator(inquire::validator::MinLengthValidator::new(7))
+            .with_validator(&|i: &str | match i.is_empty() {
+                true => Ok(Validation::Invalid("This field is required".into())),
+                false => Ok(Validation::Valid) 
+            })
+            .prompt()?
+    }.trim().to_string();
 
-    let port = port.unwrap_or_else(|| {
+    let port = if port.is_some() { port.unwrap() } else {
         inquire::CustomType::new("Enter a server port:")
             .with_default(26256)
-            .prompt()
-            .unwrap()
-    });
-    
-    let username = Username::try_from(username.unwrap_or_else(
-        || inquire::Text::new(&format!("Enter a username (up to {} chars):", Username::SIZE))
-            .with_validator(required!("This field is required"))
-            .with_validator(inquire::validator::MinLengthValidator::new(1))
-            .with_validator(inquire::validator::MaxLengthValidator::new(Username::SIZE))
+            .prompt()?
+    };
+
+    let username = if username.is_some() { Username::from_str(&username.unwrap())? } else {
+        inquire::CustomType::new(&format!("Enter a username (up to {} chars):", Username::SIZE))
             .with_placeholder("JKearnsl")
-            .prompt()
-            .unwrap()
-    )).map_err(|error| {
-        eprintln!("Failed to parse username: {}", error);
-        process::exit(1);
-    }).unwrap();
-    
-    let password = Password::from(password.unwrap_or_else(
-        || inquire::Password::new("Enter a password:")
+            .with_validator(&|i: &Username | match i.is_empty() { 
+                true => Ok(Validation::Invalid("This field is required".into())),
+                false => Ok(Validation::Valid)
+            }).prompt()?
+    };
+
+    let password = Password::from(if password.is_some() { password.unwrap() } else {
+        inquire::Password::new("Enter a password:")
             .with_validator(required!("This field is required"))
             .with_validator(inquire::validator::MinLengthValidator::new(1))
             .with_display_mode(PasswordDisplayMode::Masked)
-            .prompt()
-            .unwrap()
-    ));
+            .prompt()?
+    });
+    
     let key = AuthKey::derive_from(&password.as_slice(), &username.as_slice());
     
     clients.save(&username.as_slice(), Client{ auth_key: key.clone()});
