@@ -16,8 +16,7 @@ use crate::{
     client, 
     server
 };
-use crate::client::credential::Credential;
-use crate::client::response::Response;
+use crate::credential::Credential;
 use crate::server::packet::HandshakeBody;
 
 lazy_static! {
@@ -35,9 +34,9 @@ fn initial(
         Alg::ChaCha20Poly1305 => NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone(),
         Alg::Aes256 => NOISE_IK_PSK2_25519_AESGCM_BLAKE2S.clone()
     })
-        .local_private_key(cred.private_key.as_slice())
-        .remote_public_key(cred.server_public_key.as_slice())
-        .psk(2, cred.pre_shared_key.as_slice())
+        .local_private_key(cred.sk.as_slice())
+        .remote_public_key(cred.peer_pk.as_slice())
+        .psk(2, cred.psk.as_slice())
         .build_initiator()?;
 
     let mut buffer = [0u8; 65536];

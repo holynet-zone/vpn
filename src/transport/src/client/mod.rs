@@ -3,30 +3,24 @@ pub(crate) mod packet;
 mod worker;
 mod response;
 mod request;
-mod credential;
 
 use std::{
     future::Future,
     net::{IpAddr, SocketAddr},
-    pin::Pin,
-    thread
+    pin::Pin
 };
 use std::sync::Arc;
 use std::time::Duration;
-use dashmap::DashMap;
 use self::{
     request::Request,
     error::RuntimeError,
     response::Response,
 };
 
-use tokio::runtime::Builder;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, warn};
-use crate::client::credential::Credential;
 use crate::client::packet::DataBody;
-use crate::keys::handshake::{PublicKey, SecretKey};
-use crate::server;
+use crate::credential::Credential;
 use crate::session::{Alg, SessionId};
 
 pub struct Client {
