@@ -143,7 +143,7 @@ impl Server {
                 
                 tracing::debug!("worker {} started", worker_id);
 
-                if let Err(err) = rt.block_on(r#mod::create(
+                if let Err(err) = rt.block_on(worker::create(
                     addr, 
                     stop_tx,
                     sessions, 
