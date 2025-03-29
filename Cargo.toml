@@ -5,6 +5,7 @@ members = [
     "src/client",
     "src/server",
     "src/shared",
+    "src/transport"
 ]
 
 [workspace.package]
