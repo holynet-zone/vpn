@@ -9,13 +9,6 @@ pub struct DataPacket {
     pub(crate) enc_body: Vec<u8>
 }
 
-impl DataPacket {
-    pub fn decrypt(&self, state: &StatelessTransportState) -> anyhow::Result<DataBody> {
-        let mut buffer = [0u8; 65536];
-        state.read_message(0, &self.enc_body, &mut buffer)?;
-        bincode::deserialize(&buffer).map_err(|e| anyhow::anyhow!(e))
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 pub enum DataBody {

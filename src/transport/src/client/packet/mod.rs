@@ -7,7 +7,8 @@ pub use self::{
         DataPacket,
         DataBody
     },
-    handshake::Handshake
+    handshake::Handshake,
+    keepalive::KeepAliveBody
 };
 
 
