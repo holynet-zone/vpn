@@ -96,7 +96,7 @@ pub(super) async fn data_sender(
     loop {
         tokio::select! {
             _ = stop.recv() => break,
-            body = queue.recv() => match body { // todo: may exec in another thread from pool
+            body = queue.recv() => match body { // todo: may exec in another thread from pool??
                Some(body) => match encrypt_body(&body, &state) {
                     Ok(enc_body) => {
                         let packet = client::packet::DataPacket{ sid, enc_body };
