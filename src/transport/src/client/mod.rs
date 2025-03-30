@@ -31,6 +31,7 @@ pub struct Client {
     sender_recv: Option<mpsc::Receiver<DataBody>>,
     handshake_timeout: Duration,
     handshake_payload: Vec<u8>,
+    keepalive: Option<Duration>,
     on_session_created: Option<Arc<dyn Fn(SessionId, Vec<u8>) -> Pin<Box<dyn Future<Output = Result<(), RuntimeError>> + Send>> + Send + Sync>>,
     on_request: Option<Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync>>,
 }
@@ -48,6 +49,7 @@ impl Client {
             sender_recv: Some(sender_recv),
             handshake_timeout: Duration::from_millis(1000),
             handshake_payload: vec![],
+            keepalive: Some(Duration::from_secs(5))
         }
     }
 
@@ -66,6 +68,21 @@ impl Client {
         Fut: Future<Output = Result<(), RuntimeError>> + Send + 'static,
     {
         self.on_session_created = Some(Arc::new(move |id, data| Box::pin(handler(id, data))));
+        self
+    }
+    
+    pub fn set_handshake_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.handshake_timeout = timeout;
+        self
+    }
+    
+    pub fn set_handshake_payload(&mut self, payload: Vec<u8>) -> &mut Self {
+        self.handshake_payload = payload;
+        self
+    }
+    
+    pub fn set_keepalive(&mut self, keepalive: Duration) -> &mut Self {
+        self.keepalive = Some(keepalive);
         self
     }
     
@@ -91,7 +108,8 @@ impl Client {
             self.on_request.clone(),
             self.on_session_created.clone(),
             sender_recv,
-            self.sender.clone()
+            self.sender.clone(),
+            self.keepalive.clone()
         );
         
         tokio::select! {

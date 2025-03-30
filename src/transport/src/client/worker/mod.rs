@@ -1,5 +1,6 @@
 mod handshake;
 mod data;
+mod keepalive;
 
 use std::{
     net::SocketAddr,
@@ -19,6 +20,7 @@ use crate::server;
 use crate::client::packet::{DataBody, Packet};
 use crate::client::worker::data::{data_receiver, data_sender};
 use crate::client::worker::handshake::handshake_step;
+use crate::client::worker::keepalive::keepalive_sender;
 use crate::credential::Credential;
 use crate::session::{Alg, SessionId};
 use super::{
@@ -38,7 +40,8 @@ pub(crate) async fn create(
     on_request: Option<Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync>>,
     on_session_created: Option<Arc<dyn Fn(SessionId, Vec<u8>) -> Pin<Box<dyn Future<Output = Result<(), RuntimeError>> + Send>> + Send + Sync>>,
     data_sender_rx: mpsc::Receiver<DataBody>,
-    data_sender_tx: mpsc::Sender<DataBody>
+    data_sender_tx: mpsc::Sender<DataBody>,
+    keepalive: Option<Duration>,
 ) -> anyhow::Result<()> {
     let socket = Socket::new(
         Domain::for_address(addr),
@@ -99,6 +102,20 @@ pub(crate) async fn create(
         state,
         sid
     ));
+    
+    match keepalive {
+        Some(duration) => {
+            info!("starting keepalive sender with interval {:?}", duration);
+            tokio::spawn(keepalive_sender(
+                stop_tx.subscribe(),
+                data_sender_tx,
+                duration
+            ));
+        },
+        None => {
+            info!("keepalive sender is disabled");
+        }
+    }
 
     let mut stop_rx = stop_tx.subscribe();
     tokio::select! {
