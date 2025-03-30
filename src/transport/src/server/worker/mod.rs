@@ -14,9 +14,8 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::Receiver;
 use tracing::{error, info, warn};
 use crate::{client, server};
-use crate::client::packet::DataBody;
 use crate::keys::handshake::{PublicKey, SecretKey};
-use crate::server::packet::{KeepAliveBody};
+use crate::server::worker::data::data_executor;
 use crate::server::worker::handshake::handshake_executor;
 use crate::session::SessionId;
 use super::{
@@ -34,7 +33,7 @@ pub(crate) async fn create(
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sk: SecretKey,
     handle: Option<Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync>>,
-    sender_rx: mpsc::Receiver<(SessionId, server::Response)>,
+    sender_rx: mpsc::Receiver<(SessionId, Response)>,
     worker_id: usize 
 ) -> anyhow::Result<()> {
     let socket = Socket::new(
@@ -206,82 +205,6 @@ async fn udp_listener(
 }
 
 
-
-
-async fn data_executor(
-    mut stop: Receiver<RuntimeError>,
-    mut queue: mpsc::Receiver<(client::packet::DataPacket, SocketAddr)>,
-    udp_tx: mpsc::Sender<(server::packet::Packet, SocketAddr)>,
-    sessions: Sessions,
-    handler: Option<Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync>>
-) {
-    loop {
-        tokio::select! {
-            _ = stop.recv() => break,
-            data = queue.recv() => match data {
-                Some((enc_packet, addr)) => match sessions.get(&enc_packet.sid).await {
-                    Some(session) => match session.state {
-                        Some(state) => match enc_packet.decrypt(&state) {
-                            Ok(body) => {
-                                // Handle keepalive packets ========================================
-                                match body {
-                                    DataBody::KeepAlive(ref body) => {
-                                        info!("[{}] received keepalive packet from sid {} owd {}", addr, enc_packet.sid, body.owd());
-                                        let resp = server::packet::DataBody::KeepAlive(KeepAliveBody::new(body.client_time));
-                                        match server::packet::DataPacket::from_body(&resp, &state) {
-                                            Ok(value) => {
-                                                if let Err(e) = udp_tx.send((server::packet::Packet::Data(value), addr)).await {
-                                                    error!("failed to send server data packet to udp queue: {}", e);
-                                                }
-                                            },
-                                            Err(e) => {
-                                                error!("[{}] failed to encode keepalive data packet: {}", addr, e);
-                                            }
-                                        }
-                                    },
-                                    _ => {}
-                                }
-                                // Handle custom ===================================================
-                                match handler.as_ref() {
-                                    Some(handler) => match handler(Request {
-                                            ip: addr.ip(),
-                                            sid: enc_packet.sid,
-                                            sessions: sessions.clone(),  // arc cloning
-                                            body
-                                        }).await {
-                                        Response::Data(body) => match server::packet::DataPacket::from_body(&body, &state) {
-                                            Ok(value) => {
-                                                if let Err(e) = udp_tx.send((server::packet::Packet::Data(value), addr)).await {
-                                                    error!("failed to send server data packet to udp queue: {}", e);
-                                                }
-                                            },
-                                            Err(e) => {
-                                                error!("[{}] failed to encode data packet: {}", addr, e);
-                                            }
-                                        },
-                                        Response::Close => {
-                                            sessions.release(enc_packet.sid).await;
-                                            info!("session {} closed by handler", enc_packet.sid);
-                                        },
-                                        Response::None => {}
-                                    },
-                                    None => warn!("[{}] received data packet for session {} but no handler is set", addr, enc_packet.sid)
-                                }
-                            },
-                            Err(err) => warn!("[{}] failed to decrypt data packet (sid: {}): {}", addr, enc_packet.sid, err)
-                        },
-                        None => warn!("[{}] received data packet for session with unset state {}", addr, enc_packet.sid)
-                    },
-                    None => warn!("[{}] received data packet for unknown session {}", addr, enc_packet.sid)
-                },
-                None => {
-                    error!("data_executor channel is closed");
-                    break
-                }
-            }
-        }
-    }
-}
 // 
 // 
 // #[cfg(test)]
