@@ -2,15 +2,24 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use snow::StatelessTransportState;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use crate::{client, server};
+use crate::client::packet::DataBody;
 use crate::server::error::RuntimeError;
 use crate::server::packet::KeepAliveBody;
 use crate::server::request::Request;
 use crate::server::response::Response;
 use crate::server::session::Sessions;
+
+
+fn decode_packet(packet: &client::packet::DataPacket, state: &StatelessTransportState) -> anyhow::Result<DataBody> {
+    let mut buffer = [0u8; 65536];
+    state.read_message(0, &packet.enc_body, &mut buffer)?;
+    bincode::deserialize(&buffer).map_err(|e| anyhow::anyhow!(e))
+}
 
 pub(super) async fn data_executor(
     mut stop: Receiver<RuntimeError>,
@@ -25,7 +34,7 @@ pub(super) async fn data_executor(
             data = queue.recv() => match data {
                 Some((enc_packet, addr)) => match sessions.get(&enc_packet.sid).await {
                     Some(session) => match session.state {
-                        Some(state) => match enc_packet.decrypt(&state) {
+                        Some(state) => match decode_packet(&enc_packet, &state) {
                             Ok(body) => {
                                 // Handle keepalive packets ========================================
                                 match body {
