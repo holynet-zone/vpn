@@ -91,7 +91,7 @@ async fn complete(
     
 }
 
-pub(crate) async fn handshake_executor(
+pub(super) async fn handshake_executor(
     mut stop: Receiver<RuntimeError>,
     mut queue: mpsc::Receiver<(client::packet::Handshake, SocketAddr)>,
     udp_tx: mpsc::Sender<(Packet, SocketAddr)>,
