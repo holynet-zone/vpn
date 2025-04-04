@@ -49,7 +49,7 @@ impl Sessions {
         }
     }
 
-    pub async fn add(&self, sock_addr: SocketAddr, enc: Alg, state: Option<StatelessTransportState>) -> Option<SessionId> {
+    pub async fn add(&self, sock_addr: SocketAddr, enc: Alg, state: Option<StatelessTransportState>) -> Option<(SessionId, HolyIp)> {
         let session_id = self.sid_gen.lock().await.next()?;
         match self.holy_ip_gen.lock().await.next() {
             Some(ip) => {
@@ -62,14 +62,15 @@ impl Sessions {
                     holy_ip: ip,
                     enc,
                     state: state.map(|s| Arc::new(s))
-                })
+                });
+                self.holy_ip_map.insert(ip, session_id);
+                Some((session_id, ip))
             },
             None => {
                 self.sid_gen.lock().await.release(&session_id);
-                return None;
+                None
             }
         }
-        Some(session_id)
     }
     
     pub fn set_transport_state(&self, sid: &SessionId, state: StatelessTransportState) {
