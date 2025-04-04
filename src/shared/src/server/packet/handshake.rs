@@ -1,36 +1,25 @@
+use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
-use snow::{Builder, HandshakeState, StatelessTransportState};
 use crate::keys::handshake::{PublicKey, SecretKey};
 use crate::session::SessionId;
 
 #[derive(Serialize, Deserialize)]
 pub struct Handshake {
-    pub(crate) body: Vec<u8>
-}
-
-impl Handshake {
-    
-    pub fn complete(body: &HandshakeBody, mut responder: HandshakeState) -> anyhow::Result<(Handshake, StatelessTransportState)> {
-        let mut buffer = [0u8; 65536];
-        let len = responder.write_message(&bincode::serialize(body).unwrap(), &mut buffer)?;
-        Ok((
-            Handshake {
-                body: buffer[..len].to_vec() // FIXME: remove copy
-            },
-            responder.into_stateless_transport_mode()?
-        ))
-    }
-    
+    pub body: Vec<u8>
 }
 
 
 #[derive(Serialize, Deserialize)]
 pub enum HandshakeBody {
-    Connected {
-        sid: SessionId,
-        payload: Vec<u8>
-    },
+    Connected(HandshakePayload),
     Disconnected(HandshakeError)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HandshakePayload {
+    pub sid: SessionId,
+    pub ipaddr: IpAddr
+    // pub dns: Vec<IpAddr>,
 }
 
 

@@ -15,7 +15,7 @@ use shared::handshake::{
     NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
     params_from_alg
 };
-use shared::server::packet::{Handshake, HandshakeBody, HandshakeError, Packet};
+use shared::server::packet::{Handshake, HandshakeBody, HandshakePayload, HandshakeError, Packet};
 use shared::session::Alg;
 use crate::runtime::error::RuntimeError;
 
@@ -70,12 +70,13 @@ async fn complete(
     let mut buffer = [0u8; 65536];
     let len = responder.read_message(&handshake.body, &mut buffer)?;
     let (body, sid) = match sessions.add(addr.clone(), alg, None).await {
-        Some(sid) => {
+        Some((sid, holy_ip)) => {
             info!("[{}] session created with sid: {}", addr, sid);
-            (HandshakeBody::Connected {
-                sid: sid.clone(),
-                payload: bincode::deserialize(&buffer[..len])?
-            }, Some(sid))
+            let handshake_payload = HandshakePayload {
+                sid,
+                ipaddr: holy_ip
+            };
+            (HandshakeBody::Connected(handshake_payload), Some(sid))
         },
         None => {
             warn!("[{}] failed to create session: overload", addr);
