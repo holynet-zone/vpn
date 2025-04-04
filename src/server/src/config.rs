@@ -1,13 +1,14 @@
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-
+use shared::keys::handshake::SecretKey;
 
 #[derive(Serialize, Deserialize)]
 pub struct General {
     pub debug: bool,
     pub host: IpAddr,
     pub port: u16,
+    pub secret_key: SecretKey,
     pub storage_path: PathBuf,
 }
 
@@ -21,8 +22,9 @@ pub struct Interface {
 
 #[derive(Serialize, Deserialize)]
 pub struct Runtime {
-    pub event_capacity: u64,
-    pub event_timeout: Option<u64>,
+    pub workers: usize,
+    pub sender_buf_size: usize,
+    pub session_ttl: usize, // sec
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,17 +49,19 @@ impl Default for Config {
                 debug: false,
                 host: IpAddr::from([0, 0, 0, 0]),
                 port: 26256,
+                secret_key: SecretKey::generate_x25519(),
                 storage_path: PathBuf::from("database"),
             },
             interface: Interface {
-                name: "holynet0".to_string(),
+                name: "holynet0".into(),
                 mtu: 1420,
                 address: IpAddr::from([10, 8, 0, 0]),
                 prefix: 24,
             },
             runtime: Runtime {
-                event_capacity: 1024,
-                event_timeout: None,
+                workers: 0,
+                sender_buf_size: 1000,
+                session_ttl: 0,
             },
             redirect: Some(Redirect {
                 enabled: false,
@@ -68,14 +72,14 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load(path: &str) -> Result<Config, String> {
-        let config = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        Ok(toml::from_str(&config).map_err(|e| e.to_string())?)
+    pub fn load(path: &Path) -> anyhow::Result<Config> {
+        let config = std::fs::read_to_string(path)?;
+        Ok(toml::from_str(&config)?)
     }
 
-    pub fn save(&self, path: &str) -> Result<(), String> {
-        let config = toml::to_string(self).map_err(|e| e.to_string())?;
-        std::fs::write(path, &config).map_err(|e| e.to_string())?;
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let config = toml::to_string(self)?;
+        std::fs::write(path, &config)?;
         Ok(())
     }
 }
