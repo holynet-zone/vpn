@@ -9,6 +9,8 @@ pub struct IpAddressGenerator {
     end: IpAddr,
 }
 
+pub type HolyIp = IpAddr;
+
 impl IpAddressGenerator {
     pub fn new(start_with: IpAddr, prefix: u8) -> Self {
         let (start, end) = Self::calculate_range(start_with, prefix);
@@ -41,8 +43,8 @@ impl IpAddressGenerator {
         }
     }
 
-    pub fn release(&mut self, address: IpAddr) {
-        self.borrowed.remove(&address);
+    pub fn release(&mut self, address: &IpAddr) {
+        self.borrowed.remove(address);
     }
 
     fn increment_address(&self, address: &IpAddr) -> IpAddr {
@@ -134,7 +136,7 @@ mod tests {
         assert_eq!(addresses[0], IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)));
         assert_eq!(addresses[255], IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)));
 
-        generator.release(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)));
+        generator.release(&IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)));
         assert_eq!(generator.next(), Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0))));
     }
 
@@ -160,7 +162,7 @@ mod tests {
             IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 255))
         );
 
-        generator.release(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0)));
+        generator.release(&IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0)));
         assert_eq!(
             generator
                 .next()
@@ -169,7 +171,7 @@ mod tests {
                 .contains("2001:db8::"),
             true
         );
-        generator.release(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)));
+        generator.release(&IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)));
         assert_eq!(
             generator
                 .next()
@@ -178,5 +180,23 @@ mod tests {
                 .contains("2001:db8::1"),
             true
         );
+    }
+}
+
+
+pub fn increment_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            let mut addr_u32 = u32::from_be_bytes(octets);
+            addr_u32 = addr_u32.wrapping_add(1);
+            IpAddr::V4(Ipv4Addr::from(addr_u32))
+        }
+        IpAddr::V6(ipv6) => {
+            let segments = ipv6.octets();
+            let mut addr_u128 = u128::from_be_bytes(segments);
+            addr_u128 = addr_u128.wrapping_add(1);
+            IpAddr::V6(Ipv6Addr::from(addr_u128))
+        }
     }
 }

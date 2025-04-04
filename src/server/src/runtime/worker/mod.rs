@@ -8,23 +8,23 @@ use std::{
 use std::future::Future;
 use std::pin::Pin;
 use dashmap::DashMap;
+use etherparse::SlicedPacket;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::Receiver;
 use tracing::{error, info, warn};
-use crate::{client, server};
-use crate::keys::handshake::{PublicKey, SecretKey};
-use crate::server::worker::data::data_executor;
-use crate::server::worker::handshake::handshake_executor;
-use crate::session::SessionId;
+use tun_rs::AsyncDevice;
+use shared::keys::handshake::{PublicKey, SecretKey};
+use crate::runtime::worker::data::{data_tun_executor, data_udp_executor};
+use crate::runtime::worker::handshake::handshake_executor;
 use super::{
-    request::Request,
-    response::Response,
     session::Sessions,
     error::RuntimeError
 };
-
+use shared::{client, server};
+use crate::network::parse_source;
+use super::session::HolyIp;
 
 pub(crate) async fn create(
     addr: SocketAddr,
@@ -32,8 +32,7 @@ pub(crate) async fn create(
     sessions: Sessions,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sk: SecretKey,
-    handle: Option<Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync>>,
-    sender_rx: mpsc::Receiver<(SessionId, Response)>,
+    tun: Arc<AsyncDevice>,
     worker_id: usize 
 ) -> anyhow::Result<()> {
     let socket = Socket::new(
@@ -49,15 +48,23 @@ pub(crate) async fn create(
 
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
     let (out_udp_tx, out_udp_rx) = mpsc::channel::<(server::packet::Packet, SocketAddr)>(1000);
+    let (out_tun_tx, out_tun_rx) = mpsc::channel::<Vec<u8>>(1000);
     let (handshake_tx, handshake_rx) = mpsc::channel::<(client::packet::Handshake, SocketAddr)>(1000);
-    let (data_tx, data_rx) = mpsc::channel::<(client::packet::DataPacket, SocketAddr)>(1000);
+    let (data_udp_tx, data_udp_rx) = mpsc::channel::<(client::packet::DataPacket, SocketAddr)>(1000);
+    let (data_tun_tx, data_tun_rx) = mpsc::channel::<(Vec<u8>, HolyIp)>(1000);
 
 
     // Handle incoming UDP packets
-    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), handshake_tx, data_tx));
+    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), handshake_tx, data_udp_tx));
 
     // Handle outgoing UDP packets
     tokio::spawn(udp_sender(stop_tx.subscribe(), socket.clone(), out_udp_rx));
+    
+    // Handle incoming TUN packets
+    tokio::spawn(tun_listener(stop_tx.subscribe(), tun.clone(), data_tun_tx));
+    
+    // Handle outgoing TUN packets
+    tokio::spawn(tun_sender(stop_tx.subscribe(), tun.clone(), out_tun_rx));
     
     // Executors
     tokio::spawn(handshake_executor(
@@ -68,21 +75,21 @@ pub(crate) async fn create(
         sessions.clone(),
         sk
     ));
-    tokio::spawn(data_executor(
+    tokio::spawn(data_udp_executor(
         stop_tx.subscribe(), 
-        data_rx,
+        data_udp_rx,
+        out_udp_tx.clone(),
+        out_tun_tx.clone(),
+        sessions.clone(),
+    ));
+
+    tokio::spawn(data_tun_executor(
+        stop_tx.subscribe(),
+        data_tun_rx,
         out_udp_tx.clone(),
         sessions.clone(),
-        handle
     ));
     
-    // Sender
-    tokio::spawn(sender_executor(
-        stop_tx.subscribe(),
-        sender_rx,
-        out_udp_tx.clone(),
-        sessions.clone()
-    ));
 
     let mut stop_rx = stop_tx.subscribe();
     tokio::select! {
@@ -91,50 +98,6 @@ pub(crate) async fn create(
     
     Ok(())
 }
-
-
-async fn sender_executor(
-    mut stop: Receiver<RuntimeError>,
-    mut queue: mpsc::Receiver<(SessionId, server::Response)>,
-    udp_tx: mpsc::Sender<(server::packet::Packet, SocketAddr)>,
-    sessions: Sessions
-) {
-    loop {
-        tokio::select! {
-            _ = stop.recv() => break,
-            data = queue.recv() => match data {
-                Some((sid, response)) => match sessions.get(&sid).await {
-                    Some(session) => match session.state {
-                        Some(state) => match response {
-                            Response::Data(body) => match server::packet::DataPacket::from_body(&body, &state) {
-                                Ok(value) => {
-                                    if let Err(e) = udp_tx.send((server::packet::Packet::Data(value), session.sock_addr)).await {
-                                        error!("failed to send server resp packet to udp queue: {}", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    error!("[{}] failed to encode resp packet: {}", session.sock_addr, e);
-                                }
-                            },
-                            Response::Close => {
-                                sessions.release(sid).await;
-                                info!("session {} closed by resp handler", sid);
-                            },
-                            Response::None => {}
-                        },
-                        None => warn!("received resp packet for session with unset state {}", sid)
-                    },
-                    None => warn!("received resp packet for unknown session {}", sid)
-                },
-                None => {
-                    error!("sender_executor channel is closed");
-                    break
-                }
-            }
-        }
-    }
-}
-
 
 async fn udp_sender(
     mut stop: Receiver<RuntimeError>,
@@ -164,6 +127,7 @@ async fn udp_listener(
 ) {
     let mut udp_buffer = [0u8; 65536];
     loop {
+        udp_buffer.fill(0);
         tokio::select! {
             _ = stop.recv() => break,
             result = socket.recv_from(&mut udp_buffer) => {
@@ -198,7 +162,53 @@ async fn udp_listener(
                     }
                     Err(e) => warn!("failed to receive udp: {}", e)
                 }
-                udp_buffer.fill(0)
+            }
+        }
+    }
+}
+
+
+async fn tun_sender(
+    mut stop: Receiver<RuntimeError>,
+    tun: Arc<AsyncDevice>,
+    mut out_tun_rx: mpsc::Receiver<Vec<u8>>
+) {
+    loop {
+        tokio::select! {
+            _ = stop.recv() => break,
+            result = out_tun_rx.recv() => match result {
+                Some(data) => {
+                    if let Err(e) = tun.send(&data).await {
+                        error!("failed to send data to tun: {}", e);
+                        // todo add stop signal
+                    }
+                },
+                None => break
+            }
+        }
+    }
+}
+
+async fn tun_listener(
+    mut stop: Receiver<RuntimeError>,
+    tun: Arc<AsyncDevice>,
+    data_tun_tx: mpsc::Sender<(Vec<u8>, HolyIp)>
+) {
+    let mut buffer = [0u8; 65536];
+    loop {
+        buffer.fill(0);
+        tokio::select! {
+            _ = stop.recv() => break,
+            len = tun.recv(&mut buffer) => match parse_source(&buffer[..len]) {
+                Ok(ip) => {
+                    if let Err(e) = data_tun_tx.send((buffer[..len].to_vec(), ip)).await {
+                        error!("failed to send data to tun executor: {}", e);
+                    }
+                },
+                Err(e) => {
+                    warn!("failed to parse tun packet: {}", e);
+                    continue;
+                }
             }
         }
     }

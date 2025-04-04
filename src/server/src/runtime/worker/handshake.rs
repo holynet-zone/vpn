@@ -5,18 +5,20 @@ use snow::{Builder};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-use crate::client;
-use crate::credential::Credential;
-use crate::keys::handshake::{PublicKey, SecretKey};
-use crate::server::error::RuntimeError;
-use crate::server::session::Sessions;
-use crate::session::Alg;
-use crate::handshake::{
+use shared::client;
+use shared::credential::Credential;
+use shared::keys::handshake::{PublicKey, SecretKey};
+
+use super::Sessions;
+use shared::handshake::{
     NOISE_IK_PSK2_25519_AESGCM_BLAKE2S,
     NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
     params_from_alg
 };
-use crate::server::packet::{Handshake, HandshakeBody, HandshakeError, Packet};
+use shared::server::packet::{Handshake, HandshakeBody, HandshakeError, Packet};
+use shared::session::Alg;
+use crate::runtime::error::RuntimeError;
+
 
 fn decode_handshake_params(
     handshake: &client::packet::Handshake, 
