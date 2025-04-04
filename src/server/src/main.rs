@@ -1,7 +1,5 @@
 mod config;
 mod runtime;
-mod session;
-mod daemon;
 mod network;
 mod client;
 mod cli;
