@@ -1,10 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::process::Command;
 use tracing::info;
-use tun::Device;
 use serde::Deserialize;
 use tun_rs::AsyncDevice;
-use super::RuntimeError;
+use crate::runtime::error::RuntimeError;
 
 pub fn set_ipv4_forwarding(value: bool) -> Result<(), RuntimeError> {
     let sysctl_arg = if cfg!(target_os = "linux") {
@@ -23,7 +22,7 @@ pub fn set_ipv4_forwarding(value: bool) -> Result<(), RuntimeError> {
             info!("Ipv4 forwarding is {}", if value { "enabled" } else { "disabled" });
             Ok(())
         },
-        Err(error) => Err(RuntimeError::TunError(format!("Failed to set ipv4 forwarding: {}", error)))
+        Err(error) => Err(RuntimeError::IO(format!("failed to set ipv4 forwarding: {}", error)))
     }
 }
 
@@ -34,17 +33,26 @@ pub async fn setup_tun(name: &str, mtu: &u16, ip: &IpAddr, prefix: &u8) -> Resul
     config.mtu(mtu.clone());
     config.up();
     let dev = tun_rs::create_as_async(&config).map_err(|error| {  // todo: requires async runtime
-        RuntimeError::TunError(format!("Failed to create the TUN device: {}", error))
+        RuntimeError::Tun(format!("failed to create the TUN device: {}", error))
     })?;
 
     // ignore the head 4bytes packet information for calling `recv` and `send` on macOS
     #[cfg(target_os = "macos")]
     dev.set_ignore_packet_info(true);
-    
+
+    // let mut config = tun::Configuration::default();
+    // config.tun_name(name);
+    // config.address(ip);
+    // config.netmask(prefix_to_address(prefix));
+    // config.mtu(mtu.clone());
+    // config.up();
+    // 
+    // let tun_device = tun::create(&config).map_err(|error| {
+    //     RuntimeError::TunError(format!("Failed to create the TUN device: {}", error))
+    // })?;
     info!("TUN device {} is up", name);
     Ok(dev)
 }
-
 
 pub fn down_tun(name: &str) -> Result<(), RuntimeError> {
     let output = Command::new("sudo")
@@ -54,13 +62,13 @@ pub fn down_tun(name: &str) -> Result<(), RuntimeError> {
         .arg(name)
         .output()
         .map_err(|error| {
-            RuntimeError::TunError(format!("Failed to execute command to delete TUN interface: {}", error))
+            RuntimeError::Tun(format!("failed to execute command to delete TUN interface: {}", error))
         })?;
     if output.status.success() {
         info!("TUN interface {} is down", name);
         Ok(())
     } else {
-        Err(RuntimeError::TunError(format!("Failed to delete TUN interface: {}", String::from_utf8_lossy(&output.stderr))))
+        Err(RuntimeError::Tun(format!("failed to delete TUN interface: {}", String::from_utf8_lossy(&output.stderr))))
     }
 }
 

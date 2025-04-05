@@ -1,6 +1,5 @@
 mod handshake;
 mod data;
-mod keepalive;
 
 use std::{
     net::SocketAddr,
@@ -16,18 +15,17 @@ use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::Receiver;
 use tracing::{error, info, warn};
-use crate::server;
-use crate::client::packet::{DataBody, Packet};
-use crate::client::worker::data::{data_receiver, data_sender};
-use crate::client::worker::handshake::handshake_step;
-use crate::client::worker::keepalive::keepalive_sender;
-use crate::credential::Credential;
-use crate::session::{Alg, SessionId};
-use super::{
-    request::Request,
-    response::Response,
-    error::RuntimeError
+use tun_rs::AsyncDevice;
+use shared::client::packet::{
+    Packet
 };
+use shared::credential::Credential;
+use shared::server;
+use shared::session::Alg;
+use crate::network::DefaultGateway;
+use crate::runtime::worker::data::{data_tun_executor, data_udp_executor, keepalive_sender};
+use crate::runtime::worker::handshake::handshake_step;
+use super::{error::RuntimeError, tun};
 
 
 pub(crate) async fn create(
@@ -36,11 +34,6 @@ pub(crate) async fn create(
     cred: Credential,
     alg: Alg,
     handshake_timeout: Duration,
-    handshake_payload: Vec<u8>,
-    on_request: Option<Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync>>,
-    on_session_created: Option<Arc<dyn Fn(SessionId, Vec<u8>) -> Pin<Box<dyn Future<Output = Result<(), RuntimeError>> + Send>> + Send + Sync>>,
-    data_sender_rx: mpsc::Receiver<DataBody>,
-    data_sender_tx: mpsc::Sender<DataBody>,
     keepalive: Option<Duration>,
 ) -> anyhow::Result<()> {
     let socket = Socket::new(
@@ -57,83 +50,165 @@ pub(crate) async fn create(
 
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
     let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(1000);
-    let (data_receiver_tx, data_receiver_rx) = mpsc::channel::<server::packet::DataPacket>(1000);
+    let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(1000);
+    let (data_udp_tx, data_udp_rx) = mpsc::channel::<server::packet::DataPacket>(1000);
+    let (data_tun_tx, data_tun_rx) = mpsc::channel::<Vec<u8>>(1000);
 
 
     // Handle incoming UDP packets
-    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), data_receiver_tx));
+    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), data_udp_tx));
 
     // Handle outgoing UDP packets
     tokio::spawn(udp_sender(stop_tx.subscribe(), socket.clone(), udp_sender_rx));
+
     
     // Handshake step
-    let (sid, state) = match tokio::spawn(handshake_step(
+    let (handshake_payload, state) = match tokio::spawn(handshake_step(
         socket.clone(),
         cred,
         alg,
-        handshake_timeout,
-        handshake_payload,
-        on_session_created
+        handshake_timeout
     )).await? {
-        Ok(v) => v,
+        Ok((p, state)) => (p, Arc::new(state)),
         Err(err) => {
             stop_tx.send(err.clone())?;
             return Err(Error::from(err));
         }
     };
     
-    let state = Arc::new(state);
-    
     // Executors
-    tokio::spawn(data_receiver(
-        stop_tx.clone(),
-        stop_tx.subscribe(), 
-        data_receiver_rx,
-        data_sender_tx.clone(),
-        state.clone(),
-        on_request
-    ));
-    
-    tokio::spawn(data_sender(
+    tokio::spawn(data_tun_executor(
         stop_tx.clone(),
         stop_tx.subscribe(),
-        data_sender_rx,
-        udp_sender_tx,
-        state,
-        sid
+        data_tun_rx,
+        udp_sender_tx.clone(),
+        state.clone(),
+        handshake_payload.sid,
     ));
     
+    tokio::spawn(data_udp_executor(
+        stop_tx.clone(),
+        stop_tx.subscribe(),
+        data_udp_rx,
+        tun_sender_tx,
+        state.clone()
+    ));
+    
+    let tun = Arc::new(tun::setup_tun(
+        "holynet0",
+        &1500,
+        &handshake_payload.ipaddr,
+        &32
+    ).await?);
+
+    let mut gw = DefaultGateway::create(
+        &handshake_payload.ipaddr,
+        addr.ip().to_string().as_str(),
+        true
+    );
+
+    // Handle incoming TUN packets
+    tokio::spawn(tun_listener(
+        stop_tx.subscribe(),
+        tun.clone(),
+        data_tun_tx
+    ));
+
+    // Handle outgoing TUN packets
+    tokio::spawn(tun_sender(
+        stop_tx.subscribe(),
+        tun.clone(),
+        tun_sender_rx
+    ));
+
+
     match keepalive {
         Some(duration) => {
             info!("starting keepalive sender with interval {:?}", duration);
             tokio::spawn(keepalive_sender(
+                stop_tx.clone(),
                 stop_tx.subscribe(),
-                data_sender_tx,
-                duration
+                udp_sender_tx,
+                duration,
+                state.clone(),
+                handshake_payload.sid,
             ));
         },
-        None => {
-            info!("keepalive sender is disabled");
-        }
+        None => info!("keepalive sender is disabled")
     }
 
     let mut stop_rx = stop_tx.subscribe();
     tokio::select! {
-        _ = stop_rx.recv() => info!("listener stopped"),
+        _ = stop_rx.recv() => {
+            gw.delete()
+            info!("listener stopped")
+        }
     }
     
     Ok(())
 }
 
-async fn udp_sender(
+async fn tun_sender(
     mut stop: Receiver<RuntimeError>,
-    socket: Arc<UdpSocket>,
-    mut out_udp_rx: mpsc::Receiver<Packet>
+    tun: Arc<AsyncDevice>,
+    mut queue: mpsc::Receiver<Vec<u8>>
 ) {
     loop {
         tokio::select! {
             _ = stop.recv() => break,
-            result = out_udp_rx.recv() => match result {
+            result = queue.recv() => match result {
+                Some(packet) => {
+                    if let Err(err) = tun.send(&packet).await {
+                        error!("failed to send data to the tun: {}", err);
+                        // todo stop send
+                    }
+                },
+                None => break
+            }
+        }
+    }
+}
+
+async fn tun_listener(
+    mut stop: Receiver<RuntimeError>,
+    tun: Arc<AsyncDevice>,
+    queue: mpsc::Sender<Vec<u8>>
+) {
+    let mut buffer = [0u8; 65536];
+    loop {
+        buffer.fill(0);
+        tokio::select! {
+            _ = stop.recv() => break,
+            result = tun.recv(&mut buffer) => match result {
+                Ok(n) => {
+                    if n == 0 {
+                        warn!("received tun packet with 0 bytes, dropping it");
+                        continue;
+                    }
+                    if n > 65536 {
+                        warn!("received tun packet larger than 65536 bytes, dropping it (check ur mtu)");
+                        continue;
+                    }
+                    if let Err(err) = queue.send(buffer[..n].to_vec()).await {
+                        error!("failed to send data to data_receiver: {}", err);
+                    }
+                }
+                Err(err) => warn!("failed to receive udp: {}", err)
+            }
+        }
+    }
+}
+
+
+async fn udp_sender(
+    mut stop: Receiver<RuntimeError>,
+    socket: Arc<UdpSocket>,
+    mut queue: mpsc::Receiver<Packet>
+) {
+    loop {
+        tokio::select! {
+            _ = stop.recv() => break,
+            result = queue.recv() => match result {
                 Some(packet) => {
                     if let Err(err) = socket.send(&packet.to_bytes()).await {
                         error!("failed to send data to the server: {}", err);
