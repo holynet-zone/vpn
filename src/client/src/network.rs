@@ -1,13 +1,8 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
-use libc;
 use log::{info, warn};
 use std::process::Command;
 use pnet::datalink;
-
-pub fn is_root() -> bool {
-    unsafe { libc::geteuid() == 0 }
-}
 
 pub fn enable_ipv4_forwarding() -> Result<(), String> {
     let sysctl_arg = if cfg!(target_os = "linux") {
