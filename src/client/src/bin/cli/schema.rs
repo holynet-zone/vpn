@@ -16,18 +16,6 @@ pub struct Cli {
 pub enum Commands {
     /// connect to a server
     Connect {
-        /// addr to connect
-        #[arg(short, long)]
-        addr: Option<String>,
-        /// username
-        #[arg(short, long)]
-        username: Option<String>,
-        /// auth key
-        #[arg(short, long)]
-        auth_key: Option<String>,
-        /// password
-        #[arg(short, long)]
-        password: Option<String>,
         /// config file
         #[arg(short, long, value_name = "FILE PATH")]
         config: Option<PathBuf>,
