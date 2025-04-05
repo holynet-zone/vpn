@@ -1,4 +1,4 @@
-mod error;
+pub mod error;
 mod worker;
 mod tun;
 
@@ -26,35 +26,36 @@ pub struct Runtime {
     alg: Alg,
     cred: Credential,
     handshake_timeout: Duration,
-    keepalive: Option<Duration>
+    keepalive: Option<Duration>,
+    pub stop_tx: broadcast::Sender<RuntimeError>
 }
 
 impl Runtime {
     pub fn new(
-        addr: IpAddr, 
-        port: u16, 
-        alg: Alg, 
-        cred: Credential, 
-        handshake_timeout: Duration, 
-        keepalive: Option<Duration>
+        addr: IpAddr,
+        port: u16,
+        alg: Alg,
+        cred: Credential,
+        handshake_timeout: Duration,
+        keepalive: Option<Duration>,
     ) -> Self {
+        let (stop_tx, _) = broadcast::channel::<RuntimeError>(10);
         Self {
             sock: SocketAddr::new(addr, port),
             alg,
             cred,
             handshake_timeout,
-            keepalive
+            keepalive,
+            stop_tx
         }
     }
 
     pub async fn run(&self) -> Result<(), RuntimeError> {
         tracing::info!("Connecting to udp://{}", self.sock);
-
-        let (stop_tx, mut stop_rx) = broadcast::channel::<RuntimeError>(10);
         
         let worker = worker::create(
             self.sock,
-            stop_tx,
+            self.stop_tx.clone(),
             self.cred.clone(),
             self.alg.clone(),
             self.handshake_timeout,
@@ -74,7 +75,7 @@ impl Runtime {
                     Err(RuntimeError::Unexpected(err.to_string()))
                 }
             },
-            err = stop_rx.recv() => return match err {
+            err = self.stop_tx.subscribe().recv() => return match err {
                 Ok(err) => Err(err),
                 Err(err) => {
                     let msg = format!("stop channel is closed: {err}");
