@@ -5,12 +5,16 @@ use thiserror::Error;
 pub enum RuntimeError {
     #[error("IO: {0}")]
     IO(String),
+    #[error("Tun: {0}")]
+    Tun(String),
     #[error("Handshake: {0}")]
     Handshake(String),
     #[error("Disconnect: {0}")]
     Disconnect(String),
     #[error("Unexpected: {0}")]
-    Unexpected(String)
+    Unexpected(String),
+    #[error("StopSignal")]
+    StopSignal
 }
 
 impl From<std::io::Error> for RuntimeError {
