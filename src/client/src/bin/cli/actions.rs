@@ -50,12 +50,13 @@ pub async fn connect(config_path: Option<PathBuf>, key: Option<String>) -> anyho
     let stop_tx = runtime.stop_tx.clone();
 
     ctrlc::set_handler(move || {
+        println!("Ctrl-C received, stopping runtime...");
         stop_tx.send(RuntimeError::StopSignal).unwrap();
         thread::sleep(Duration::from_secs(3));
-        process::exit(0);
+        process::exit(0); // todo
     }).expect("error setting Ctrl-C handler");
     
     runtime.run().await.map_err(
-        |err| anyhow::anyhow!("Runtime error: {}", err)
+        |err| anyhow::anyhow!("{}", err)
     )
 }

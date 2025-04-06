@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
-use log::{info, warn};
+use tracing::{info, warn};
 use std::process::Command;
 use pnet::datalink;
 

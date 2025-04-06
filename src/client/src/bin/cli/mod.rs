@@ -5,18 +5,16 @@ use clap::Parser;
 use std::process;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{fmt, Layer};
-use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use crate::schema::{Cli, Commands};
 
 const LOG_DIR: &str = "logs";
-const LOG_PREFIX: &str = "storage.log";
+const LOG_PREFIX: &str = "client.log";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let args = Cli::parse();
-    args.debug.then(|| log::set_max_level(log::LevelFilter::Debug));
     match args.command {
         Commands::Connect { config, key } => {
             let log_level = LevelFilter::from_level(if args.debug {
