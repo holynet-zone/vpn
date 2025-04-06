@@ -19,6 +19,21 @@ impl<const SIZE: usize> Key<SIZE> {
         OsRng.fill_bytes(&mut key);
         Self(key)
     }
+    
+    pub fn to_hex(&self) -> String {
+        self.0.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+    
+    pub fn from_hex(hex: &str) -> Result<Self, anyhow::Error> {
+        if hex.len() != SIZE * 2 {
+            return Err(anyhow::anyhow!("invalid key size, expected {} but actual {}", SIZE * 2, hex.len()));
+        }
+        let mut key = [0u8; SIZE];
+        for (i, byte) in hex.as_bytes().chunks(2).enumerate() {
+            key[i] = u8::from_str_radix(std::str::from_utf8(byte)?, 16)?;
+        }
+        Ok(Self(key))
+    }
 }
 
 impl<const SIZE: usize> Deref for Key<SIZE> {
@@ -28,11 +43,11 @@ impl<const SIZE: usize> Deref for Key<SIZE> {
 }
 
 impl<const SIZE: usize> TryFrom<&[u8]> for Key<SIZE> {
-    type Error = String;
+    type Error = anyhow::Error;
 
     fn try_from(slice: &[u8]) -> Result<Self, Self::Error> {
         if slice.len() != SIZE {
-            return Err(format!("invalid key size, expected {}", SIZE));
+            return Err(anyhow::anyhow!("invalid key size, expected {}", SIZE));
         }
         let mut key = [0u8; SIZE];
         key.copy_from_slice(slice);
@@ -41,10 +56,10 @@ impl<const SIZE: usize> TryFrom<&[u8]> for Key<SIZE> {
 }
 
 impl<const SIZE: usize> TryFrom<&str> for Key<SIZE> {
-    type Error = String;
+    type Error = anyhow::Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let bytes = STANDARD_NO_PAD.decode(value).map_err(|error| error.to_string())?;
+        let bytes = STANDARD_NO_PAD.decode(value)?;
         Self::try_from(bytes.as_slice())
     }
 }
@@ -94,7 +109,7 @@ impl<'de, const SIZE: usize> Deserialize<'de> for Key<SIZE> {
         };
 
         if bytes.len() != SIZE {
-            return Err(de::Error::custom(format!("Key must be {} bytes", SIZE)));
+            return Err(de::Error::custom(format!("key must be {} bytes", SIZE)));
         }
 
         let mut key = [0u8; SIZE];
