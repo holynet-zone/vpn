@@ -94,7 +94,7 @@ impl Runtime {
 
         let mut handles = Vec::new();
         
-        for worker_id in 0..self.workers {
+        for worker_id in 1..self.workers + 1 {
             let addr = self.sock;
             let stop_tx = self.stop_tx.clone();
             let sessions = self.sessions.clone();
@@ -151,7 +151,7 @@ impl Runtime {
         
         let mut stop_rx = self.stop_tx.subscribe();
 
-        if let Ok(err) = stop_rx.try_recv() {
+        if let Ok(err) = stop_rx.recv().await {
             return Err(err);
         }
 
