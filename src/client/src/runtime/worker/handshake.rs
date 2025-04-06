@@ -1,10 +1,6 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use snow::{Builder, HandshakeState, StatelessTransportState};
-use snow::params::NoiseParams;
 use tokio::net::UdpSocket;
 use tracing::warn;
 use shared::client::packet::{Handshake, Packet};
@@ -15,7 +11,7 @@ use shared::handshake::{
 };
 use shared::server;
 use shared::server::packet::{HandshakeBody, HandshakePayload};
-use shared::session::{Alg, SessionId};
+use shared::session::Alg;
 use super::super::{
     error::RuntimeError
 };

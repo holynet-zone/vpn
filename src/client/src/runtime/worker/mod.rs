@@ -5,9 +5,7 @@ use std::{
     net::SocketAddr,
     sync::Arc
 };
-use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr};
-use std::pin::Pin;
 use std::time::Duration;
 use anyhow::Error;
 use socket2::{Domain, Protocol, Socket, Type};
@@ -140,7 +138,7 @@ pub(crate) async fn create(
     let mut stop_rx = stop_tx.subscribe();
     tokio::select! {
         _ = stop_rx.recv() => {
-            gw.delete()
+            gw.delete();
             info!("listener stopped")
         }
     }

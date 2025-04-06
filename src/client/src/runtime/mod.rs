@@ -2,24 +2,18 @@ pub mod error;
 mod worker;
 mod tun;
 
-use std::{
-    future::Future,
-    net::{IpAddr, SocketAddr},
-    pin::Pin
-};
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use self::{
     error::RuntimeError,
 };
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tracing::{error, warn};
 use shared::{
     credential::Credential,
     session::Alg
 };
-use crate::network::DefaultGateway;
 
 pub struct Runtime {
     sock: SocketAddr,
@@ -62,6 +56,8 @@ impl Runtime {
             self.keepalive.clone()
         );
         
+        let mut stop_rx = self.stop_tx.subscribe();
+        
         tokio::select! {
             resp = worker => match resp {
                 Ok(_) => {
@@ -75,7 +71,7 @@ impl Runtime {
                     Err(RuntimeError::Unexpected(err.to_string()))
                 }
             },
-            err = self.stop_tx.subscribe().recv() => return match err {
+            err = stop_rx.recv() => return match err {
                 Ok(err) => Err(err),
                 Err(err) => {
                     let msg = format!("stop channel is closed: {err}");
