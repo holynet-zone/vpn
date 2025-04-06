@@ -1,29 +1,9 @@
 use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr};
 use tracing::{info, warn};
 use std::process::Command;
 use pnet::datalink;
 
-pub fn enable_ipv4_forwarding() -> Result<(), String> {
-    let sysctl_arg = if cfg!(target_os = "linux") {
-        "net.ipv4.ip_forward=1"
-    } else if cfg!(target_os = "macos") {
-        "net.inet.ip.forwarding=1"
-    } else {
-        unimplemented!()
-    };
-    info!("Enabling IPv4 Forwarding.");
-    let status = Command::new("sysctl")
-        .arg("-w")
-        .arg(sysctl_arg)
-        .status()
-        .unwrap();
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("sysctl: {}", status))
-    }
-}
 
 pub enum RouteType {
     Net,

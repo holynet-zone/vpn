@@ -17,8 +17,10 @@ use self::{
 use tokio::runtime::Builder;
 use tokio::sync::{broadcast};
 use crate::config::Config;
-use shared::keys::handshake::{PublicKey, SecretKey};
-use crate::runtime::tun::set_ipv4_forwarding;
+use shared::{
+    keys::handshake::{PublicKey, SecretKey},
+    network::set_ipv4_forwarding
+};
 use crate::storage::Client;
 
 pub struct Runtime {

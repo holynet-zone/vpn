@@ -4,6 +4,7 @@ use crate::{config, network, CONFIG_PATH_ENV};
 use std::path::{Path, PathBuf};
 use std::{process, thread};
 use std::time::Duration;
+use shared::network::find_available_ifname;
 use crate::runtime::error::RuntimeError;
 
 pub async fn start(
@@ -41,7 +42,7 @@ pub async fn start(
     if let Some(interface) = interface {
         config.interface.name = interface;
     } else {
-        config.interface.name = network::find_available_ifname("holynet"); // todo undefined behavior
+        config.interface.name = find_available_ifname("holynet"); // todo undefined behavior
     }
 
     if let Err(err) = config.save(path.as_path()) {

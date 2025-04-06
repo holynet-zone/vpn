@@ -1,27 +1,7 @@
-use std::collections::HashSet;
-use std::net::IpAddr;
 use etherparse::SlicedPacket;
-use pnet::datalink;
+use std::net::IpAddr;
 use tun_rs::IntoAddress;
 
-pub fn find_available_ifname(base_name: &str) -> String {
-    let interfaces = datalink::interfaces();
-
-    let existing_names: HashSet<String> = interfaces
-        .into_iter()
-        .map(|iface| iface.name)
-        .collect();
-
-    let mut index = 0;
-    loop {
-        let candidate = format!("{}{}", base_name, index);
-        if !existing_names.contains(&candidate) {
-            return candidate;
-        }
-
-        index += 1;
-    }
-}
 
 pub fn parse_source(packet: &[u8]) -> anyhow::Result<IpAddr> {
     match SlicedPacket::from_ip(&packet) {
@@ -40,6 +20,6 @@ pub fn parse_source(packet: &[u8]) -> anyhow::Result<IpAddr> {
             },
             None => Err(anyhow::anyhow!("failed to parse IP packet: missing network layer"))
         },
-        Err(error) => Err(anyhow::anyhow!(error))
+        Err(error) => Err(anyhow::Error::from(error))
     }
 }

@@ -41,7 +41,6 @@ pub async fn add(
         }
     };
     
-    
     let host = if host.is_some() { host.unwrap() } else {
         inquire::Text::new("Enter a server host:")
             .with_default(&config.general.host)
@@ -67,9 +66,7 @@ pub async fn add(
     } else {
         SecretKey::generate_x25519()
     };
-    println!("Private key {}", format_opaque_bytes(sk.as_slice()));
     let pk = PublicKey::derive_from(sk.clone());
-    println!("Public key {}", pk);
     let psk = if psk.is_some() {
         SecretKey::try_from(psk.unwrap().as_str()).map_err(|error| {
             anyhow::anyhow!("failed to parse pre-shared key: {}", error)
@@ -77,6 +74,11 @@ pub async fn add(
     } else {
         SecretKey::generate_x25519()
     };
+
+    println!("\nClient has been successfully created!");
+    
+    println!("\nPublic key {}", pk.to_hex());
+    println!("Private key {}", format_opaque_bytes(sk.as_slice()));
     println!("Pre-shared key {}", format_opaque_bytes(psk.as_slice()));
     
     let clients = Clients::new(database(&*config.general.storage)?);
@@ -85,8 +87,6 @@ pub async fn add(
         peer_pk: PublicKey::derive_from(sk.clone()),
         created_at: chrono::Utc::now(),
     }).await;
-    
-    println!("\nClient has been successfully created!");
     
     let connection_config = ConnectionConfig {
         general: General {
@@ -103,7 +103,7 @@ pub async fn add(
         runtime: None,
     };
 
-    println!("\nConnection key:\n\t{}", connection_config.to_base64()?);
+    println!("\nConnection key\n{}", connection_config.to_base64()?);
     
     let config_path = PathBuf::from(format!(
         "connection-{}.toml", 
@@ -114,7 +114,7 @@ pub async fn add(
         anyhow::anyhow!("failed to save connection config: {}", error)
     })?;
     
-    println!("Connection config:\n\t{}", config_path.display());
+    println!("\nConnection config saved as {}\n", config_path.display());
     Ok(())
 }
 

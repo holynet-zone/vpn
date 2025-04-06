@@ -1,7 +1,6 @@
-use std::net::IpAddr;
-use serde::{Deserialize, Serialize};
-use crate::keys::handshake::{PublicKey, SecretKey};
 use crate::session::SessionId;
+use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 
 #[derive(Serialize, Deserialize)]
 pub struct Handshake {
