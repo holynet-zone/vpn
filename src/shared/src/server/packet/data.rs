@@ -1,6 +1,5 @@
 use crate::server::packet::keepalive::KeepAliveBody;
 use serde::{Deserialize, Serialize};
-use snow::StatelessTransportState;
 
 #[derive(Serialize, Deserialize)]
 pub struct DataPacket {
