@@ -1,6 +1,5 @@
 pub mod schema;
-pub mod user;
-pub mod start;
 mod style;
+pub mod actions;
 
 pub use style::render_config;

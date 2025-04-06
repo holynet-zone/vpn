@@ -5,11 +5,10 @@ use shared::keys::handshake::SecretKey;
 
 #[derive(Serialize, Deserialize)]
 pub struct General {
-    pub debug: bool,
-    pub host: IpAddr,
+    pub host: String,
     pub port: u16,
     pub secret_key: SecretKey,
-    pub storage_path: PathBuf,
+    pub storage: PathBuf,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -46,11 +45,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             general: General {
-                debug: false,
-                host: IpAddr::from([0, 0, 0, 0]),
+                host: IpAddr::from([0, 0, 0, 0]).to_string(),
                 port: 26256,
                 secret_key: SecretKey::generate_x25519(),
-                storage_path: PathBuf::from("database"),
+                storage: PathBuf::from("database"),
             },
             interface: Interface {
                 name: "holynet0".into(),
@@ -59,14 +57,14 @@ impl Default for Config {
                 prefix: 24,
             },
             runtime: Runtime {
-                workers: 0,
+                workers: 0, // auto
                 sender_buf_size: 1000,
-                session_ttl: 0,
+                session_ttl: 0, // turn off
             },
             redirect: Some(Redirect {
                 enabled: false,
                 interfaces: vec![],
-            }),
+            })
         }
     }
 }
@@ -77,7 +75,7 @@ impl Config {
         Ok(toml::from_str(&config)?)
     }
 
-    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let config = toml::to_string(self)?;
         std::fs::write(path, &config)?;
         Ok(())
