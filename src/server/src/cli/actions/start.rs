@@ -19,9 +19,15 @@ pub async fn start(
                 println!("loading configuration from env: {}", path);
                 anyhow::anyhow!("failed to load configuration from env: {}", error)
             })?, PathBuf::from(path)),
-            Err(_) => {
-                println!("no configuration provided, using default config");
-                (config::Config::default(), PathBuf::from("config.toml"))
+            Err(_) => match Path::new("config.toml").exists() {
+                true => (config::Config::load(Path::new("config.toml")).map_err(|error| {
+                    println!("loading configuration from file: config.toml");
+                    anyhow::anyhow!("failed to load configuration from file: {}", error)
+                })?, PathBuf::from("config.toml")),
+                false => {
+                    println!("no configuration provided, using default config");
+                    (config::Config::default(), PathBuf::from("config.toml"))
+                }
             }
         }
     };
@@ -56,6 +62,6 @@ pub async fn start(
     }).expect("error setting Ctrl-C handler");
     
     runtime.run().await.map_err(|error| {
-        anyhow::anyhow!("Runtime error: {}", error)
+        anyhow::anyhow!("Runtime: {}", error) // todo dead code
     })
 }
