@@ -6,9 +6,10 @@ use super::style::styles;
 
 
 #[derive(Clone, Display)]
-#[display("{}", username)]
+#[display("{}\tcreated at {}", pk, created_at)]
 pub struct UserRow {
-    pub username: String
+    pub pk: String,
+    pub created_at: String,
 }
 
 
@@ -19,8 +20,11 @@ pub struct Cli {
     #[arg(short, long, default_value = "false")]
     pub debug: bool,
 
+    #[arg(short, long, value_name = "FILE")]
+    pub config: Option<PathBuf>,
+
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Commands
 }
 
 #[derive(Subcommand)]
@@ -34,13 +38,7 @@ pub enum Commands {
         #[arg(short, long)]
         port: Option<u16>,
         #[arg(short, long)]
-        iface: Option<String>,
-        #[arg(short, long, value_name = "FILE")]
-        config: Option<PathBuf>,
-        #[arg(short, long, value_name = "FILE")]
-        storage: Option<PathBuf>,
-        #[arg(short, long, default_value = "false")]
-        daemon: bool,
+        iface: Option<String>
     },
     /// Users management
     Users {
@@ -62,24 +60,26 @@ pub enum Commands {
 pub enum UsersCommands {
     /// Add a new user
     Add {
-        /// username
         #[arg(short, long)]
-        username: Option<String>,
-        /// password
-        #[arg(short, long)]
-        password: Option<String>,
-        #[arg(short, long)]
+        /// server host
         host: Option<String>,
         #[arg(short, long)]
-        port: Option<u16>
+        /// server port
+        port: Option<u16>,
+        /// secret key (hex)
+        #[arg(short, long)]
+        sk: Option<String>,
+        /// pre shared key (hex)
+        #[arg(short, long)]
+        psk: Option<String>
     },
     /// List all users
     List,
     /// Remove a user
     Remove {
-        /// username
+        /// public key (hex)
         #[arg(short, long)]
-        username: String,
+        pk: String,
     },
 }
 

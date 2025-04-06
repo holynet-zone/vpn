@@ -4,8 +4,12 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-sunbeam =  { workspace = true}
+snow = "0.9"
 serde = { version = "1.0.217", features = ["derive"] }
 base64 = "0.22.1"
 toml = "0.8.19"
 bincode = "1.3.*"
+rand_core = "0.6.4"
+lazy_static = "1.5.0"
+anyhow = "1.0.97"
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }

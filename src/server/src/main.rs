@@ -1,30 +1,25 @@
 mod config;
 mod runtime;
-mod session;
-mod daemon;
 mod network;
-mod client;
+mod storage;
 mod cli;
 
-use std::process;
-use tracing::error;
-use tracing_subscriber::{fmt, filter, reload, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender;
+use tracing_subscriber::{filter, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt};
 
-use clap::Parser;
-use rocksdb::DB;
 use crate::cli::render_config;
-use crate::client::single::Clients;
+use clap::Parser;
 
 const CONFIG_PATH_ENV: &str = "CONFIG_PATH";
-const STORAGE_PATH_ENV: &str = "STORAGE_PATH";
+const LOG_DIR: &str = "logs";
+const LOG_PREFIX: &str = "server.log";
 
-
-fn main() {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> anyhow::Result<()> {
     let cli = cli::schema::Cli::parse();
     inquire::set_global_render_config(render_config());
 
-    let file_appender = tracing_appender::rolling::daily("logs", "server.log");
+    let file_appender = tracing_appender::rolling::daily(LOG_DIR, LOG_PREFIX);
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let filter = filter::LevelFilter::INFO;
     let (filter, reload_handle) = reload::Layer::new(filter);
@@ -43,57 +38,31 @@ fn main() {
         cli::schema::Commands::Start { 
             host, 
             port, 
-            iface, 
-            config, 
-            storage, 
-            daemon 
-        } => cli::start::start(
+            iface
+        } => cli::actions::start(
             host,
             port,
             iface,
-            config,
-            storage,
-            daemon
-        ),
-        cli::schema::Commands::Users { commands } => {
-            let storage_path = std::env::var(STORAGE_PATH_ENV).unwrap_or_else(|_| "database".to_string()); // todo: from --storage
-            let mut opts = rocksdb::Options::default();
-            opts.create_if_missing(true);
-            let db = DB::open(&opts, storage_path).map_err(|error| {
-                error!("Failed to open the database: {}", error);
-                process::exit(1);
-            }).unwrap();
-            let clients = Clients::new(db);
-            match commands {
-                cli::schema::UsersCommands::Add {
-                    username,
-                    password,
-                    host,
-                    port
-                } => cli::user::add(
-                    &clients,
-                    username,
-                    password,
-                    host,
-                    port
-                ).map_err(|error| {
-                    error!("Failed to add user: {}", error);
-                    process::exit(1);
-                }).unwrap(),
-                cli::schema::UsersCommands::Remove { username } => cli::user::remove(
-                    &clients,
-                    username
-                ),
-                cli::schema::UsersCommands::List => {
-                    let raw_list = cli::user::list(&clients);
-                    if raw_list.is_empty() {
-                        println!("No users found");
-                        process::exit(1);
-                    } else {
-                        println!("{}", raw_list);
-                    }
-                }
-            }
+            cli.config
+        ).await,
+        cli::schema::Commands::Users { commands } => match commands {
+            cli::schema::UsersCommands::Add {
+                host,
+                port,
+                sk,
+                psk,
+            } => cli::actions::add(
+                cli.config,
+                host,
+                port,
+                sk,
+                psk
+            ).await,
+            cli::schema::UsersCommands::Remove { pk } => cli::actions::remove(
+                cli.config,
+                pk
+            ).await,
+            cli::schema::UsersCommands::List => cli::actions::list(cli.config).await,
         },
         cli::schema::Commands::Monitor => unimplemented!("Monitor command is not implemented"),
         cli::schema::Commands::Logs => unimplemented!("Logs command is not implemented"),

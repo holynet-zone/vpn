@@ -4,37 +4,40 @@ version = "0.1.0"
 edition = { workspace = true }
 
 [dependencies]
-sunbeam = { workspace = true }
 shared = { workspace = true }
-tun = { workspace = true }
-mio = { workspace = true }
 clap = { version = "4.5.*", features = ["cargo", "color", "derive"] }
-pnet = "0.35.*"
+inquire = "0.7.*"
+anstyle = "1.0.10"
+ctrlc = "3.4"
 
 # data
 chrono = { workspace = true }
-serde = { workspace = true}
 etherparse = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
+anyhow = "1.0.97"
+thiserror = "1.0.69"
+dashmap = "7.0.0-rc2"
+bincode = "=1.3.3"
+derive_more = { version = "1.0.*", features = ["display"] }
+toml = "0.8.19"
+serde-big-array = "0.5.*"
+serde_json = "1.0.133"
 
 # logging
-log = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
-toml = "0.8.19"
+
+
+# Crypto
+snow = "0.9"
+
+# IO
+pnet = "0.35.*"
 rocksdb = { version = "0.23.*", features = ["multi-threaded-cf"] }
-bincode = "1.3.3"
-serde-big-array = "0.5.*"
-rand = "0.9.0-beta.1"
-daemonize = "0.5.*"
-thiserror = "2.0.9"
-serde_json = "1.0.133"
-inquire = "0.7.*"
-derive_more = { version = "1.0.*", features = ["display"] }
-base64 = "0.22.1"
-tokio = { version = "1.43.*", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
 tun-rs = { version = "1.5", features = ["async_tokio"] }
+tokio = { version = "1.43", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2", "net"] }
 socket2 = "0.5.8"
-anyhow = "1.0.95"
-async-trait = "0.1.85"
-anstyle = "1.0.10"
+async-trait = "0.1"
+hex = "0.4.3"
