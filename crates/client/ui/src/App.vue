@@ -9,7 +9,7 @@ const route = useRoute()
     <RouterView />
   </main>
   <footer class="no-selectable">
-<!--    <img src="@/assets/icon.svg" alt="Holynet VPN" >-->
+<!--    <img crates="@/assets/icon.svg" alt="Holynet VPN" >-->
     <RouterLink to="/">
       <span :class="['nav-icon', { 'active': route.path === '/' }]">Home</span>
     </RouterLink>

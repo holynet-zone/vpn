@@ -1,16 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "src/client",
-    "src/server",
-    "src/shared"
+    "crates/client",
+    "crates/server",
+    "crates/shared"
 ]
 
 [workspace.package]
+version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies]
-shared = { path = "src/shared" }
+shared = { path = "crates/shared" }
 
 # data
 chrono = { version = "0.4", features = ["serde"] }
