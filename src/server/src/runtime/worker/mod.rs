@@ -31,7 +31,7 @@ pub(crate) async fn create(
     sk: SecretKey,
     tun: Arc<AsyncDevice>,
     worker_id: usize 
-) -> anyhow::Result<()> {
+) -> Result<(), RuntimeError> {
     let socket = Socket::new(
         Domain::for_address(addr),
         Type::DGRAM,

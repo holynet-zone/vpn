@@ -135,9 +135,9 @@ impl Runtime {
         for handle in handles {
             if let Err(err) = handle.join().unwrap_or_else(|e| {
                 tracing::error!("panic in worker thread: {:?}", e);
-                Err(anyhow::anyhow!("panic in worker thread: {:?}", e))
+                Err(RuntimeError::Unexpected(format!("panic in worker thread: {:?}", e)))
             }) {
-                errors.push(RuntimeError::Unexpected(err.to_string()));
+                errors.push(err);
             }
         }
 

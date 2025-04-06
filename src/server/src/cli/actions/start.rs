@@ -62,6 +62,6 @@ pub async fn start(
     }).expect("error setting Ctrl-C handler");
     
     runtime.run().await.map_err(|error| {
-        anyhow::anyhow!("Runtime: {}", error) // todo dead code
+        anyhow::anyhow!("Runtime: {}", error)
     })
 }
