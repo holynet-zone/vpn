@@ -66,17 +66,14 @@ impl Runtime {
                     Ok(())
                 },
                 Err(err) => {
-                    let msg = format!("worker result with unexpected error: {err}");
-                    error!(msg);
-                    Err(RuntimeError::Unexpected(err.to_string()))
+                    error!("worker result with error");
+                    Err(err)
                 }
             },
             err = stop_rx.recv() => return match err {
                 Ok(err) => Err(err),
                 Err(err) => {
-                    let msg = format!("stop channel is closed: {err}");
-                    error!(msg);
-                    Err(RuntimeError::Unexpected(msg))
+                    Err(RuntimeError::IO(format!("stop channel is closed: {err}")))
                 }
             }
         }

@@ -7,7 +7,6 @@ use std::{
 };
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
-use anyhow::Error;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, mpsc};
@@ -33,7 +32,7 @@ pub(crate) async fn create(
     alg: Alg,
     handshake_timeout: Duration,
     keepalive: Option<Duration>,
-) -> anyhow::Result<()> {
+) -> Result<(), RuntimeError> {
     let socket = Socket::new(
         Domain::for_address(addr),
         Type::DGRAM,
@@ -51,14 +50,6 @@ pub(crate) async fn create(
     let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(1000);
     let (data_udp_tx, data_udp_rx) = mpsc::channel::<server::packet::DataPacket>(1000);
     let (data_tun_tx, data_tun_rx) = mpsc::channel::<Vec<u8>>(1000);
-
-
-    // Handle incoming UDP packets
-    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), data_udp_tx));
-
-    // Handle outgoing UDP packets
-    tokio::spawn(udp_sender(stop_tx.subscribe(), socket.clone(), udp_sender_rx));
-
     
     // Handshake step
     let (handshake_payload, state) = match tokio::spawn(handshake_step(
@@ -66,14 +57,21 @@ pub(crate) async fn create(
         cred,
         alg,
         handshake_timeout
-    )).await? {
+    )).await.unwrap() { // todo unwrap
         Ok((p, state)) => (p, Arc::new(state)),
         Err(err) => {
             stop_tx.send(err.clone())?;
-            return Err(Error::from(err));
+            return Err(err);
         }
     };
-    
+
+    // Handle incoming UDP packets
+    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), data_udp_tx));
+
+    // Handle outgoing UDP packets
+    tokio::spawn(udp_sender(stop_tx.subscribe(), socket.clone(), udp_sender_rx));
+
+
     // Executors
     tokio::spawn(data_tun_executor(
         stop_tx.clone(),

@@ -63,7 +63,7 @@ pub(super) async fn data_udp_executor(
                         continue;
                     }
                 },
-                None => panic!("data_receiver channel is closed")
+                None => return
             }
         }
     }
@@ -91,7 +91,7 @@ pub(super) async fn data_tun_executor(
                         )).unwrap();
                     }
                 },
-                None => panic!("data_sender channel is closed")
+                None => return
             }
         }
     }
