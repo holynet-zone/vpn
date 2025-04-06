@@ -3,45 +3,49 @@ mod actions;
 
 use clap::Parser;
 use std::process;
-use tracing_subscriber::fmt;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::{fmt, Layer};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use crate::schema::{Cli, Commands};
 
 const LOG_DIR: &str = "logs";
-const LOG_PREFIX: &str = "client.log";
+const LOG_PREFIX: &str = "storage.log";
 
-
-fn main() {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
     let args = Cli::parse();
     args.debug.then(|| log::set_max_level(log::LevelFilter::Debug));
     match args.command {
         Commands::Connect { config, key } => {
-            let log_level = if args.debug {
+            let log_level = LevelFilter::from_level(if args.debug {
                 tracing::Level::DEBUG
             } else {
                 tracing::Level::INFO
-            };
+            });
             
             let file_appender = tracing_appender::rolling::daily(LOG_DIR, LOG_PREFIX);
             let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+            let file_layer = fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .with_filter(log_level);
+
+            let console_layer = fmt::layer()
+                .with_ansi(true)
+                .with_filter(log_level);
+
             tracing_subscriber::registry()
-                .with(fmt::layer()
-                          .with_writer(non_blocking)
-                          .with_ansi(false)
-                          .with_max_level(log_level)
-                )
-                .with(fmt::layer()
-                    .with_ansi(true)
-                    .with_max_level(log_level)
-                )
+                .with(file_layer)
+                .with(console_layer)
                 .init();
             
-            actions::connect(config, key).map_err(|error| {
-                eprintln!("{}", error);
+            if let Err(err ) = actions::connect(config, key).await {
+                eprintln!("{}", err);
                 process::exit(1);
-            }).unwrap();
+            }
         }
     }
 }

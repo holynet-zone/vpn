@@ -6,7 +6,7 @@ use client::runtime::Runtime;
 use shared::connection_config::ConnectionConfig;
 use shared::credential::Credential;
 
-pub fn connect(config_path: Option<PathBuf>, key: Option<String>) -> anyhow::Result<()> {
+pub async fn connect(config_path: Option<PathBuf>, key: Option<String>) -> anyhow::Result<()> {
     if config_path.is_some() && key.is_some() {
         return Err(anyhow::anyhow!("config and key cannot be used together"));
     }
@@ -55,5 +55,7 @@ pub fn connect(config_path: Option<PathBuf>, key: Option<String>) -> anyhow::Res
         process::exit(0);
     }).expect("error setting Ctrl-C handler");
     
-    runtime.run()
+    runtime.run().await.map_err(
+        |err| anyhow::anyhow!("Runtime error: {}", err)
+    )
 }
