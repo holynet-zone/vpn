@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct KeepAliveBody {
     server_time: u128,
-    client_time: u128
+    pub client_time: u128
 }
 
 impl KeepAliveBody {

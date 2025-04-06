@@ -21,7 +21,7 @@ pub struct Handshake {
 //     // then the user password would have to be reissued on the server side
 //     //
 //     // The `guard` field of the `EncAlg` type in this context means the encryption type
-//     // that the server will use for further communication with the client once
+//     // that the server will use for further communication with the storage once
 //     // the connection is successfully established and the payload flow begins.
 //     // It does not mean the encryption type for authentication!
 //     //

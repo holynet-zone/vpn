@@ -7,7 +7,8 @@ pub use self::{
     handshake::{
         Handshake,
         HandshakeBody,
-        HandshakeError
+        HandshakeError,
+        HandshakePayload
     },
     data::{
         DataPacket,

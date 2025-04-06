@@ -6,7 +6,6 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 
-pub mod session;
 pub mod handshake;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
