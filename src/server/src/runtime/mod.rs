@@ -4,24 +4,22 @@ pub mod error;
 mod tun;
 
 use std::{
-    future::Future,
     net::{IpAddr, SocketAddr},
-    pin::Pin,
     thread
 };
-use std::path::Path;
 use std::sync::Arc;
 use dashmap::DashMap;
 use self::{
     error::RuntimeError,
-    session::{Session, Sessions}
+    session::{ Sessions}
 };
 
 use tokio::runtime::Builder;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast};
 use crate::config::Config;
 use shared::keys::handshake::{PublicKey, SecretKey};
 use crate::runtime::tun::set_ipv4_forwarding;
+use crate::storage::Client;
 
 pub struct Runtime {
     sock: SocketAddr,
@@ -36,34 +34,21 @@ pub struct Runtime {
     tun_name: String,
     tun_mtu: u16,
     tun_ip: IpAddr,
-    tun_prefix: u8
+    tun_prefix: u8,
+    // stop signal
+    pub stop_tx: broadcast::Sender<RuntimeError>,
 }
 
 impl Runtime {
-    // pub fn new(addr: IpAddr, port: u16, sk: SecretKey) -> Self {
-    //     Self {
-    //         sock: SocketAddr::new(addr, port),
-    //         sk,
-    //         workers: thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
-    //         known_clients: Default::default(),
-    //         sessions: Sessions::new(),
-    //         session_ttl: 0, // inf
-    //         sender_buf_size: 1000,
-    //         tun_name: "holynet0".into(),
-    //         tun_mtu: 1500,
-    //         tun_ip: addr,
-    //         tun_prefix: 24
-    //     }
-    // }
-    // 
-    pub fn from_config(path: &Path) -> Result<Self, RuntimeError> {
-        let config = Config::load(path).map_err(
-            |err| RuntimeError::IO(format!("failed to load config: {}", err))
-        )?;
+
+    pub fn from_config(config: Config) -> Result<Self, RuntimeError> {
+        let (stop_tx, _) = broadcast::channel::<RuntimeError>(5);
 
         Ok(Self {
             sock: SocketAddr::new(
-                config.general.host, 
+                config.general.host.parse().map_err(
+                    |err| RuntimeError::Unexpected(format!("invalid host: {}", err))
+                )?,
                 config.general.port
             ),
             sk: config.general.secret_key,
@@ -79,8 +64,16 @@ impl Runtime {
             tun_name: config.interface.name,
             tun_mtu: config.interface.mtu,
             tun_ip: config.interface.address,
-            tun_prefix: config.interface.prefix
+            tun_prefix: config.interface.prefix,
+            stop_tx,
         })
+    }
+    
+    pub fn insert_clients(&mut self, clients: Vec<Client>) {
+        self.known_clients = Arc::new(DashMap::from_iter(
+            clients.into_iter()
+                .map(|client| (client.peer_pk, client.psk))
+        ));
     }
     
     pub async fn run(&mut self) -> Result<(), RuntimeError> {
@@ -99,12 +92,11 @@ impl Runtime {
             &self.tun_prefix
         ).await?);
 
-        let (stop_tx, mut stop_rx) = broadcast::channel::<RuntimeError>(5);
         let mut handles = Vec::new();
         
         for worker_id in 0..self.workers {
             let addr = self.sock;
-            let stop_tx = stop_tx.clone();
+            let stop_tx = self.stop_tx.clone();
             let sessions = self.sessions.clone();
             let sk = self.sk.clone();
             let known_clients = self.known_clients.clone();
@@ -156,6 +148,8 @@ impl Runtime {
                 format!("{} workers critical failed: {:?}", errors.len(), errors)
             ))
         }
+        
+        let mut stop_rx = self.stop_tx.subscribe();
 
         if let Ok(err) = stop_rx.try_recv() {
             return Err(err);

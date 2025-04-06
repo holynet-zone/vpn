@@ -5,10 +5,7 @@ use std::{
     net::SocketAddr,
     sync::Arc
 };
-use std::future::Future;
-use std::pin::Pin;
 use dashmap::DashMap;
-use etherparse::SlicedPacket;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, mpsc};
@@ -199,14 +196,20 @@ async fn tun_listener(
         buffer.fill(0);
         tokio::select! {
             _ = stop.recv() => break,
-            len = tun.recv(&mut buffer) => match parse_source(&buffer[..len]) {
-                Ok(ip) => {
-                    if let Err(e) = data_tun_tx.send((buffer[..len].to_vec(), ip)).await {
-                        error!("failed to send data to tun executor: {}", e);
+            result = tun.recv(&mut buffer) => match result {
+                Ok(len) => match parse_source(&buffer[..len]) {
+                    Ok(ip) => {
+                        if let Err(e) = data_tun_tx.send((buffer[..len].to_vec(), ip)).await {
+                            error!("failed to send data to tun executor: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        warn!("failed to parse tun packet: {}", e);
+                        continue;
                     }
                 },
                 Err(e) => {
-                    warn!("failed to parse tun packet: {}", e);
+                    error!("failed to receive tun packet: {}", e); // todo add stop signal
                     continue;
                 }
             }
@@ -224,7 +227,7 @@ async fn tun_listener(
 //         mpsc,
 //         broadcast
 //     };
-//     use crate::{client, server};
+//     use crate::{storage, server};
 //     use crate::keys::handshake::{PublicKey, SecretKey};
 //     use crate::server::error::RuntimeError;
 //     use crate::server::packet::{DataBody, Packet};
@@ -252,8 +255,8 @@ async fn tun_listener(
 // 
 //         let (stop_tx, _) = broadcast::channel::<RuntimeError>(1);
 //         let (out_udp_tx, mut out_udp_rx) = mpsc::channel::<(server::packet::Packet, SocketAddr)>(1000);
-//         let (handshake_tx, handshake_rx) = mpsc::channel::<(client::packet::Handshake, SocketAddr)>(1000);
-//         let (data_tx, data_rx) = mpsc::channel::<(client::packet::DataPacket, SocketAddr)>(1000);
+//         let (handshake_tx, handshake_rx) = mpsc::channel::<(storage::packet::Handshake, SocketAddr)>(1000);
+//         let (data_tx, data_rx) = mpsc::channel::<(storage::packet::DataPacket, SocketAddr)>(1000);
 // 
 //         let sessions = server::session::Sessions::new();
 //         let known_clients = std::sync::Arc::new(dashmap::DashMap::new());
@@ -279,15 +282,15 @@ async fn tun_listener(
 //                 std::sync::Arc::new(|req| {
 //                     Box::pin(async move {
 //                         match req.body {
-//                             client::packet::DataBody::Payload(bytes) => {
+//                             storage::packet::DataBody::Payload(bytes) => {
 //                                 println!("server handle {} bytes payload, sid: {}", bytes.len(), req.sid);
 //                                 Response::Data(DataBody::Payload(vec![1, 2, 3]))
 //                             },
-//                             client::packet::DataBody::KeepAlive(body) => {
+//                             storage::packet::DataBody::KeepAlive(body) => {
 //                                 println!("server handle keepalive owd {} sid {}", body.owd(), req.sid);
 //                                 Response::None
 //                             },
-//                             client::packet::DataBody::Disconnect => {
+//                             storage::packet::DataBody::Disconnect => {
 //                                 println!("server handle Disconnect");
 //                                 Response::None
 //                             }
@@ -298,8 +301,8 @@ async fn tun_listener(
 //         ));
 // 
 //         // [step 1] Client Initial
-//         let handshake_body = client::packet::HandshakeBody {};
-//         let (handshake, handshake_state) = client::packet::Handshake::initial(
+//         let handshake_body = storage::packet::HandshakeBody {};
+//         let (handshake, handshake_state) = storage::packet::Handshake::initial(
 //             &handshake_body,
 //             client_alg,
 //             &client_sk,
@@ -320,13 +323,13 @@ async fn tun_listener(
 //         };
 //         let sid = match handshake_body {
 //             server::packet::HandshakeBody::Connected { sid, payload } => sid,
-//             server::packet::HandshakeBody::Disconnected(_) => panic!("client disconnected")
+//             server::packet::HandshakeBody::Disconnected(_) => panic!("storage disconnected")
 //         };
 // 
 //         // Transport
-//         let packet = client::packet::DataPacket::from_body(
+//         let packet = storage::packet::DataPacket::from_body(
 //             sid,
-//             &client::packet::DataBody::Payload(vec![1, 2, 3]),
+//             &storage::packet::DataBody::Payload(vec![1, 2, 3]),
 //             &transport_state
 //         )?;
 //         data_tx.send((packet, client_sock)).await?;

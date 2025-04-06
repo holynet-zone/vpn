@@ -68,7 +68,7 @@ async fn complete(
         .build_responder()?;
     
     let mut buffer = [0u8; 65536];
-    let len = responder.read_message(&handshake.body, &mut buffer)?;
+    let _len = responder.read_message(&handshake.body, &mut buffer)?; // todo we now dont need msg from client
     let (body, sid) = match sessions.add(addr.clone(), alg, None).await {
         Some((sid, holy_ip)) => {
             info!("[{}] session created with sid: {}", addr, sid);
@@ -124,7 +124,7 @@ pub(super) async fn handshake_executor(
                             }
                         }
                         None => {
-                            warn!("[{}] received handshake from unknown client: {}", addr, peer_pk);
+                            warn!("[{}] received handshake from unknown storage: {}", addr, peer_pk);
                             continue;
                         }
                     },

@@ -43,7 +43,7 @@ impl Sessions {
     pub fn new(network: &IpAddr, prefix: u8) -> Self {
         Sessions {
             sid_gen: Arc::new(Mutex::new(SessionIdGenerator::new(1))),
-            holy_ip_gen: Arc::new(Mutex::new(IpAddressGenerator::new(increment_ip(*network), *prefix))),
+            holy_ip_gen: Arc::new(Mutex::new(IpAddressGenerator::new(increment_ip(*network), prefix))),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new())
         }
@@ -112,10 +112,10 @@ impl ReleaseKey for SessionId {
     async fn release(&self, context: &Sessions) {
         let holy_ip = context.map.remove(self).and_then(|(sid, session)|{
             context.holy_ip_map.remove(&session.holy_ip);
-            Some(&session.holy_ip)
+            Some(session.holy_ip)
         });
         if let Some(holy_ip) = holy_ip {
-            context.holy_ip_gen.lock().await.release(holy_ip);
+            context.holy_ip_gen.lock().await.release(&holy_ip);
         }
         context.sid_gen.lock().await.release(&self);
     }
@@ -150,7 +150,7 @@ trait GetSession {
 
 impl GetSession for &SessionId {
     fn get(&self, context: &Sessions) -> Option<Session> {
-        if let Some(session_lock) = context.map.get(self.clone()) { // TODO: clone
+        if let Some(session_lock) = context.map.get(*self) { // TODO: clone
             Some(session_lock.clone())
         } else {
             None
@@ -160,7 +160,7 @@ impl GetSession for &SessionId {
 
 impl GetSession for &IpAddr {
     fn get(&self, context: &Sessions) -> Option<Session> {
-        if let Some(session_lock) = context.holy_ip_map.get(self) {
+        if let Some(session_lock) = context.holy_ip_map.get(*self) { // todo clone
             if let Some(session) = context.map.get(&session_lock.clone()) {
                 Some(session.clone())
             } else {

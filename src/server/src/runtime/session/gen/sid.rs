@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use shared::session::SessionId;
-use crate::session::SessionId;
 
 pub struct SessionIdGenerator {
     current: SessionId,
