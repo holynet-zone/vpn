@@ -9,8 +9,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, mpsc};
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::mpsc;
+use tokio::sync::broadcast::{Receiver, Sender};
 use tracing::{error, info, warn};
 use tun_rs::AsyncDevice;
 use shared::client::packet::{
@@ -27,7 +27,7 @@ use super::{error::RuntimeError, tun};
 
 pub(crate) async fn create(
     addr: SocketAddr,
-    stop_tx: broadcast::Sender<RuntimeError>,
+    stop_tx: Sender<RuntimeError>,
     cred: Credential,
     alg: Alg,
     handshake_timeout: Duration,
@@ -66,10 +66,10 @@ pub(crate) async fn create(
     };
 
     // Handle incoming UDP packets
-    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), data_udp_tx));
+    tokio::spawn(udp_listener(stop_tx.clone(), stop_tx.subscribe(), socket.clone(), data_udp_tx));
 
     // Handle outgoing UDP packets
-    tokio::spawn(udp_sender(stop_tx.subscribe(), socket.clone(), udp_sender_rx));
+    tokio::spawn(udp_sender(stop_tx.clone(), stop_tx.subscribe(), socket.clone(), udp_sender_rx));
 
 
     // Executors
@@ -105,6 +105,7 @@ pub(crate) async fn create(
 
     // Handle incoming TUN packets
     tokio::spawn(tun_listener(
+        stop_tx.clone(),
         stop_tx.subscribe(),
         tun.clone(),
         data_tun_tx
@@ -112,6 +113,7 @@ pub(crate) async fn create(
 
     // Handle outgoing TUN packets
     tokio::spawn(tun_sender(
+        stop_tx.clone(),
         stop_tx.subscribe(),
         tun.clone(),
         tun_sender_rx
@@ -145,6 +147,7 @@ pub(crate) async fn create(
 }
 
 async fn tun_sender(
+    stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     tun: Arc<AsyncDevice>,
     mut queue: mpsc::Receiver<Vec<u8>>
@@ -155,8 +158,7 @@ async fn tun_sender(
             result = queue.recv() => match result {
                 Some(packet) => {
                     if let Err(err) = tun.send(&packet).await {
-                        error!("failed to send data to the tun: {}", err);
-                        // todo stop send
+                        stop_sender.send(RuntimeError::IO(format!("failed to send tun: {}", err))).unwrap();
                     }
                 },
                 None => break
@@ -166,6 +168,7 @@ async fn tun_sender(
 }
 
 async fn tun_listener(
+    stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     tun: Arc<AsyncDevice>,
     queue: mpsc::Sender<Vec<u8>>
@@ -189,7 +192,9 @@ async fn tun_listener(
                         error!("failed to send data to data_receiver: {}", err);
                     }
                 }
-                Err(err) => warn!("failed to receive udp: {}", err)
+                Err(err) => {
+                    stop_sender.send(RuntimeError::IO(format!("failed to receive tun: {}",err))).unwrap();
+                }
             }
         }
     }
@@ -197,6 +202,7 @@ async fn tun_listener(
 
 
 async fn udp_sender(
+    stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     socket: Arc<UdpSocket>,
     mut queue: mpsc::Receiver<Packet>
@@ -207,7 +213,7 @@ async fn udp_sender(
             result = queue.recv() => match result {
                 Some(packet) => {
                     if let Err(err) = socket.send(&packet.to_bytes()).await {
-                        error!("failed to send data to the server: {}", err);
+                        stop_sender.send(RuntimeError::IO(format!("failed to send udp: {}", err))).unwrap();
                     }
                 },
                 None => break
@@ -217,46 +223,47 @@ async fn udp_sender(
 }
 
 async fn udp_listener(
+    stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     socket: Arc<UdpSocket>,
     data_receiver: mpsc::Sender<server::packet::DataPacket>
 ) {
     let mut udp_buffer = [0u8; 65536];
     loop {
+        udp_buffer.fill(0);
         tokio::select! {
             _ = stop.recv() => break,
-            result = socket.recv(&mut udp_buffer) => {
-                match result {
-                    Ok(n) => {
-                        if n == 0 {
-                            warn!("received UDP packet with 0 bytes, dropping it");
-                            continue;
-                        }
-                        if n > 65536 {
-                            warn!("received UDP packet larger than 65536 bytes, dropping it");
-                            continue;
-                        }
-                        match server::packet::Packet::try_from(&udp_buffer[..n]) {
-                            Ok(packet) => match packet {
-                                server::packet::Packet::Data(data) => {
-                                    if let Err(err) = data_receiver.send(data).await {
-                                        error!("failed to send data to data_receiver: {}", err);
-                                    }
-                                },
-                                server::packet::Packet::Handshake(_) => {
-                                    warn!("received handshake packet, but expected data packet");
-                                    continue;
-                                },
+            result = socket.recv(&mut udp_buffer) => match result {
+                Ok(n) => {
+                    if n == 0 {
+                        warn!("received UDP packet with 0 bytes, dropping it");
+                        continue;
+                    }
+                    if n > 65536 {
+                        warn!("received UDP packet larger than 65536 bytes, dropping it");
+                        continue;
+                    }
+                    match server::packet::Packet::try_from(&udp_buffer[..n]) {
+                        Ok(packet) => match packet {
+                            server::packet::Packet::Data(data) => {
+                                if let Err(err) = data_receiver.send(data).await {
+                                    error!("failed to send data to data_receiver: {}", err);
+                                }
                             },
-                            Err(err) => {
-                                warn!("failed to parse UDP packet: {}", err);
+                            server::packet::Packet::Handshake(_) => {
+                                warn!("received handshake packet, but expected data packet");
                                 continue;
-                            }
+                            },
+                        },
+                        Err(err) => {
+                            warn!("failed to parse UDP packet: {}", err);
+                            continue;
                         }
                     }
-                    Err(err) => warn!("failed to receive udp: {}", err)
                 }
-                udp_buffer.fill(0)
+                Err(err) => {
+                    stop_sender.send(RuntimeError::IO(format!("failed to receive udp: {}", err))).unwrap();
+                }
             }
         }
     }
