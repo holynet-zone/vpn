@@ -24,34 +24,33 @@ fn decode_handshake_params(
     handshake: &client::packet::Handshake, 
     sk: &SecretKey
 ) -> anyhow::Result<(PublicKey, Alg)> {
-    let mut client_pk = [0u8; 32];
     let mut buffer = [0u8; 65536];
 
     let mut responder = Builder::new(NOISE_IK_PSK2_25519_AESGCM_BLAKE2S.clone())
         .local_private_key(sk.as_slice())
         .build_responder()?;
 
-    responder.read_message(&handshake.body, &mut buffer)?;
-    if let Some(client_pk) = responder.get_remote_static().map(|pk| {
-        client_pk.copy_from_slice(pk);
-        PublicKey::from(client_pk)
-    }) {
-        return Ok((client_pk, Alg::Aes256))
+    let alg = match responder.read_message(&handshake.body, &mut buffer) {
+        Err(err) => match err {
+            snow::Error::Decrypt => {
+                responder = Builder::new(NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone())
+                    .local_private_key(sk.as_slice())
+                    .build_responder()?;
+                responder.read_message(&handshake.body, &mut buffer)?;
+                Alg::ChaCha20Poly1305
+            },
+            _ => return Err(anyhow::Error::from(err))
+        },
+        Ok(_) => Alg::Aes256
+    };
+
+    match responder.get_remote_static().map(PublicKey::try_from) {
+        Some(key) => Ok((
+            key.expect("when decoding handshake params, pk should be valid 32 bytes"), 
+            alg
+        )),
+        None =>  Err(anyhow::anyhow!("invalid handshake"))
     }
-
-    responder = Builder::new(NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone())
-        .local_private_key(sk.as_slice())
-        .build_responder()?;
-
-    responder.read_message(&handshake.body, &mut buffer)?;
-    if let Some(client_pk) = responder.get_remote_static().map(|pk| {
-        client_pk.copy_from_slice(pk);
-        PublicKey::from(client_pk)
-    }) {
-        return Ok((client_pk, Alg::ChaCha20Poly1305))
-    }
-
-    Err(anyhow::anyhow!("key or params is invalid"))
 }
 
 async fn complete(
@@ -129,7 +128,7 @@ pub(super) async fn handshake_executor(
                         }
                     },
                     Err(e) => {
-                        warn!("[{}] failed to decode handshake (step 1): {}", addr, e);
+                        warn!("[{}] failed to decode handshake params: {}", addr, e);
                         continue;
                     }
                 },
