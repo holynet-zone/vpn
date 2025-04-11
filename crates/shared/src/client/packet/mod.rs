@@ -1,4 +1,3 @@
-mod keepalive;
 mod data;
 mod handshake;
 
@@ -7,8 +6,7 @@ pub use self::{
         DataPacket,
         DataBody
     },
-    handshake::Handshake,
-    keepalive::KeepAliveBody
+    handshake::Handshake
 };
 
 

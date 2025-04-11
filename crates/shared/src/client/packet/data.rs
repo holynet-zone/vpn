@@ -1,4 +1,3 @@
-use crate::client::packet::keepalive::KeepAliveBody;
 use crate::session::SessionId;
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +11,6 @@ pub struct DataPacket {
 #[derive(Serialize, Deserialize)]
 pub enum DataBody {
     Payload(Vec<u8>),
-    KeepAlive(KeepAliveBody),
+    KeepAlive(u128),
     Disconnect
 }

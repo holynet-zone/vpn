@@ -11,7 +11,6 @@ use super::super::{
     error::RuntimeError,
     session::Sessions
 };
-use shared::server::packet::KeepAliveBody;
 use super::HolyIp;
 
 fn decode_from_packet(packet: &client::packet::DataPacket, state: &StatelessTransportState) -> anyhow::Result<client::packet::DataBody> {
@@ -44,10 +43,9 @@ pub(super) async fn data_udp_executor(
                         Some(state) => match decode_from_packet(&enc_packet, &state) {
                             Ok(body) => {
                                 match body {
-                                    client::packet::DataBody::KeepAlive(ref body) => {
-                                        info!("[{}] received keepalive packet from sid {} owd {}", addr, enc_packet.sid, body.owd());
-                                        let resp = DataBody::KeepAlive(KeepAliveBody::new(body.client_time));
-                                        match encode_to_packet(&resp, &state) {
+                                    client::packet::DataBody::KeepAlive(client_time) => {
+                                        info!("[{}] received keepalive packet from sid {}", addr,enc_packet.sid);
+                                        match encode_to_packet(&DataBody::KeepAlive(client_time), &state) {
                                             Ok(value) => {
                                                 if let Err(e) = udp_tx.send((Packet::Data(value), addr)).await {
                                                     error!("failed to send server data packet to udp queue: {}", e);

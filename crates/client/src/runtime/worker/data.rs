@@ -1,16 +1,14 @@
-
+use crate::runtime::error::RuntimeError;
+use shared::client::packet::{DataBody, DataPacket, Packet};
+use shared::keepalive::{format_duration_millis, micros_since_start};
+use shared::server;
+use shared::session::SessionId;
 use snow::StatelessTransportState;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::{Receiver, Sender};
-use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info, warn};
-use shared::client::packet::{DataBody, DataPacket, KeepAliveBody, Packet};
-use shared::server;
-use shared::session::SessionId;
-use crate::runtime::error::RuntimeError;
+use tokio::sync::mpsc;
+use tracing::{info, warn};
 
 
 fn decrypt_body(
@@ -44,8 +42,11 @@ pub(super) async fn data_udp_executor(
             data = queue.recv() => match data { // todo: may exec in another thread from pool
                 Some(data) => match decrypt_body(&data, &state) {
                     Ok(data_body) => match data_body {
-                        server::packet::DataBody::KeepAlive(ref body) => {
-                            info!("keepalive rtt: {} ms; owd: {} ms", body.rtt(), body.owd());
+                        server::packet::DataBody::KeepAlive(time) => {
+                            info!("keepalive rtt: {}", format_duration_millis(
+                                time,
+                                micros_since_start()
+                            ));
                             continue;
                         },
                         server::packet::DataBody::Disconnect(ref code) => {
@@ -109,7 +110,7 @@ pub(super) async fn keepalive_sender(
     loop {
         tokio::select! {
             _ = stop.recv() => break,
-            _ = timer.tick() => match encrypt_body(&DataBody::KeepAlive(KeepAliveBody::new()), &state) {
+            _ = timer.tick() => match encrypt_body(&DataBody::KeepAlive(micros_since_start()), &state) {
                 Ok(enc_body) => {
                     udp_sender.send(Packet::Data(DataPacket{ sid, enc_body })).await.unwrap();  // todo: if channel is full then we can ignore sending
                 },
