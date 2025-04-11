@@ -1,4 +1,3 @@
-use crate::server::packet::keepalive::KeepAliveBody;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -9,6 +8,6 @@ pub struct DataPacket {
 #[derive(Serialize, Deserialize)]
 pub enum DataBody {
     Payload(Vec<u8>),
-    KeepAlive(KeepAliveBody),
+    KeepAlive(u128),
     Disconnect(u8)
 }
