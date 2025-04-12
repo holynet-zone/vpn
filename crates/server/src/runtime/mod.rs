@@ -16,7 +16,7 @@ use self::{
 
 use tokio::runtime::Builder;
 use tokio::sync::{broadcast};
-use crate::config::Config;
+use crate::config::{Config, RuntimeConfig};
 use shared::{
     keys::handshake::{PublicKey, SecretKey},
     network::set_ipv4_forwarding
@@ -26,12 +26,10 @@ use crate::storage::Client;
 pub struct Runtime {
     sock: SocketAddr,
     sk: SecretKey,
-    workers: usize,
     // Client pub key -> pre-shared key
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sessions: Sessions,
-    session_ttl: usize, // in seconds
-    sender_buf_size: usize,
+    config: RuntimeConfig,
     // tun
     tun_name: String,
     tun_mtu: u16,
@@ -54,15 +52,9 @@ impl Runtime {
                 config.general.port
             ),
             sk: config.general.secret_key,
-            workers: if config.runtime.workers == 0 {
-                thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
-            } else {
-                config.runtime.workers
-            },
+            config: config.runtime.unwrap_or_default(),
             known_clients: Default::default(), // todo
             sessions: Sessions::new(&config.interface.address, config.interface.prefix),
-            session_ttl: 0, // inf
-            sender_buf_size: config.runtime.sender_buf_size,
             tun_name: config.interface.name,
             tun_mtu: config.interface.mtu,
             tun_ip: config.interface.address,
@@ -79,10 +71,15 @@ impl Runtime {
     }
     
     pub async fn run(&mut self) -> Result<(), RuntimeError> {
+        let workers = match self.config.workers == 0 {
+            true => thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+            false => self.config.workers
+        };
+        
         tracing::info!(
             "Runtime running on udp://{} with {} workers",
             self.sock,
-            self.workers
+            workers
         );
         
         set_ipv4_forwarding(true)?;
@@ -96,13 +93,14 @@ impl Runtime {
 
         let mut handles = Vec::new();
         
-        for worker_id in 1..self.workers + 1 {
+        for worker_id in 1..workers + 1 {
             let addr = self.sock;
             let stop_tx = self.stop_tx.clone();
             let sessions = self.sessions.clone();
             let sk = self.sk.clone();
             let known_clients = self.known_clients.clone();
             let tun = tun.clone();
+            let config = self.config.clone();
             
             let handle = thread::spawn(move || {
                 let rt = Builder::new_current_thread()
@@ -119,7 +117,8 @@ impl Runtime {
                     known_clients,
                     sk,
                     tun,
-                    worker_id
+                    worker_id,
+                    config
                 )) {
                     tracing::error!("worker {worker_id} failed: {err}");
                     return Err(err);

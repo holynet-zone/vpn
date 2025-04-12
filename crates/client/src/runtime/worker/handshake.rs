@@ -4,7 +4,7 @@ use snow::{Builder, HandshakeState, StatelessTransportState};
 use tokio::net::UdpSocket;
 use tracing::warn;
 use shared::client::packet::{Handshake, Packet};
-use shared::credential::Credential;
+use shared::connection_config::CredentialsConfig;
 use shared::handshake::{
     NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
     NOISE_IK_PSK2_25519_AESGCM_BLAKE2S
@@ -20,15 +20,15 @@ use super::super::{
 
 fn initial(
     alg: Alg, 
-    cred: &Credential
+    cred: &CredentialsConfig
 ) -> Result<(Handshake, HandshakeState), RuntimeError> {
     let mut initiator = Builder::new(match alg {
         Alg::ChaCha20Poly1305 => NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone(),
         Alg::Aes256 => NOISE_IK_PSK2_25519_AESGCM_BLAKE2S.clone()
     })
-        .local_private_key(cred.sk.as_slice())
-        .remote_public_key(cred.peer_pk.as_slice())
-        .psk(2, cred.psk.as_slice())
+        .local_private_key(cred.private_key.as_slice())
+        .remote_public_key(cred.server_public_key.as_slice())
+        .psk(2, cred.pre_shared_key.as_slice())
         .build_initiator()?;
 
     let mut buffer = [0u8; 65536];
@@ -55,7 +55,7 @@ fn complete(
 
 pub(super) async fn handshake_step(
     socket: Arc<UdpSocket>,
-    cred: Credential,
+    cred: CredentialsConfig,
     alg: Alg,
     timeout: Duration
 ) -> Result<(HandshakePayload, StatelessTransportState), RuntimeError> {

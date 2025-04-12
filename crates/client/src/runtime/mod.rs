@@ -14,13 +14,13 @@ use shared::{
     credential::Credential,
     session::Alg
 };
+use shared::connection_config::{CredentialsConfig, RuntimeConfig};
 
 pub struct Runtime {
     sock: SocketAddr,
     alg: Alg,
-    cred: Credential,
-    handshake_timeout: Duration,
-    keepalive: Option<Duration>,
+    cred: CredentialsConfig,
+    config: RuntimeConfig,
     pub stop_tx: broadcast::Sender<RuntimeError>
 }
 
@@ -29,17 +29,15 @@ impl Runtime {
         addr: IpAddr,
         port: u16,
         alg: Alg,
-        cred: Credential,
-        handshake_timeout: Duration,
-        keepalive: Option<Duration>,
+        cred: CredentialsConfig,
+        config: RuntimeConfig
     ) -> Self {
         let (stop_tx, _) = broadcast::channel::<RuntimeError>(10);
         Self {
             sock: SocketAddr::new(addr, port),
             alg,
             cred,
-            handshake_timeout,
-            keepalive,
+            config,
             stop_tx
         }
     }
@@ -52,8 +50,7 @@ impl Runtime {
             self.stop_tx.clone(),
             self.cred.clone(),
             self.alg.clone(),
-            self.handshake_timeout,
-            self.keepalive.clone()
+            self.config.clone()
         );
         
         let mut stop_rx = self.stop_tx.subscribe();

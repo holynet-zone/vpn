@@ -16,7 +16,7 @@ use tun_rs::AsyncDevice;
 use shared::client::packet::{
     Packet
 };
-use shared::credential::Credential;
+use shared::connection_config::{CredentialsConfig, RuntimeConfig};
 use shared::server;
 use shared::session::Alg;
 use crate::network::DefaultGateway;
@@ -28,10 +28,9 @@ use super::{error::RuntimeError, tun};
 pub(crate) async fn create(
     addr: SocketAddr,
     stop_tx: Sender<RuntimeError>,
-    cred: Credential,
+    cred: CredentialsConfig,
     alg: Alg,
-    handshake_timeout: Duration,
-    keepalive: Option<Duration>,
+    config: RuntimeConfig
 ) -> Result<(), RuntimeError> {
     let socket = Socket::new(
         Domain::for_address(addr),
@@ -40,23 +39,23 @@ pub(crate) async fn create(
     )?;
     socket.set_nonblocking(true)?;
     // socket.set_reuse_port(true)?;
-    socket.set_recv_buffer_size(1024 * 1024 * 1024)?;
-    socket.set_send_buffer_size(1024 * 1024 * 1024)?;
+    socket.set_recv_buffer_size(config.so_rcvbuf)?;
+    socket.set_send_buffer_size(config.so_sndbuf)?;
     socket.bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0,0,0,0)), 0).into())?;
     socket.connect(&addr.into())?;
 
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
-    let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(1000);
-    let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(1000);
-    let (data_udp_tx, data_udp_rx) = mpsc::channel::<server::packet::DataPacket>(1000);
-    let (data_tun_tx, data_tun_rx) = mpsc::channel::<Vec<u8>>(1000);
+    let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(config.out_udp_buf);
+    let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(config.out_tun_buf);
+    let (data_udp_tx, data_udp_rx) = mpsc::channel::<server::packet::DataPacket>(config.data_udp_buf);
+    let (data_tun_tx, data_tun_rx) = mpsc::channel::<Vec<u8>>(config.data_tun_buf);
     
     // Handshake step
     let (handshake_payload, state) = match tokio::spawn(handshake_step(
         socket.clone(),
         cred,
         alg,
-        handshake_timeout
+        Duration::from_millis(config.handshake_timeout)
     )).await.unwrap() { // todo unwrap
         Ok((p, state)) => (p, Arc::new(state)),
         Err(err) => {
@@ -120,14 +119,14 @@ pub(crate) async fn create(
     ));
 
 
-    match keepalive {
+    match config.keepalive {
         Some(duration) => {
             info!("starting keepalive sender with interval {:?}", duration);
             tokio::spawn(keepalive_sender(
                 stop_tx.clone(),
                 stop_tx.subscribe(),
                 udp_sender_tx,
-                duration,
+                Duration::from_secs(duration),
                 state.clone(),
                 handshake_payload.sid,
             ));

@@ -4,7 +4,7 @@ use crate::storage::{database, Client, Clients};
 use crate::{config, CONFIG_PATH_ENV};
 use inquire::validator::Validation;
 use inquire::required;
-use shared::connection_config::{ConnectionConfig, Credentials, General};
+use shared::connection_config::{ConnectionConfig, CredentialsConfig, GeneralConfig};
 use shared::keys::handshake::{PublicKey, SecretKey};
 use shared::session::Alg;
 use std::path::{Path, PathBuf};
@@ -89,12 +89,12 @@ pub async fn add(
     }).await;
     
     let connection_config = ConnectionConfig {
-        general: General {
+        general: GeneralConfig {
             host,
             port,
             alg: Alg::Aes256
         },
-        credentials: Credentials {
+        credentials: CredentialsConfig {
             private_key: sk,
             pre_shared_key: psk,
             server_public_key: PublicKey::derive_from(config.general.secret_key),
