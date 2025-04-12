@@ -22,6 +22,7 @@ use super::{
 use shared::{client, server};
 use crate::network::parse_source;
 use super::session::HolyIp;
+use crate::config::RuntimeConfig;
 
 pub(crate) async fn create(
     addr: SocketAddr,
@@ -30,7 +31,8 @@ pub(crate) async fn create(
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sk: SecretKey,
     tun: Arc<AsyncDevice>,
-    worker_id: usize 
+    worker_id: usize,
+    config: RuntimeConfig
 ) -> Result<(), RuntimeError> {
     let socket = Socket::new(
         Domain::for_address(addr),
@@ -39,16 +41,16 @@ pub(crate) async fn create(
     )?;
     socket.set_nonblocking(true)?;
     socket.set_reuse_port(true)?;
-    socket.set_recv_buffer_size(1024 * 1024 * 1024)?;
-    socket.set_send_buffer_size(1024 * 1024 * 1024)?;
+    socket.set_recv_buffer_size(config.so_rcvbuf)?;
+    socket.set_send_buffer_size(config.so_sndbuf)?;
     socket.bind(&addr.into())?;
 
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
-    let (out_udp_tx, out_udp_rx) = mpsc::channel::<(server::packet::Packet, SocketAddr)>(1000);
-    let (out_tun_tx, out_tun_rx) = mpsc::channel::<Vec<u8>>(1000);
-    let (handshake_tx, handshake_rx) = mpsc::channel::<(client::packet::Handshake, SocketAddr)>(1000);
-    let (data_udp_tx, data_udp_rx) = mpsc::channel::<(client::packet::DataPacket, SocketAddr)>(1000);
-    let (data_tun_tx, data_tun_rx) = mpsc::channel::<(Vec<u8>, HolyIp)>(1000);
+    let (out_udp_tx, out_udp_rx) = mpsc::channel::<(server::packet::Packet, SocketAddr)>(config.out_udp_buf);
+    let (out_tun_tx, out_tun_rx) = mpsc::channel::<Vec<u8>>(config.out_tun_buf);
+    let (handshake_tx, handshake_rx) = mpsc::channel::<(client::packet::Handshake, SocketAddr)>(config.handshake_buf);
+    let (data_udp_tx, data_udp_rx) = mpsc::channel::<(client::packet::DataPacket, SocketAddr)>(config.data_udp_buf);
+    let (data_tun_tx, data_tun_rx) = mpsc::channel::<(Vec<u8>, HolyIp)>(config.data_tun_buf);
 
 
     // Handle incoming UDP packets
