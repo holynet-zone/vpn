@@ -61,7 +61,7 @@ impl Sessions {
                     created_at: time,
                     holy_ip: ip,
                     enc,
-                    state: state.map(|s| Arc::new(s))
+                    state: state.map(Arc::new)
                 });
                 self.holy_ip_map.insert(ip, session_id);
                 Some((session_id, ip))
@@ -74,9 +74,9 @@ impl Sessions {
     }
     
     pub fn set_transport_state(&self, sid: &SessionId, state: StatelessTransportState) {
-        self.map.get_mut(sid).map(|mut session| {
-            session.state = Some(Arc::new(state));
-        });
+        if let Some(mut session) = self.map.get_mut(sid) { 
+            session.state = Some(Arc::new(state)); 
+        }
     }
 
     pub async fn release<K: ReleaseKey>(&self, key: K) {
@@ -110,14 +110,14 @@ trait ReleaseKey {
 #[async_trait]
 impl ReleaseKey for SessionId {
     async fn release(&self, context: &Sessions) {
-        let holy_ip = context.map.remove(self).and_then(|(sid, session)|{
+        let holy_ip = context.map.remove(self).map(|(sid, session)|{
             context.holy_ip_map.remove(&session.holy_ip);
-            Some(session.holy_ip)
+            session.holy_ip
         });
         if let Some(holy_ip) = holy_ip {
             context.holy_ip_gen.lock().await.release(&holy_ip);
         }
-        context.sid_gen.lock().await.release(&self);
+        context.sid_gen.lock().await.release(self);
     }
 }
 
@@ -150,22 +150,14 @@ trait GetSession {
 
 impl GetSession for &SessionId {
     fn get(&self, context: &Sessions) -> Option<Session> {
-        if let Some(session_lock) = context.map.get(*self) { // TODO: clone
-            Some(session_lock.clone())
-        } else {
-            None
-        }
+        context.map.get(*self).map(|session_lock| session_lock.clone())
     }
 }
 
 impl GetSession for &IpAddr {
     fn get(&self, context: &Sessions) -> Option<Session> {
         if let Some(session_lock) = context.holy_ip_map.get(*self) { // todo clone
-            if let Some(session) = context.map.get(&session_lock.clone()) {
-                Some(session.clone())
-            } else {
-                None
-            }
+            context.map.get(&session_lock.clone()).map(|session| session.clone())
         } else {
             None
         }

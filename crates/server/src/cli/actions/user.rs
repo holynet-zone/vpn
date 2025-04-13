@@ -46,7 +46,7 @@ pub async fn add(
             .with_default(&config.general.host)
             .with_validator(required!("This field is required"))
             .with_validator(inquire::validator::MinLengthValidator::new(7))
-            .with_validator(&|i: &str | match i.is_empty() {
+            .with_validator(|i: &str | match i.is_empty() {
                 true => Ok(Validation::Invalid("This field is required".into())),
                 false => Ok(Validation::Valid) 
             })
@@ -81,7 +81,7 @@ pub async fn add(
     println!("Private key {}", format_opaque_bytes(sk.as_slice()));
     println!("Pre-shared key {}", format_opaque_bytes(psk.as_slice()));
     
-    let clients = Clients::new(database(&*config.general.storage)?);
+    let clients = Clients::new(database(&config.general.storage)?);
     clients.save(Client {
         psk: psk.clone(),
         peer_pk: PublicKey::derive_from(sk.clone()),
@@ -140,7 +140,7 @@ pub async fn remove(
         anyhow::anyhow!("failed to parse public key: {}", error)
     })?;
     
-    let clients = Clients::new(database(&*config.general.storage)?);
+    let clients = Clients::new(database(&config.general.storage)?);
     clients.delete(&pk).await?;
     println!("Client has been successfully removed");
     Ok(())
@@ -161,7 +161,7 @@ pub async fn list(config: Option<PathBuf>) -> anyhow::Result<()> {
         }
     };
     
-    let clients = Clients::new(database(&*config.general.storage)?);
+    let clients = Clients::new(database(&config.general.storage)?);
     let users: Vec<_> = clients.get_all().await.iter().map(|client| {
         UserRow {
             pk: client.peer_pk.to_hex(),

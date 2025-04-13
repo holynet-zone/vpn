@@ -29,13 +29,13 @@ fn decode_handshake_params(
         .local_private_key(sk.as_slice())
         .build_responder()?;
 
-    let alg = match responder.read_message(&handshake, &mut buffer) {
+    let alg = match responder.read_message(handshake, &mut buffer) {
         Err(err) => match err {
             snow::Error::Decrypt => {
                 responder = Builder::new(NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone())
                     .local_private_key(sk.as_slice())
                     .build_responder()?;
-                responder.read_message(&handshake, &mut buffer)?;
+                responder.read_message(handshake, &mut buffer)?;
                 Alg::ChaCha20Poly1305
             },
             _ => return Err(anyhow::Error::from(err))
@@ -53,7 +53,7 @@ fn decode_handshake_params(
 }
 
 async fn complete(
-    handshake: &Vec<u8>,
+    handshake: &[u8],
     cred: &Credential,
     alg: Alg,
     addr: &SocketAddr,
@@ -66,8 +66,8 @@ async fn complete(
         .build_responder()?;
     
     let mut buffer = [0u8; 65536];
-    let _len = responder.read_message(&handshake, &mut buffer)?; // todo we now dont need msg from client
-    let (body, sid) = match sessions.add(addr.clone(), alg, None).await {
+    let _len = responder.read_message(handshake, &mut buffer)?; // todo we now dont need msg from client
+    let (body, sid) = match sessions.add(*addr, alg, None).await {
         Some((sid, holy_ip)) => {
             info!("[{}] session created with sid: {}", addr, sid);
             let handshake_payload = HandshakeResponderPayload { sid, ipaddr: holy_ip };

@@ -1,11 +1,11 @@
+use crate::runtime::error::RuntimeError;
 use crate::runtime::Runtime;
 use crate::storage::{database, Clients};
-use crate::{config, network, CONFIG_PATH_ENV};
-use std::path::{Path, PathBuf};
-use std::{process, thread};
-use std::time::Duration;
+use crate::{config, CONFIG_PATH_ENV};
 use shared::network::find_available_ifname;
-use crate::runtime::error::RuntimeError;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use std::{process, thread};
 
 pub async fn start(
     host: Option<String>,
@@ -49,7 +49,7 @@ pub async fn start(
         eprintln!("cant update configuration: {}", err);
     }
     
-    let clients = Clients::new(database(&*config.general.storage)?);
+    let clients = Clients::new(database(&config.general.storage)?);
     let mut runtime = Runtime::from_config(config)?;
     runtime.insert_clients(clients.get_all().await);
 

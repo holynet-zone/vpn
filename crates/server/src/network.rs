@@ -4,11 +4,11 @@ use tun_rs::IntoAddress;
 
 
 pub fn parse_source(packet: &[u8]) -> anyhow::Result<IpAddr> {
-    match SlicedPacket::from_ip(&packet) {
+    match SlicedPacket::from_ip(packet) {
         Ok(packet) => match packet.net {
             Some(net) => match net {
                 etherparse::InternetSlice::Ipv4(ipv4) => match &ipv4.header().destination_addr().into_address() {
-                    Ok(addr) => Ok(addr.clone()),
+                    Ok(addr) => Ok(*addr),
                     Err(err) => Err(anyhow::anyhow!("failed to parse IPv4 address: {}", err))
                 },
                 etherparse::InternetSlice::Ipv6(_) => {

@@ -44,7 +44,7 @@ fn complete(
     mut initiator: HandshakeState
 ) -> Result<(HandshakeResponderBody, StatelessTransportState), RuntimeError> {
     let mut buffer = [0u8; 65536];
-    let len = initiator.read_message(&handshake, &mut buffer)?;
+    let len = initiator.read_message(handshake, &mut buffer)?;
     Ok((
         bincode::deserialize(&buffer[..len])?,
         initiator.into_stateless_transport_mode()?

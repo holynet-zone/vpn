@@ -57,7 +57,7 @@ impl Clients {
         let data = bincode::serialize(&client).expect("failed to serialize client");
 
         task::spawn_blocking(move || {
-            db.put(&*client.peer_pk, &data).expect("failed to save client to db");
+            db.put(*client.peer_pk, &data).expect("failed to save client to db");
         })
             .await
             .unwrap()
@@ -68,8 +68,8 @@ impl Clients {
         let pk = pk.clone(); // todo fix
 
         task::spawn_blocking(move || {
-            db.delete(&pk.as_slice())
-                .map_err(|err| anyhow::Error::from(err))
+            db.delete(pk.as_slice())
+                .map_err(anyhow::Error::from)
         })
             .await?
     }

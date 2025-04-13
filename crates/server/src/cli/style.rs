@@ -116,6 +116,6 @@ pub fn format_opaque_bytes(bytes: &[u8]) -> String {
             .collect();
 
         //format!("\u{001b}[{};{}m{}", fg_color_code, bg_color_code, block_chars)
-        format!("{}", opaque_chars)
+        opaque_chars
     }
 }

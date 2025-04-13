@@ -10,10 +10,7 @@ use self::{
 
 use tokio::sync::broadcast;
 use tracing::{error, warn};
-use shared::{
-    credential::Credential,
-    session::Alg
-};
+use shared::session::Alg;
 use shared::connection_config::{CredentialsConfig, RuntimeConfig};
 
 pub struct Runtime {
@@ -67,7 +64,7 @@ impl Runtime {
                     Err(err)
                 }
             },
-            err = stop_rx.recv() => return match err {
+            err = stop_rx.recv() => match err {
                 Ok(err) => Err(err),
                 Err(err) => {
                     Err(RuntimeError::IO(format!("stop channel is closed: {err}")))

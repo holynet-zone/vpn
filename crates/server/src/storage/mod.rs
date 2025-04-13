@@ -1,14 +1,11 @@
-use std::path::Path;
-use std::process;
 use rocksdb::DB;
-use serde::{Deserialize, Serialize};
-use tracing::error;
+use std::path::Path;
 
 mod clients;
 
 pub use clients::{
-    Clients,
-    Client
+    Client,
+    Clients
 };
 
 pub fn database(path: &Path) -> anyhow::Result<DB> {
