@@ -13,11 +13,9 @@ use tokio::sync::mpsc;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tracing::{error, info, warn};
 use tun_rs::AsyncDevice;
-use shared::client::packet::{
-    Packet
-};
+use shared::protocol::{EncryptedData, Packet};
 use shared::connection_config::{CredentialsConfig, RuntimeConfig};
-use shared::server;
+
 use shared::session::Alg;
 use crate::network::DefaultGateway;
 use crate::runtime::worker::data::{data_tun_executor, data_udp_executor, keepalive_sender};
@@ -47,7 +45,7 @@ pub(crate) async fn create(
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
     let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(config.out_udp_buf);
     let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(config.out_tun_buf);
-    let (data_udp_tx, data_udp_rx) = mpsc::channel::<server::packet::DataPacket>(config.data_udp_buf);
+    let (data_udp_tx, data_udp_rx) = mpsc::channel::<EncryptedData>(config.data_udp_buf);
     let (data_tun_tx, data_tun_rx) = mpsc::channel::<Vec<u8>>(config.data_tun_buf);
     
     // Handshake step
@@ -174,7 +172,6 @@ async fn tun_listener(
 ) {
     let mut buffer = [0u8; 65536];
     loop {
-        buffer.fill(0);
         tokio::select! {
             _ = stop.recv() => break,
             result = tun.recv(&mut buffer) => match result {
@@ -225,11 +222,10 @@ async fn udp_listener(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     socket: Arc<UdpSocket>,
-    data_receiver: mpsc::Sender<server::packet::DataPacket>
+    data_receiver: mpsc::Sender<EncryptedData>
 ) {
     let mut udp_buffer = [0u8; 65536];
     loop {
-        udp_buffer.fill(0);
         tokio::select! {
             _ = stop.recv() => break,
             result = socket.recv(&mut udp_buffer) => match result {
@@ -242,17 +238,21 @@ async fn udp_listener(
                         warn!("received UDP packet larger than 65536 bytes, dropping it");
                         continue;
                     }
-                    match server::packet::Packet::try_from(&udp_buffer[..n]) {
+                    match Packet::try_from(&udp_buffer[..n]) {
                         Ok(packet) => match packet {
-                            server::packet::Packet::Data(data) => {
+                            Packet::DataServer(data) => {
                                 if let Err(err) = data_receiver.send(data).await {
                                     error!("failed to send data to data_receiver: {}", err);
                                 }
                             },
-                            server::packet::Packet::Handshake(_) => {
+                            Packet::HandshakeResponder(_) => {
                                 warn!("received handshake packet, but expected data packet");
                                 continue;
                             },
+                            _ => {
+                                warn!("received unexpected packet type");
+                                continue;
+                            }
                         },
                         Err(err) => {
                             warn!("failed to parse UDP packet: {}", err);
