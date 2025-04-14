@@ -41,3 +41,87 @@ Options:
 ```
 
 ## Protocol schema
+
+### Handshake
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+
+    Client->>Server: Handshake Initial
+    Server->>Client: Handshake Response
+```
+#### Handshake Initial
+```text
+0      8      24                              N  bit
+┌──────┬───────┬──────────────────────────────┐     
+│ TYPE │  LEN  │      HANDSHAKE PAYLOAD       │     
+│ 0x00 │   N   │         (ENCRYPTED)          │     
+│(8bit)│(16bit)│          (N-24bit)           │     
+└──────┴───────┴──────────────────────────────┘   
+```
+
+#### Handshake Response
+```text
+                              0      8      24                              N  bit
+                              ┌──────┬───────┬──────────────────────────────┐     
+                              │ TYPE │  LEN  │      HANDSHAKE PAYLOAD       │     
+                              │ 0x01 │   N   │         (ENCRYPTED)          │     
+                              │(8bit)│(16bit)│          (N-24bit)           │     
+                              └──────┴───────┴──────────────┬───────────────┘     
+                                                            │                     
+                                                            │                     
+                                                            ▼                     
+                                                                                  
+                                                                                  
+                                            0      8      40     48        80     
+                                            ┌──────┬───────┬──────┬─────────┐     
+                                            │ TYPE │       │ TYPE │         │     
+                                        ┌── │ 0x00 │  SID  │ 0x00 │  IPv4   │     
+                                        │   │(8bit)│(32bit)│(8bit)│ (32bit) │     
+                                        │   └──────┴───────┴──────┴─────────┘     
+                       ┌──    COMPLETE  │   0      8      40     48       176     
+                       │                │   ┌──────┬───────┬──────┬─────────┐     
+                       │                │   │ TYPE │       │ TYPE │         │     
+                       │                └── │ 0x00 │  SID  │ 0x01 │  IPv6   │     
+                       │                    │(8bit)│(32bit)│(8bit)│ (128bit)│     
+                       │                    └──────┴───────┴──────┴─────────┘     
+                       │                                                          
+                       │                                  MaxConnectedDevices     
+HandshakeResponderBody │                    0      8      40     48        80     
+                       │                    ┌──────┬───────┬──────┬─────────┐     
+                       │                    │ TYPE │       │ TYPE │         │     
+                       │                ┌── │ 0x00 │  SID  │ 0x00 │  IPv4   │     
+                       │                │   │(8bit)│(32bit)│(8bit)│ (32bit) │     
+                       │                │   └──────┴───────┴──────┴─────────┘     
+                       │                │                    ServerOverloaded     
+                       │                │   0      8                              
+                       │                │   ┌──────┐                              
+                       │                │   │ TYPE │                              
+                       └──   DISCONNECT ├── │ 0x01 │                              
+                                        │   │(8bit)│                              
+                                        │   └──────┘                              
+                                        │                          Unexpected     
+                                        │   0      8      72                N     
+                                        │   ┌──────┬───────┬────────────────┐     
+                                        │   │ TYPE │  LEN  │                │     
+                                        └── │ 0x02 │   N   │      TEXT      │     
+                                            │(8bit)│(64bit)│                │     
+                                            └──────┴───────┴────────────────┘     
+```
+### Data
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+
+    Client->>Server: DataPayload
+    Client->>Server: DataPayload
+    Server->>Client: DataPayload
+    Client->>Server: DataKeepAlive
+    Server->>Client: DataKeepAlive
+```
+#### DataClient
+
+
+#### DataServer
