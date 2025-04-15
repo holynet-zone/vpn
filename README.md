@@ -172,7 +172,7 @@ sequenceDiagram
 0      8      24                              N  bit                     
 ┌──────┬───────┬──────────────────────────────┐                          
 │ TYPE │  LEN  │         DATA PAYLOAD         │                          
-│ 0x02 │   N   │          (ENCRYPTED)         │                          
+│ 0x03 │   N   │          (ENCRYPTED)         │                          
 │(8bit)│(16bit)│           (N-24bit)          │                          
 └──────┴───────┴──────────────┬───────────────┘                          
                               │                                          
