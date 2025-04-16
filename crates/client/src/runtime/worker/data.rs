@@ -16,15 +16,29 @@ fn decrypt_body(
 ) -> anyhow::Result<DataServerBody> {
     let mut buffer = [0u8; 65536];
     state.read_message(0, encrypted, &mut buffer)?;
-    bincode::deserialize(&buffer).map_err(|e| anyhow::anyhow!(e))
+    match bincode::serde::decode_from_slice(
+        &buffer,
+        bincode::config::standard()
+    ) {
+        Ok((obj, _)) => Ok(obj),
+        Err(err) => Err(anyhow::anyhow!(err))
+    }
 }
 
-fn encrypt_body(body: &DataClientBody,
+fn encrypt_body(
+    body: &DataClientBody,
     state: &StatelessTransportState
 ) -> anyhow::Result<EncryptedData> {
     let mut buffer = [0u8; 65536];
-    let len = state.write_message(0, &bincode::serialize(body)?, &mut buffer)?;
-    Ok(buffer[..len].to_vec())
+    let len = state.write_message(
+        0, 
+        &bincode::serde::encode_to_vec(
+            body,
+            bincode::config::standard()
+        )?,
+        &mut buffer
+    )?;
+    Ok(buffer[..len].to_vec().into())
 }
 
 
@@ -55,7 +69,7 @@ pub(super) async fn data_udp_executor(
                             continue;
                         },
                         DataServerBody::Payload(payload) => {
-                            tun_sender.send(payload).await.unwrap()
+                            tun_sender.send(payload.0).await.unwrap()
                         }
                     },
                     Err(e) => {
@@ -81,7 +95,7 @@ pub(super) async fn data_tun_executor(
         tokio::select! {
             _ = stop.recv() => break,
             body = queue.recv() => match body { // todo: may exec in another thread from pool??
-               Some(packet) => match encrypt_body(&DataClientBody::Payload(packet), &state) {
+               Some(packet) => match encrypt_body(&DataClientBody::Payload(packet.into()), &state) {
                     Ok(encrypted) => {
                         udp_sender.send(Packet::DataClient{ sid, encrypted }).await.unwrap(); // todo remove await
                     },

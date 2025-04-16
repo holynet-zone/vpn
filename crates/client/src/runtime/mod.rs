@@ -1,6 +1,5 @@
 pub mod error;
 mod worker;
-mod tun;
 
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;

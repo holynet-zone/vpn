@@ -36,7 +36,7 @@ fn initial(
 
     let mut buffer = [0u8; 65536];
     let len = initiator.write_message(&[], &mut buffer)?;
-    Ok((buffer[..len].to_vec(), initiator))
+    Ok((buffer[..len].to_vec().into(), initiator))
 }
 
 fn complete(
@@ -45,10 +45,12 @@ fn complete(
 ) -> Result<(HandshakeResponderBody, StatelessTransportState), RuntimeError> {
     let mut buffer = [0u8; 65536];
     let len = initiator.read_message(handshake, &mut buffer)?;
-    Ok((
-        bincode::deserialize(&buffer[..len])?,
-        initiator.into_stateless_transport_mode()?
-    ))
+    match bincode::serde::decode_from_slice(&buffer[..len], bincode::config::standard()) {
+        Ok((body, _)) => Ok((body, initiator.into_stateless_transport_mode()?)),
+        Err(err) => Err(RuntimeError::Handshake(
+            format!("decode handshake complete packet: {}", err)
+        ))
+    }
 }
 
 pub(super) async fn handshake_step(

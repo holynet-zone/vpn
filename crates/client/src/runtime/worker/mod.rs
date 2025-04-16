@@ -17,10 +17,11 @@ use shared::protocol::{EncryptedData, Packet};
 use shared::connection_config::{CredentialsConfig, RuntimeConfig};
 
 use shared::session::Alg;
+use shared::tun::setup_tun;
 use crate::network::DefaultGateway;
 use crate::runtime::worker::data::{data_tun_executor, data_udp_executor, keepalive_sender};
 use crate::runtime::worker::handshake::handshake_step;
-use super::{error::RuntimeError, tun};
+use super::error::RuntimeError;
 
 
 pub(crate) async fn create(
@@ -87,11 +88,11 @@ pub(crate) async fn create(
         state.clone()
     ));
     
-    let tun = Arc::new(tun::setup_tun(
+    let tun = Arc::new(setup_tun(
         "holynet0",
-        &1500,
-        &handshake_payload.ipaddr,
-        &32
+        1500,
+        handshake_payload.ipaddr,
+        32
     ).await?);
 
     let mut gw = DefaultGateway::create(

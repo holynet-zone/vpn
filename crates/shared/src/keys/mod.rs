@@ -113,7 +113,7 @@ impl<'de, const SIZE: usize> Deserialize<'de> for Key<SIZE> {
         }
 
         let mut key = [0u8; SIZE];
-        key.copy_from_slice(&bytes);
-        Ok(Self(key))
+        key.copy_from_slice(&bytes); // todo: use array, not vec
+        Ok(Self(key)) 
     }
 }

@@ -8,7 +8,7 @@ members = [
 
 [workspace.package]
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
 
 [workspace.dependencies]
 shared = { path = "crates/shared" }
@@ -16,7 +16,7 @@ snow = "0.9"
 
 # io
 tokio = { version = "1.44", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
-tun-rs = { version = "1.5", features = ["async_tokio"] }
+tun-rs = { version = "2.0.9", features = ["async_tokio"] }
 socket2 = "0.5.9"
 ctrlc = "3.4"
 
@@ -25,6 +25,7 @@ chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 anyhow = "1.0.95"
 etherparse = "0.17"
+bincode = "2.0.1"
 
 # logging
 tracing = "0.1"

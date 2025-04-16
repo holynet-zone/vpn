@@ -78,13 +78,17 @@ async fn complete(
             (HandshakeResponderBody::Disconnect(HandshakeError::ServerOverloaded), None)
         }
     };
-    let len = responder.write_message(&bincode::serialize(&body)?, &mut buffer)?;
+    let len = responder.write_message(
+        &bincode::serde::encode_to_vec(
+            &body,
+            bincode::config::standard()
+        )?, // todo: may we can use buffer here?
+        &mut buffer
+    )?;
     if let Some(sid) = sid {
         sessions.set_transport_state(&sid, responder.into_stateless_transport_mode()?);
     }
-    Ok(
-        buffer[..len].to_vec() // FIXME: remove copy
-    )
+    Ok(buffer[..len].to_vec().into())
 }
 
 pub(super) async fn handshake_executor(

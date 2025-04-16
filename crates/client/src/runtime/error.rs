@@ -35,12 +35,6 @@ impl From<anyhow::Error> for RuntimeError {
     }
 }
 
-impl From<bincode::Error> for RuntimeError {
-    fn from(err: bincode::Error) -> Self {
-        RuntimeError::Unexpected(format!("bincode error: {}", err))
-    }
-}
-
 impl<T> From<tokio::sync::broadcast::error::SendError<T>> for RuntimeError  {
     fn from(err: tokio::sync::broadcast::error::SendError<T>) -> Self {
         RuntimeError::IO(format!("broadcast send: {}", err))

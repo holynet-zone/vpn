@@ -1,4 +1,4 @@
-mod gen;
+mod generator;
 
 use std::{
     net::SocketAddr,
@@ -8,7 +8,7 @@ use std::{
 use std::net::IpAddr;
 use tokio::sync::Mutex;
 use async_trait::async_trait;
-use gen::{
+use generator::{
     SessionIdGenerator,
     IpAddressGenerator,
     increment_ip
@@ -18,7 +18,7 @@ use gen::{
 use dashmap::DashMap;
 use snow::StatelessTransportState;
 use shared::session::{Alg, SessionId};
-pub(crate) use crate::runtime::session::gen::HolyIp;
+pub(crate) use crate::runtime::session::generator::HolyIp;
 
 #[derive(Clone)]
 pub struct Session {

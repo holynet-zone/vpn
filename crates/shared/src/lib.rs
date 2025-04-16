@@ -6,3 +6,5 @@ pub mod credential;
 pub mod network;
 pub mod keepalive;
 pub mod protocol;
+pub mod tun;
+pub mod types;

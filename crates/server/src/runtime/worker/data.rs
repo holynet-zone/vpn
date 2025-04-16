@@ -15,13 +15,26 @@ use super::HolyIp;
 fn decode_body(encrypted: &EncryptedData, state: &StatelessTransportState) -> anyhow::Result<DataClientBody> {
     let mut buffer = [0u8; 65536];
     let len = state.read_message(0, encrypted, &mut buffer)?;
-    bincode::deserialize(&buffer[..len]).map_err(|e| anyhow::anyhow!(e))
+    match bincode::serde::decode_from_slice(
+        &buffer[..len],
+        bincode::config::standard()
+    ) {
+        Ok((obj, _)) => Ok(obj),
+        Err(err) => Err(anyhow::anyhow!(err))
+    }
 }
 
 fn encode_body(body: &DataServerBody, state: &StatelessTransportState) -> anyhow::Result<EncryptedData> {
     let mut buffer = [0u8; 65536];
-    let len = state.write_message(0, &bincode::serialize(body)?, &mut buffer)?;
-    Ok(buffer[..len].to_vec())
+    let len = state.write_message(
+        0,
+        &bincode::serde::encode_to_vec(
+            body,
+            bincode::config::standard()
+        )?,
+        &mut buffer
+    )?;
+    Ok(buffer[..len].to_vec().into())
 }
 
 pub(super) async fn data_udp_executor(
@@ -54,7 +67,7 @@ pub(super) async fn data_udp_executor(
                                 },
                                 DataClientBody::Payload(data) => {
                                     // sessions. - check HolyIp in sessions
-                                    if let Err(err) = tun_tx.send(data).await {
+                                    if let Err(err) = tun_tx.send(data.0).await {
                                         error!("[{}] failed to send data to tun queue: {}", addr, err);
                                     }
                                 },
@@ -90,7 +103,7 @@ pub(super) async fn data_tun_executor(
             data = queue.recv() => match data {
                 Some((packet, holy_ip)) => match sessions.get(&holy_ip).await {
                     Some(session) => match session.state {
-                        Some(state) => match encode_body(&DataServerBody::Payload(packet), &state) {
+                        Some(state) => match encode_body(&DataServerBody::Payload(packet.into()), &state) {
                             Ok(body) => {
                                 if let Err(e) = udp_tx.send((Packet::DataServer(body), session.sock_addr)).await {
                                     error!("failed to send server data packet to udp queue: {}", e);
