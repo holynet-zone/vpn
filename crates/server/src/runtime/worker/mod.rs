@@ -19,7 +19,8 @@ use super::{
     session::Sessions,
     error::RuntimeError
 };
-use shared::{client, server};
+use shared::protocol::{EncryptedData, EncryptedHandshake, Packet};
+use shared::session::SessionId;
 use crate::network::parse_source;
 use super::session::HolyIp;
 use crate::config::RuntimeConfig;
@@ -46,10 +47,10 @@ pub(crate) async fn create(
     socket.bind(&addr.into())?;
 
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
-    let (out_udp_tx, out_udp_rx) = mpsc::channel::<(server::packet::Packet, SocketAddr)>(config.out_udp_buf);
+    let (out_udp_tx, out_udp_rx) = mpsc::channel::<(Packet, SocketAddr)>(config.out_udp_buf);
     let (out_tun_tx, out_tun_rx) = mpsc::channel::<Vec<u8>>(config.out_tun_buf);
-    let (handshake_tx, handshake_rx) = mpsc::channel::<(client::packet::Handshake, SocketAddr)>(config.handshake_buf);
-    let (data_udp_tx, data_udp_rx) = mpsc::channel::<(client::packet::DataPacket, SocketAddr)>(config.data_udp_buf);
+    let (handshake_tx, handshake_rx) = mpsc::channel::<(EncryptedHandshake, SocketAddr)>(config.handshake_buf);
+    let (data_udp_tx, data_udp_rx) = mpsc::channel::<(SessionId, EncryptedData, SocketAddr)>(config.data_udp_buf);
     let (data_tun_tx, data_tun_rx) = mpsc::channel::<(Vec<u8>, HolyIp)>(config.data_tun_buf);
 
 
@@ -101,7 +102,7 @@ pub(crate) async fn create(
 async fn udp_sender(
     mut stop: Receiver<RuntimeError>,
     socket: Arc<UdpSocket>,
-    mut out_udp_rx: mpsc::Receiver<(server::packet::Packet, SocketAddr)>
+    mut out_udp_rx: mpsc::Receiver<(Packet, SocketAddr)>
 ) {
     loop {
         tokio::select! {
@@ -121,12 +122,11 @@ async fn udp_sender(
 async fn udp_listener(
     mut stop: Receiver<RuntimeError>,
     socket: Arc<UdpSocket>,
-    handshake_tx: mpsc::Sender<(client::packet::Handshake, SocketAddr)>,
-    data_tx: mpsc::Sender<(client::packet::DataPacket, SocketAddr)>
+    handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
+    data_tx: mpsc::Sender<(SessionId, EncryptedData, SocketAddr)>
 ) {
     let mut udp_buffer = [0u8; 65536];
     loop {
-        udp_buffer.fill(0);
         tokio::select! {
             _ = stop.recv() => break,
             result = socket.recv_from(&mut udp_buffer) => {
@@ -140,17 +140,21 @@ async fn udp_listener(
                             warn!("received UDP packet from {} larger than 65536 bytes, dropping it", client_addr);
                             continue;
                         }
-                        match client::packet::Packet::try_from(&udp_buffer[..n]) {
+                        match Packet::try_from(&udp_buffer[..n]) {
                             Ok(packet) => match packet {
-                                client::packet::Packet::Handshake(handshake) => {
+                                Packet::HandshakeInitial(handshake) => {
                                     if let Err(e) = handshake_tx.send((handshake, client_addr)).await {
                                         error!("failed to send handshake to executor: {}", e);
                                     }
                                 },
-                                client::packet::Packet::Data(data) => {
-                                    if let Err(e) = data_tx.send((data, client_addr)).await {
+                                Packet::DataClient{ sid, encrypted } => {
+                                    if let Err(e) = data_tx.send((sid, encrypted, client_addr)).await {
                                         error!("failed to send data to executor: {}", e);
                                     }
+                                },
+                                _ => {
+                                    warn!("received unexpected packet from {}, length {}", client_addr, n);
+                                    continue;
                                 }
                             },
                             Err(e) => {
@@ -195,7 +199,6 @@ async fn tun_listener(
 ) {
     let mut buffer = [0u8; 65536];
     loop {
-        buffer.fill(0);
         tokio::select! {
             _ = stop.recv() => break,
             result = tun.recv(&mut buffer) => match result {
@@ -232,7 +235,7 @@ async fn tun_listener(
 //     use crate::{storage, server};
 //     use crate::keys::handshake::{PublicKey, SecretKey};
 //     use crate::server::error::RuntimeError;
-//     use crate::server::packet::{DataBody, Packet};
+//     use crate::{DataBody, Packet};
 //     use crate::server::response::Response;
 //     use crate::server::r#mod::{data_executor, handshake_executor};
 //     use crate::session::Alg;
@@ -256,7 +259,7 @@ async fn tun_listener(
 //         tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 // 
 //         let (stop_tx, _) = broadcast::channel::<RuntimeError>(1);
-//         let (out_udp_tx, mut out_udp_rx) = mpsc::channel::<(server::packet::Packet, SocketAddr)>(1000);
+//         let (out_udp_tx, mut out_udp_rx) = mpsc::channel::<(Packet, SocketAddr)>(1000);
 //         let (handshake_tx, handshake_rx) = mpsc::channel::<(storage::packet::Handshake, SocketAddr)>(1000);
 //         let (data_tx, data_rx) = mpsc::channel::<(storage::packet::DataPacket, SocketAddr)>(1000);
 // 
@@ -324,8 +327,8 @@ async fn tun_listener(
 //             _ => panic!("unexpected packet")
 //         };
 //         let sid = match handshake_body {
-//             server::packet::HandshakeBody::Connected { sid, payload } => sid,
-//             server::packet::HandshakeBody::Disconnected(_) => panic!("storage disconnected")
+//             HandshakeBody::Connected { sid, payload } => sid,
+//             HandshakeBody::Disconnected(_) => panic!("storage disconnected")
 //         };
 // 
 //         // Transport

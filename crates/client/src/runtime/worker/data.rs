@@ -1,7 +1,6 @@
 use crate::runtime::error::RuntimeError;
-use shared::client::packet::{DataBody, DataPacket, Packet};
+use shared::protocol::{DataClientBody, DataServerBody, EncryptedData, Packet};
 use shared::keepalive::{format_duration_millis, micros_since_start};
-use shared::server;
 use shared::session::SessionId;
 use snow::StatelessTransportState;
 use std::sync::Arc;
@@ -12,27 +11,41 @@ use tracing::{info, warn};
 
 
 fn decrypt_body(
-    enc_packet: &server::packet::DataPacket,
+    encrypted: &EncryptedData,
     state: &StatelessTransportState
-) -> anyhow::Result<server::packet::DataBody> {
+) -> anyhow::Result<DataServerBody> {
     let mut buffer = [0u8; 65536];
-    state.read_message(0, &enc_packet.enc_body, &mut buffer)?;
-    bincode::deserialize(&buffer).map_err(|e| anyhow::anyhow!(e))
+    state.read_message(0, encrypted, &mut buffer)?;
+    match bincode::serde::decode_from_slice(
+        &buffer,
+        bincode::config::standard()
+    ) {
+        Ok((obj, _)) => Ok(obj),
+        Err(err) => Err(anyhow::anyhow!(err))
+    }
 }
 
-fn encrypt_body(body: &DataBody,
+fn encrypt_body(
+    body: &DataClientBody,
     state: &StatelessTransportState
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<EncryptedData> {
     let mut buffer = [0u8; 65536];
-    let len = state.write_message(0, &bincode::serialize(body)?, &mut buffer)?;
-    Ok(buffer[..len].to_vec())
+    let len = state.write_message(
+        0, 
+        &bincode::serde::encode_to_vec(
+            body,
+            bincode::config::standard()
+        )?,
+        &mut buffer
+    )?;
+    Ok(buffer[..len].to_vec().into())
 }
 
 
 pub(super) async fn data_udp_executor(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
-    mut queue: mpsc::Receiver<server::packet::DataPacket>,
+    mut queue: mpsc::Receiver<EncryptedData>,
     tun_sender: mpsc::Sender<Vec<u8>>,
     state: Arc<StatelessTransportState>,
 ) {
@@ -42,21 +55,21 @@ pub(super) async fn data_udp_executor(
             data = queue.recv() => match data { // todo: may exec in another thread from pool
                 Some(data) => match decrypt_body(&data, &state) {
                     Ok(data_body) => match data_body {
-                        server::packet::DataBody::KeepAlive(time) => {
+                        DataServerBody::KeepAlive(time) => {
                             info!("keepalive rtt: {}", format_duration_millis(
                                 time,
                                 micros_since_start()
                             ));
                             continue;
                         },
-                        server::packet::DataBody::Disconnect(ref code) => {
+                        DataServerBody::Disconnect(ref code) => {
                             stop_sender.send(RuntimeError::Disconnect(
                                 format!("server disconnected code {}", code)
                             )).unwrap();
                             continue;
                         },
-                        server::packet::DataBody::Payload(payload) => {
-                            tun_sender.send(payload).await.unwrap()
+                        DataServerBody::Payload(payload) => {
+                            tun_sender.send(payload.0).await.unwrap()
                         }
                     },
                     Err(e) => {
@@ -82,9 +95,9 @@ pub(super) async fn data_tun_executor(
         tokio::select! {
             _ = stop.recv() => break,
             body = queue.recv() => match body { // todo: may exec in another thread from pool??
-               Some(packet) => match encrypt_body(&DataBody::Payload(packet), &state) {
-                    Ok(enc_body) => {
-                        udp_sender.send(Packet::Data(DataPacket{ sid, enc_body })).await.unwrap(); // todo remove await
+               Some(packet) => match encrypt_body(&DataClientBody::Payload(packet.into()), &state) {
+                    Ok(encrypted) => {
+                        udp_sender.send(Packet::DataClient{ sid, encrypted }).await.unwrap(); // todo remove await
                     },
                     Err(e) => {
                         stop_sender.send(RuntimeError::Unexpected(
@@ -110,9 +123,9 @@ pub(super) async fn keepalive_sender(
     loop {
         tokio::select! {
             _ = stop.recv() => break,
-            _ = timer.tick() => match encrypt_body(&DataBody::KeepAlive(micros_since_start()), &state) {
-                Ok(enc_body) => {
-                    udp_sender.send(Packet::Data(DataPacket{ sid, enc_body })).await.unwrap();  // todo: if channel is full then we can ignore sending
+            _ = timer.tick() => match encrypt_body(&DataClientBody::KeepAlive(micros_since_start()), &state) {
+                Ok(encrypted) => {
+                    udp_sender.send(Packet::DataClient{ sid, encrypted }).await.unwrap();  // todo: if channel is full then we can ignore sending
                 },
                 Err(e) => {
                     stop_sender.send(RuntimeError::Unexpected(

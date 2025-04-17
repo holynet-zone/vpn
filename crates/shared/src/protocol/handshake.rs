@@ -3,19 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
 #[derive(Serialize, Deserialize)]
-pub struct Handshake {
-    pub body: Vec<u8>
-}
-
-
-#[derive(Serialize, Deserialize)]
-pub enum HandshakeBody {
-    Connected(HandshakePayload),
-    Disconnected(HandshakeError)
+pub enum HandshakeResponderBody {
+    Complete(HandshakeResponderPayload),
+    Disconnect(HandshakeError)
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct HandshakePayload {
+pub struct HandshakeResponderPayload {
     pub sid: SessionId,
     pub ipaddr: IpAddr
     // pub dns: Vec<IpAddr>,

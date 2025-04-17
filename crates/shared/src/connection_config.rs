@@ -1,6 +1,6 @@
 use crate::keys::handshake::{
-    SecretKey,
-    PublicKey
+    PublicKey,
+    SecretKey
 };
 use crate::session::Alg;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
@@ -52,9 +52,7 @@ pub struct ConnectionConfig {
 impl ConnectionConfig {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         match std::fs::read_to_string(path) {
-            Ok(config) => toml::from_str(&config).map_err(
-                |err| anyhow::Error::from(err)
-            ),
+            Ok(config) => toml::from_str(&config).map_err(anyhow::Error::from),
             Err(err) => Err(anyhow::Error::from(err))
         }
     }
@@ -68,14 +66,17 @@ impl ConnectionConfig {
 
     pub fn from_base64(base64: &str) -> anyhow::Result<Self> {
         let bytes = STANDARD_NO_PAD.decode(base64)?;
-        bincode::deserialize(&bytes).map_err(
-            |err| anyhow::Error::from(err)
-        )
+        let (obj, _) = bincode::serde::decode_from_slice(
+            &bytes,
+            bincode::config::standard()
+        ).map_err(anyhow::Error::from)?;
+        Ok(obj)
     }
     
     pub fn to_base64(&self) -> anyhow::Result<String> {
-        let bytes = bincode::serialize(&self).map_err(
-            |err| anyhow::Error::from(err)
+        let bytes = bincode::serde::encode_to_vec(
+            self,
+            bincode::config::standard()
         )?;
         Ok(STANDARD_NO_PAD.encode(&bytes))
     }

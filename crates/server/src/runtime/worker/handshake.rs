@@ -5,7 +5,6 @@ use snow::{Builder};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-use shared::client;
 use shared::credential::Credential;
 use shared::keys::handshake::{PublicKey, SecretKey};
 
@@ -15,13 +14,13 @@ use shared::handshake::{
     NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
     params_from_alg
 };
-use shared::server::packet::{Handshake, HandshakeBody, HandshakePayload, HandshakeError, Packet};
+use shared::protocol::{EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload, Packet};
 use shared::session::Alg;
 use crate::runtime::error::RuntimeError;
 
 
 fn decode_handshake_params(
-    handshake: &client::packet::Handshake, 
+    handshake: &EncryptedHandshake, 
     sk: &SecretKey
 ) -> anyhow::Result<(PublicKey, Alg)> {
     let mut buffer = [0u8; 65536];
@@ -30,13 +29,13 @@ fn decode_handshake_params(
         .local_private_key(sk.as_slice())
         .build_responder()?;
 
-    let alg = match responder.read_message(&handshake.body, &mut buffer) {
+    let alg = match responder.read_message(handshake, &mut buffer) {
         Err(err) => match err {
             snow::Error::Decrypt => {
                 responder = Builder::new(NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone())
                     .local_private_key(sk.as_slice())
                     .build_responder()?;
-                responder.read_message(&handshake.body, &mut buffer)?;
+                responder.read_message(handshake, &mut buffer)?;
                 Alg::ChaCha20Poly1305
             },
             _ => return Err(anyhow::Error::from(err))
@@ -54,12 +53,12 @@ fn decode_handshake_params(
 }
 
 async fn complete(
-    handshake: &client::packet::Handshake,
+    handshake: &[u8],
     cred: &Credential,
     alg: Alg,
     addr: &SocketAddr,
     sessions: &Sessions
-) -> anyhow::Result<Handshake> {
+) -> anyhow::Result<EncryptedHandshake> {
     let mut responder = Builder::new(params_from_alg(&alg).clone())
         .local_private_key(cred.sk.as_slice())
         .remote_public_key(cred.peer_pk.as_slice())
@@ -67,35 +66,34 @@ async fn complete(
         .build_responder()?;
     
     let mut buffer = [0u8; 65536];
-    let _len = responder.read_message(&handshake.body, &mut buffer)?; // todo we now dont need msg from client
-    let (body, sid) = match sessions.add(addr.clone(), alg, None).await {
+    let _len = responder.read_message(handshake, &mut buffer)?; // todo we now dont need msg from client
+    let (body, sid) = match sessions.add(*addr, alg, None).await {
         Some((sid, holy_ip)) => {
             info!("[{}] session created with sid: {}", addr, sid);
-            let handshake_payload = HandshakePayload {
-                sid,
-                ipaddr: holy_ip
-            };
-            (HandshakeBody::Connected(handshake_payload), Some(sid))
+            let handshake_payload = HandshakeResponderPayload { sid, ipaddr: holy_ip };
+            (HandshakeResponderBody::Complete(handshake_payload), Some(sid))
         },
         None => {
             warn!("[{}] failed to create session: overload", addr);
-            (HandshakeBody::Disconnected(HandshakeError::ServerOverloaded), None)
+            (HandshakeResponderBody::Disconnect(HandshakeError::ServerOverloaded), None)
         }
     };
-    let len = responder.write_message(&bincode::serialize(&body)?, &mut buffer)?;
+    let len = responder.write_message(
+        &bincode::serde::encode_to_vec(
+            &body,
+            bincode::config::standard()
+        )?, // todo: may we can use buffer here?
+        &mut buffer
+    )?;
     if let Some(sid) = sid {
         sessions.set_transport_state(&sid, responder.into_stateless_transport_mode()?);
     }
-    Ok(Handshake {
-        body: buffer[..len].to_vec() // FIXME: remove copy
-    })
-    
-    
+    Ok(buffer[..len].to_vec().into())
 }
 
 pub(super) async fn handshake_executor(
     mut stop: Receiver<RuntimeError>,
-    mut queue: mpsc::Receiver<(client::packet::Handshake, SocketAddr)>,
+    mut queue: mpsc::Receiver<(EncryptedHandshake, SocketAddr)>,
     udp_tx: mpsc::Sender<(Packet, SocketAddr)>,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sessions: Sessions,
@@ -114,7 +112,7 @@ pub(super) async fn handshake_executor(
                             &addr, 
                             &sessions
                         ).await {
-                            Ok(handshake) => match udp_tx.send((Packet::Handshake(handshake), addr)).await {
+                            Ok(handshake) => match udp_tx.send((Packet::HandshakeResponder(handshake), addr)).await {
                                 Ok(_) => info!("[{}] handshake complete", addr),
                                 Err(e) => warn!("[{}] failed to send handshake: {}", addr, e)
                             },

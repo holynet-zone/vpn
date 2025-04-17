@@ -1,7 +1,6 @@
 pub mod session;
 mod worker;
 pub mod error;
-mod tun;
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -21,6 +20,7 @@ use shared::{
     keys::handshake::{PublicKey, SecretKey},
     network::set_ipv4_forwarding
 };
+use shared::tun::setup_tun;
 use crate::storage::Client;
 
 pub struct Runtime {
@@ -84,11 +84,11 @@ impl Runtime {
         
         set_ipv4_forwarding(true)?;
         
-        let tun = Arc::new(tun::setup_tun(
+        let tun = Arc::new(setup_tun(
             &self.tun_name,
-            &self.tun_mtu,
-            &self.tun_ip,
-            &self.tun_prefix
+            self.tun_mtu,
+            self.tun_ip,
+            self.tun_prefix
         ).await?);
 
         let mut handles = Vec::new();
