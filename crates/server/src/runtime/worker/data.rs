@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use snow::StatelessTransportState;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use shared::protocol::{EncryptedData, Packet, DataClientBody, DataServerBody};
 use shared::session::SessionId;
@@ -43,42 +43,54 @@ pub(super) async fn data_udp_executor(
     udp_tx: mpsc::Sender<(Packet, SocketAddr)>,
     tun_tx: mpsc::Sender<Vec<u8>>,
     sessions: Sessions,
+    inf_sessions_timeout: bool,
 ) {
     loop {
         tokio::select! {
             _ = stop.recv() => break,
             data = queue.recv() => match data {
-                Some((sid, encrypypted, addr)) => match sessions.get(&sid).await {
-                    Some(session) => match session.state {
-                        Some(state) => match decode_body(&encrypypted, &state) {
-                            Ok(body) => match body {
-                                DataClientBody::KeepAlive(client_time) => {
-                                    info!("[{}] received keepalive packet from sid {}", addr, sid);
-                                    match encode_body(&DataServerBody::KeepAlive(client_time), &state) {
-                                        Ok(value) => {
-                                            if let Err(e) = udp_tx.send((Packet::DataServer(value), addr)).await {
-                                                error!("failed to send server data packet to udp queue: {}", e);
-                                            }
-                                        },
-                                        Err(e) => {
-                                            error!("[{}] failed to encode keepalive data packet: {}", addr, e);
+                Some((sid, encrypypted, addr)) => match sessions.get(&sid) {
+                    Some(session) => match decode_body(&encrypypted, &session.state) {
+                        Ok(body) => match body {
+                            DataClientBody::KeepAlive(client_time) => {
+                                info!("[{}] received keepalive packet from sid {}", addr, sid);
+                                if session.sock_addr() != addr {
+                                    debug!("[{}] changed address from {} to {}", sid, session.sock_addr(), addr);
+                                    sessions.update_sock_addr(sid, addr);
+                                }
+                                match encode_body(&DataServerBody::KeepAlive(client_time), &session.state) {
+                                    Ok(value) => {
+                                        if !inf_sessions_timeout {
+                                            sessions.touch(sid)
                                         }
+                                        if let Err(e) = udp_tx.send((Packet::DataServer(value), addr)).await {
+                                            error!("failed to send server data packet to udp queue: {}", e);
+                                        }
+                                    },
+                                    Err(e) => {
+                                        error!("[{}] failed to encode keepalive data packet: {}", addr, e);
                                     }
-                                },
-                                DataClientBody::Payload(data) => {
-                                    // sessions. - check HolyIp in sessions
-                                    if let Err(err) = tun_tx.send(data.0).await {
-                                        error!("[{}] failed to send data to tun queue: {}", addr, err);
-                                    }
-                                },
-                                DataClientBody::Disconnect => {
-                                    sessions.release(sid).await;
-                                    info!("[{}] received disconnect packet from sid {}", addr, sid);
-                                },
+                                }
                             },
-                            Err(err) => warn!("[{}] failed to decrypt data packet (sid: {}): {}", addr, sid, err)
+                            DataClientBody::Payload(data) => {
+                                // sessions. - check HolyIp in sessions
+                                if !inf_sessions_timeout {
+                                    sessions.touch(sid)
+                                }
+                                if session.sock_addr() != addr {
+                                    debug!("[{}] changed address from {} to {}", sid, session.sock_addr(), addr);
+                                    sessions.update_sock_addr(sid, addr);
+                                }
+                                if let Err(err) = tun_tx.send(data.0).await {
+                                    error!("[{}] failed to send data to tun queue: {}", addr, err);
+                                }
+                            },
+                            DataClientBody::Disconnect => {
+                                sessions.release(sid).await;
+                                info!("[{}] received disconnect packet from sid {}", addr, sid);
+                            },
                         },
-                        None => warn!("[{}] received data packet for session with unset state {}", addr, sid)
+                        Err(err) => warn!("[{}] failed to decrypt data packet (sid: {}): {}", addr, sid, err)
                     },
                     None => warn!("[{}] received data packet for unknown session {}", addr, sid)
                 },
@@ -101,17 +113,14 @@ pub(super) async fn data_tun_executor(
         tokio::select! {
             _ = stop.recv() => break,
             data = queue.recv() => match data {
-                Some((packet, holy_ip)) => match sessions.get(&holy_ip).await {
-                    Some(session) => match session.state {
-                        Some(state) => match encode_body(&DataServerBody::Payload(packet.into()), &state) {
-                            Ok(body) => {
-                                if let Err(e) = udp_tx.send((Packet::DataServer(body), session.sock_addr)).await {
-                                    error!("failed to send server data packet to udp queue: {}", e);
-                                }
-                            },
-                            Err(err) => warn!("[{}] failed to encode tun data packet (sid: {}): {}", session.sock_addr, session.id, err)
+                Some((packet, holy_ip)) => match sessions.get(&holy_ip) {
+                    Some(session) => match encode_body(&DataServerBody::Payload(packet.into()), &session.state) {
+                        Ok(body) => {
+                            if let Err(e) = udp_tx.send((Packet::DataServer(body), session.sock_addr())).await {
+                                error!("failed to send server data packet to udp queue: {}", e);
+                            }
                         },
-                        None => warn!("[{}] received tun data packet for session with unset state (sid: {})", session.sock_addr, session.id)
+                        Err(err) => warn!("[{}] failed to encode tun data packet (sid: {}): {}", session.sock_addr(), session.id, err)
                     },
                     None => warn!("[{}] received data packet for unknown session", holy_ip)
                 },

@@ -1,6 +1,6 @@
 use crate::runtime::error::RuntimeError;
 use shared::protocol::{DataClientBody, DataServerBody, EncryptedData, Packet};
-use shared::keepalive::{format_duration_millis, micros_since_start};
+use shared::time::{format_duration_millis, micros_since_start};
 use shared::session::SessionId;
 use snow::StatelessTransportState;
 use std::sync::Arc;

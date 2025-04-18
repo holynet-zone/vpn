@@ -81,6 +81,7 @@ pub(crate) async fn create(
         out_udp_tx.clone(),
         out_tun_tx.clone(),
         sessions.clone(),
+        config.session.unwrap_or_default().timeout == 0
     ));
 
     tokio::spawn(data_tun_executor(

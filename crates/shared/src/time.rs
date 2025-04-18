@@ -1,10 +1,14 @@
 use std::time::Instant;
 
-static KEEPALIVE_START_INSTANT: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
+static APP_START_INSTANT: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
 
 
 pub fn micros_since_start() -> u128 {
-    KEEPALIVE_START_INSTANT.elapsed().as_micros()
+    APP_START_INSTANT.elapsed().as_micros()
+}
+
+pub fn sec_since_start() -> u64 {
+    APP_START_INSTANT.elapsed().as_secs()
 }
 
 
