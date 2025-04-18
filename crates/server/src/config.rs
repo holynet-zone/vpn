@@ -20,6 +20,13 @@ pub struct InterfaceConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct SessionConfig {
+    pub ttl: usize, // sec
+    pub timeout: usize, // sec
+    pub cleanup_interval: usize, // sec
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RuntimeConfig {
     pub workers: usize,
     pub so_rcvbuf: usize,
@@ -29,7 +36,7 @@ pub struct RuntimeConfig {
     pub handshake_buf: usize,
     pub data_udp_buf: usize,
     pub data_tun_buf: usize,
-    pub session_ttl: usize, // sec
+    pub session: Option<SessionConfig>
 }
 
 #[derive(Serialize, Deserialize)]
@@ -94,6 +101,16 @@ impl Default for InterfaceConfig {
     }
 }
 
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            ttl: 60 * 60 * 24, // 1 day todo: not working now
+            timeout: 60 * 5, // 5 min
+            cleanup_interval: 60, // 1 min
+        }
+    }
+}
+
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
@@ -105,7 +122,7 @@ impl Default for RuntimeConfig {
             handshake_buf: 1000,
             data_udp_buf: 1000,
             data_tun_buf: 1000,
-            session_ttl: 0, // turn off
+            session: Some(SessionConfig::default()),
         }
     }
 }
