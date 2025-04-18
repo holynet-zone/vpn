@@ -36,3 +36,4 @@ tokio = { workspace = true }
 socket2 = "0.5.8"
 async-trait = "0.1"
 hex = "0.4.3"
+rand = "0.9.1"

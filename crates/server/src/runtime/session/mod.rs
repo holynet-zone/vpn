@@ -69,7 +69,7 @@ pub struct Sessions {
 impl Sessions {
     pub fn new(network: &IpAddr, prefix: u8) -> Self {
         Sessions {
-            sid_gen: Arc::new(Mutex::new(SessionIdGenerator::new(1))),
+            sid_gen: Arc::new(Mutex::new(SessionIdGenerator::new())),
             holy_ip_gen: Arc::new(Mutex::new(IpAddressGenerator::new(increment_ip(*network), prefix))),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new())
