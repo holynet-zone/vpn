@@ -67,7 +67,7 @@ async fn complete(
     
     let mut buffer = [0u8; 65536];
     let _len = responder.read_message(handshake, &mut buffer)?; // todo we now dont need msg from client
-    let (body, keys) = match sessions.next_session_id().await {
+    let (body, keys) = match sessions.next_session_id() {
         Some(sid) => match sessions.next_holy_ip().await {
             Some(ipaddr) => {
                 info!("[{}] session created with sid: {}", addr, sid);
