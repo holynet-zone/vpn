@@ -84,11 +84,7 @@ pub(super) async fn data_udp_executor(
                                 if let Err(err) = tun_tx.send(data.0).await {
                                     error!("[{}] failed to send data to tun queue: {}", addr, err);
                                 }
-                            },
-                            DataClientBody::Disconnect => {
-                                sessions.release(sid).await;
-                                info!("[{}] received disconnect packet from sid {}", addr, sid);
-                            },
+                            }
                         },
                         Err(err) => warn!("[{}] failed to decrypt data packet (sid: {}): {}", addr, sid, err)
                     },

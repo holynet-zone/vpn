@@ -156,15 +156,15 @@ sequenceDiagram
                                   │               0                      128
                                   │               ┌────────────────────────┐
                                   │               │    CLIENT TIMESTAMP    │
-                                  ├──── KEEPALIVE │         micros         │
-                                  │       0x01    │        (128bit)        │
-                                  │               └────────────────────────┘
-                                  │                                         
-                                  │                                         
-                                  │                                         
-                                  │                                         
-                                  └──── Disconnect                          
-                                          0x02                              
+                                  └──── KEEPALIVE │         micros         │
+                                          0x01    │        (128bit)        │
+                                                  └────────────────────────┘
+                                                                           
+                                                                           
+                                                                           
+                                                                           
+                                                         
+ 
 ```
 
 #### DataServer

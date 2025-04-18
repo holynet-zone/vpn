@@ -11,6 +11,5 @@ pub enum DataServerBody {
 #[derive(Serialize, Deserialize)]
 pub enum DataClientBody {
     Payload(VecU16<u8>),
-    KeepAlive(u128),
-    Disconnect
+    KeepAlive(u128)
 }
