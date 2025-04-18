@@ -1,11 +1,16 @@
-use crate::runtime::error::RuntimeError;
-use crate::runtime::Runtime;
+use server::{
+    runtime::{
+        error::RuntimeError,
+        Runtime
+    },
+    config
+};
 use crate::storage::{database, Clients};
-use crate::{config, CONFIG_PATH_ENV};
 use shared::network::find_available_ifname;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{process, thread};
+use crate::CONFIG_PATH_ENV;
 
 pub async fn start(
     host: Option<String>,
@@ -51,7 +56,7 @@ pub async fn start(
     
     let clients = Clients::new(database(&config.general.storage)?);
     let mut runtime = Runtime::from_config(config)?;
-    runtime.insert_clients(clients.get_all().await);
+    runtime.insert_clients(clients.get_all().await.iter().map(|cl| (cl.peer_pk.clone(), cl.psk.clone())).collect());
 
     let stop_tx = runtime.stop_tx.clone();
 

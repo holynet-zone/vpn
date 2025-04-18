@@ -22,7 +22,6 @@ use shared::{
     network::set_ipv4_forwarding
 };
 use shared::tun::setup_tun;
-use crate::storage::Client;
 
 pub struct Runtime {
     sock: SocketAddr,
@@ -64,10 +63,10 @@ impl Runtime {
         })
     }
     
-    pub fn insert_clients(&mut self, clients: Vec<Client>) {
+    pub fn insert_clients(&mut self, clients: Vec<(PublicKey, SecretKey)>) {
         self.known_clients = Arc::new(DashMap::from_iter(
             clients.into_iter()
-                .map(|client| (client.peer_pk, client.psk))
+                .map(|(peer_pk, psk)| (peer_pk, psk))
         ));
     }
     

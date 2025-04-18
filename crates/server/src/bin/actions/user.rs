@@ -1,13 +1,16 @@
-use crate::cli::schema::UserRow;
-use crate::cli::style::format_opaque_bytes;
-use crate::storage::{database, Client, Clients};
-use crate::{config, CONFIG_PATH_ENV};
+use super::super::{
+    schema::UserRow,
+    style::format_opaque_bytes,
+    storage::{database, Client, Clients}
+};
 use inquire::validator::Validation;
 use inquire::required;
 use shared::connection_config::{ConnectionConfig, CredentialsConfig, GeneralConfig};
 use shared::keys::handshake::{PublicKey, SecretKey};
 use shared::session::Alg;
 use std::path::{Path, PathBuf};
+use server::config;
+use crate::CONFIG_PATH_ENV;
 
 pub async fn add(
     config: Option<PathBuf>,

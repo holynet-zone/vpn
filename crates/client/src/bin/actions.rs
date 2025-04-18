@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{process, thread};
+use ctrlc::set_handler;
 use client::runtime::error::RuntimeError;
 use client::runtime::Runtime;
 use shared::connection_config::{
@@ -15,9 +16,9 @@ pub async fn connect(config_path: Option<PathBuf>, key: Option<String>) -> anyho
     }
     
     let mut config = if let Some(ref path) = config_path {
-        ConnectionConfig::load(&*path)
+        ConnectionConfig::load(path)
     } else if let Some(key) = key {
-        ConnectionConfig::from_base64(&*key)
+        ConnectionConfig::from_base64(&key)
     } else {
         return Err(anyhow::anyhow!("config or key is required"));
     }?;
@@ -34,7 +35,7 @@ pub async fn connect(config_path: Option<PathBuf>, key: Option<String>) -> anyho
     }
     
     if let Some(ref path) = config_path {
-        config.save(&*path)?;
+        config.save(&path)?;
     }
 
     let runtime = Runtime::new(
@@ -47,14 +48,12 @@ pub async fn connect(config_path: Option<PathBuf>, key: Option<String>) -> anyho
     
     let stop_tx = runtime.stop_tx.clone();
 
-    ctrlc::set_handler(move || {
+    set_handler(move || {
         println!("Ctrl-C received, stopping runtime...");
         stop_tx.send(RuntimeError::StopSignal).unwrap();
         thread::sleep(Duration::from_secs(1));
         process::exit(0); // todo
     }).expect("error setting Ctrl-C handler");
     
-    runtime.run().await.map_err(
-        |err| anyhow::Error::from(err)
-    )
+    runtime.run().await.map_err(anyhow::Error::from)
 }
