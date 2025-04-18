@@ -7,6 +7,7 @@ use std::{
     thread
 };
 use std::sync::Arc;
+use std::time::Duration;
 use dashmap::DashMap;
 use self::{
     error::RuntimeError,
@@ -130,6 +131,20 @@ impl Runtime {
             });
 
             handles.push(handle);
+        }
+        
+        // session cleanup
+        let session = self.config.session.clone().unwrap_or_default();
+        if session.timeout != 0 {
+            tracing::info!("session cleanup worker started");
+            tokio::spawn(session::worker::run(
+                self.stop_tx.clone(),
+                self.sessions.clone(),
+                Duration::from_secs(session.timeout as u64),
+                Duration::from_secs(session.cleanup_interval as u64),
+            ));
+        } else { 
+            tracing::info!("session cleanup worker disabled");
         }
         
         let mut errors = Vec::new();

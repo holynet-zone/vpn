@@ -67,14 +67,23 @@ async fn complete(
     
     let mut buffer = [0u8; 65536];
     let _len = responder.read_message(handshake, &mut buffer)?; // todo we now dont need msg from client
-    let (body, sid) = match sessions.add(*addr, alg, None).await {
-        Some((sid, holy_ip)) => {
-            info!("[{}] session created with sid: {}", addr, sid);
-            let handshake_payload = HandshakeResponderPayload { sid, ipaddr: holy_ip };
-            (HandshakeResponderBody::Complete(handshake_payload), Some(sid))
+    let (body, keys) = match sessions.next_session_id().await {
+        Some(sid) => match sessions.next_holy_ip().await {
+            Some(ipaddr) => {
+                info!("[{}] session created with sid: {}", addr, sid);
+                (
+                    HandshakeResponderBody::Complete(HandshakeResponderPayload { sid, ipaddr }), 
+                    Some((sid, ipaddr))
+                )
+            },
+            None => {
+                warn!("[{}] failed to create session: ran out of holy ip", addr);
+                sessions.release_session_id(&sid).await;
+                (HandshakeResponderBody::Disconnect(HandshakeError::ServerOverloaded), None)
+            }
         },
         None => {
-            warn!("[{}] failed to create session: overload", addr);
+            warn!("[{}] failed to create session: ran out of sid", addr);
             (HandshakeResponderBody::Disconnect(HandshakeError::ServerOverloaded), None)
         }
     };
@@ -85,8 +94,8 @@ async fn complete(
         )?, // todo: may we can use buffer here?
         &mut buffer
     )?;
-    if let Some(sid) = sid {
-        sessions.set_transport_state(&sid, responder.into_stateless_transport_mode()?);
+    if let Some((sid, holy_ip)) = keys {
+        sessions.add(sid, holy_ip,  *addr, alg, responder.into_stateless_transport_mode()?);
     }
     Ok(buffer[..len].to_vec().into())
 }
