@@ -60,7 +60,7 @@ impl Session {
 
 #[derive(Clone)]
 pub struct Sessions {
-    sid_gen: Arc<Mutex<SessionIdGenerator>>,
+    sid_gen: Arc<SessionIdGenerator>,
     holy_ip_gen: Arc<Mutex<IpAddressGenerator>>,
     map: Arc<DashMap<SessionId, Arc<Session>>>,
     holy_ip_map: Arc<DashMap<HolyIp, SessionId>>,
@@ -69,15 +69,15 @@ pub struct Sessions {
 impl Sessions {
     pub fn new(network: &IpAddr, prefix: u8) -> Self {
         Sessions {
-            sid_gen: Arc::new(Mutex::new(SessionIdGenerator::new())),
+            sid_gen: Arc::new(SessionIdGenerator::new()),
             holy_ip_gen: Arc::new(Mutex::new(IpAddressGenerator::new(increment_ip(*network), prefix))),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new())
         }
     }
     
-    pub async fn next_session_id(&self) -> Option<SessionId> {
-        self.sid_gen.lock().await.next()
+    pub fn next_session_id(&self) -> Option<SessionId> {
+        self.sid_gen.next()
     }
 
     pub async fn next_holy_ip(&self) -> Option<HolyIp> {
@@ -87,7 +87,7 @@ impl Sessions {
     /// Warning: only if [`SessionId`] was created manually with [`Sessions::next_session_id`] 
     /// and not passed to [`Sessions::add`]
     pub async fn release_session_id(&self, sid: &SessionId) {
-        self.sid_gen.lock().await.release(sid);
+        self.sid_gen.release(sid);
     }
     
     /// Warning: only if [`HolyIp`] was created manually with [`Sessions::next_holy_ip`]
@@ -158,14 +158,13 @@ impl Sessions {
                 session_ids_to_release.push(sid);
             }
         }
-
-        let mut sid_gen = self.sid_gen.lock().await;
-        let mut holy_ip_gen = self.holy_ip_gen.lock().await;
+        
 
         for sid in session_ids_to_release.iter() {
-            sid_gen.release(sid);
+            self.sid_gen.release(sid);
         }
 
+        let mut holy_ip_gen = self.holy_ip_gen.lock().await;
         for holy_ip in holy_ips_to_release.iter() {
             holy_ip_gen.release(holy_ip);
         }
@@ -242,7 +241,7 @@ impl ReleaseKey for SessionId {
         if let Some(holy_ip) = holy_ip {
             context.holy_ip_gen.lock().await.release(&holy_ip);
         }
-        context.sid_gen.lock().await.release(self);
+        context.sid_gen.release(self);
     }
 }
 
