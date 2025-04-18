@@ -4,7 +4,6 @@ mod network;
 mod storage;
 mod cli;
 
-use tracing_appender;
 use tracing_subscriber::{filter, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt};
 
 use crate::cli::render_config;
