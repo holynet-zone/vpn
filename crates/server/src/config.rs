@@ -1,7 +1,12 @@
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use serde::{Deserialize, Serialize};
 use shared::keys::handshake::SecretKey;
+use shared::network::find_available_ifname;
+
+
+static PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| Mutex::new(PathBuf::from("config.toml")));
 
 #[derive(Serialize, Deserialize)]
 pub struct GeneralConfig {
@@ -56,15 +61,31 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> anyhow::Result<Config> {
-        let config = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&config)?)
+    pub fn path() -> PathBuf {
+        PATH.lock().expect("failed to lock config path mutex, this should not happen").clone()
     }
 
-    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
-        let config = toml::to_string(self)?;
-        std::fs::write(path, &config)?;
-        Ok(())
+    pub fn load(path: &Path) -> anyhow::Result<Config> {
+        let config = toml::from_str(&std::fs::read_to_string(path)?)?;
+        let mut path_guard = PATH.lock().expect(
+            "failed to lock config path mutex, this should not happen"
+        );
+        *path_guard = path.to_path_buf();
+        Ok(config)
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        std::fs::write(
+            Self::path(),
+            &toml::to_string(self)?
+        ).map_err(anyhow::Error::from)
+    }
+
+    pub fn save_as(&self, path: &Path) -> anyhow::Result<()> {
+        std::fs::write(
+            path,
+            &toml::to_string(self)?
+        ).map_err(anyhow::Error::from)
     }
 }
 
@@ -93,7 +114,7 @@ impl Default for GeneralConfig {
 impl Default for InterfaceConfig {
     fn default() -> Self {
         Self {
-            name: "holynet0".into(), // todo from available interface number
+            name: find_available_ifname("holynet"),
             mtu: 1420,
             address: IpAddr::from([10, 8, 0, 0]),
             prefix: 24,

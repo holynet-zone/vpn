@@ -6,6 +6,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     thread
 };
+use std::fmt::format;
 use std::sync::Arc;
 use std::time::Duration;
 use dashmap::DashMap;
@@ -42,7 +43,7 @@ pub struct Runtime {
 impl Runtime {
 
     pub fn from_config(config: Config) -> Result<Self, RuntimeError> {
-        let (stop_tx, _) = broadcast::channel::<RuntimeError>(5);
+        let (stop_tx, _) = broadcast::channel::<RuntimeError>(8);
 
         Ok(Self {
             sock: SocketAddr::new(
@@ -70,7 +71,7 @@ impl Runtime {
         ));
     }
     
-    pub async fn run(&mut self) -> Result<(), RuntimeError> {
+    pub async fn run(&mut self) -> Result<(), Vec<RuntimeError>> {
         let workers = match self.config.workers == 0 {
             true => thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
             false => self.config.workers
@@ -82,14 +83,14 @@ impl Runtime {
             workers
         );
         
-        set_ipv4_forwarding(true)?;
+        set_ipv4_forwarding(true).map_err(|err| vec![RuntimeError::from(err)])?;
         
         let tun = Arc::new(setup_tun(
             &self.tun_name,
             self.tun_mtu,
             self.tun_ip,
             self.tun_prefix
-        ).await?);
+        ).await.map_err(|err| vec![RuntimeError::from(err)])?);
 
         let mut handles = Vec::new();
         
@@ -148,26 +149,21 @@ impl Runtime {
         
         let mut errors = Vec::new();
         for handle in handles {
-            if let Err(err) = handle.join().unwrap_or_else(|e| {
-                tracing::error!("panic in worker thread: {:?}", e);
-                Err(RuntimeError::Unexpected(format!("panic in worker thread: {:?}", e)))
-            }) {
-                errors.push(err);
+            if let Err(err) = handle.join() {
+                errors.push(RuntimeError::Unexpected(format!("{:?}", err)));
             }
         }
 
-        set_ipv4_forwarding(false)?; // todo save bef aft state
+        set_ipv4_forwarding(false).map_err(|err| vec![RuntimeError::from(err)])?;; // todo save bef aft state
 
         if !errors.is_empty() {
-            return Err(RuntimeError::Unexpected(
-                format!("{} workers critical failed: {:?}", errors.len(), errors)
-            ))
+            return Err(errors);
         }
         
         let mut stop_rx = self.stop_tx.subscribe();
 
         if let Ok(err) = stop_rx.recv().await {
-            return Err(err);
+            return Err(vec![err]);
         }
 
         panic!("all workers stopped unexpectedly");

@@ -8,7 +8,7 @@ use self::{
 };
 
 use tokio::sync::broadcast;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use shared::session::Alg;
 use shared::connection_config::{CredentialsConfig, RuntimeConfig};
 
@@ -54,19 +54,19 @@ impl Runtime {
         tokio::select! {
             resp = worker => match resp {
                 Ok(_) => {
-                    warn!("worker stopped without error, waiting for stop signal");
+                    debug!("worker stopped without error, waiting for stop signal");
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     Ok(())
                 },
                 Err(err) => {
-                    error!("worker result with error");
+                    debug!("worker result with error");
                     Err(err)
                 }
             },
             err = stop_rx.recv() => match err {
                 Ok(err) => Err(err),
                 Err(err) => {
-                    Err(RuntimeError::IO(format!("stop channel is closed: {err}")))
+                    Err(RuntimeError::IO(format!("stop channel err: {err}")))
                 }
             }
         }
