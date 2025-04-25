@@ -53,7 +53,7 @@ fn complete(
     }
 }
 
-pub(super) async fn handshake_step(
+pub async fn handshake_step(
     socket: Arc<UdpSocket>,
     cred: CredentialsConfig,
     alg: Alg,

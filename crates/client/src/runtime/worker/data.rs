@@ -42,7 +42,7 @@ fn encrypt_body(
 }
 
 
-pub(super) async fn data_udp_executor(
+pub(crate) async fn data_udp_executor(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     mut queue: mpsc::Receiver<EncryptedData>,
@@ -83,7 +83,7 @@ pub(super) async fn data_udp_executor(
     }
 }
 
-pub(super) async fn data_tun_executor(
+pub(crate) async fn data_tun_executor(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     mut queue: mpsc::Receiver<Vec<u8>>,
@@ -111,7 +111,7 @@ pub(super) async fn data_tun_executor(
     }
 }
 
-pub(super) async fn keepalive_sender(
+pub(crate) async fn keepalive_sender(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     udp_sender: mpsc::Sender<Packet>,
