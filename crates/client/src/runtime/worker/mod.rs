@@ -14,8 +14,8 @@ use tokio::sync::broadcast::{Receiver, Sender};
 use tracing::{error, info, warn};
 use tun_rs::AsyncDevice;
 use shared::protocol::{EncryptedData, Packet};
-use shared::connection_config::{CredentialsConfig, RuntimeConfig};
-
+use shared::connection_config::{CredentialsConfig, InterfaceConfig, RuntimeConfig};
+use shared::network::find_available_ifname;
 use shared::session::Alg;
 use shared::tun::setup_tun;
 use crate::network::DefaultGateway;
@@ -29,7 +29,8 @@ pub(crate) async fn create(
     stop_tx: Sender<RuntimeError>,
     cred: CredentialsConfig,
     alg: Alg,
-    config: RuntimeConfig
+    runtime_config: RuntimeConfig,
+    iface_config: InterfaceConfig,
 ) -> Result<(), RuntimeError> {
     let socket = Socket::new(
         Domain::for_address(addr),
@@ -38,23 +39,23 @@ pub(crate) async fn create(
     )?;
     socket.set_nonblocking(true)?;
     // socket.set_reuse_port(true)?;
-    socket.set_recv_buffer_size(config.so_rcvbuf)?;
-    socket.set_send_buffer_size(config.so_sndbuf)?;
+    socket.set_recv_buffer_size(runtime_config.so_rcvbuf)?;
+    socket.set_send_buffer_size(runtime_config.so_sndbuf)?;
     socket.bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0,0,0,0)), 0).into())?;
     socket.connect(&addr.into())?;
 
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
-    let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(config.out_udp_buf);
-    let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(config.out_tun_buf);
-    let (data_udp_tx, data_udp_rx) = mpsc::channel::<EncryptedData>(config.data_udp_buf);
-    let (data_tun_tx, data_tun_rx) = mpsc::channel::<Vec<u8>>(config.data_tun_buf);
+    let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(runtime_config.out_udp_buf);
+    let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(runtime_config.out_tun_buf);
+    let (data_udp_tx, data_udp_rx) = mpsc::channel::<EncryptedData>(runtime_config.data_udp_buf);
+    let (data_tun_tx, data_tun_rx) = mpsc::channel::<Vec<u8>>(runtime_config.data_tun_buf);
     
     // Handshake step
     let (handshake_payload, state) = match tokio::spawn(handshake_step(
         socket.clone(),
         cred,
         alg,
-        Duration::from_millis(config.handshake_timeout)
+        Duration::from_millis(runtime_config.handshake_timeout)
     )).await.unwrap() { // todo unwrap
         Ok((p, state)) => (p, Arc::new(state)),
         Err(err) => {
@@ -89,10 +90,11 @@ pub(crate) async fn create(
     ));
     
     let tun = Arc::new(setup_tun(
-        "holynet0",
-        1500,
+        iface_config.name,
+        iface_config.mtu,
         handshake_payload.ipaddr,
-        32
+        32,
+        false
     ).await?);
 
     let mut gw = DefaultGateway::create(
@@ -118,7 +120,7 @@ pub(crate) async fn create(
     ));
 
 
-    match config.keepalive {
+    match runtime_config.keepalive {
         Some(duration) => {
             info!("starting keepalive sender with interval {:?}", duration);
             tokio::spawn(keepalive_sender(

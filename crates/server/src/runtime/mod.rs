@@ -85,12 +85,13 @@ impl Runtime {
         
         set_ipv4_forwarding(true).map_err(|err| vec![RuntimeError::from(err)])?;
         
-        let tun = Arc::new(setup_tun(
+        let tun = setup_tun(
             &self.tun_name,
             self.tun_mtu,
             self.tun_ip,
-            self.tun_prefix
-        ).await.map_err(|err| vec![RuntimeError::from(err)])?);
+            self.tun_prefix,
+            true
+        ).await.map_err(|err| vec![RuntimeError::from(err)])?;
 
         let mut handles = Vec::new();
         
@@ -100,7 +101,9 @@ impl Runtime {
             let sessions = self.sessions.clone();
             let sk = self.sk.clone();
             let known_clients = self.known_clients.clone();
-            let tun = tun.clone();
+            let tun = tun.try_clone().map_err(|err| vec![RuntimeError::Tun(
+                format!("failed to clone tun device: {}", err)
+            )])?;
             let config = self.config.clone();
             
             let handle = thread::spawn(move || {

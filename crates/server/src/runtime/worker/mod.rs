@@ -31,7 +31,7 @@ pub(crate) async fn create(
     sessions: Sessions,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sk: SecretKey,
-    tun: Arc<AsyncDevice>,
+    tun: AsyncDevice,
     worker_id: usize,
     config: RuntimeConfig
 ) -> Result<(), RuntimeError> {
@@ -47,6 +47,8 @@ pub(crate) async fn create(
     socket.bind(&addr.into())?;
 
     let socket = Arc::new(UdpSocket::from_std(socket.into())?);
+    let tun = Arc::new(tun);
+    
     let (out_udp_tx, out_udp_rx) = mpsc::channel::<(Packet, SocketAddr)>(config.out_udp_buf);
     let (out_tun_tx, out_tun_rx) = mpsc::channel::<Vec<u8>>(config.out_tun_buf);
     let (handshake_tx, handshake_rx) = mpsc::channel::<(EncryptedHandshake, SocketAddr)>(config.handshake_buf);

@@ -7,6 +7,7 @@ use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use crate::network::find_available_ifname;
 
 #[derive(Serialize, Deserialize)]
 pub struct GeneralConfig {
@@ -22,7 +23,7 @@ pub struct CredentialsConfig {
     pub server_public_key: PublicKey
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InterfaceConfig {
     pub name: String,
     pub mtu: u16
@@ -59,9 +60,7 @@ impl ConnectionConfig {
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let config = toml::to_string(self)?;
-        std::fs::write(path, &config).map_err(
-            |err| anyhow::Error::from(err)
-        )
+        std::fs::write(path, &config).map_err(anyhow::Error::from)
     }
 
     pub fn from_base64(base64: &str) -> anyhow::Result<Self> {
@@ -93,6 +92,15 @@ impl Default for RuntimeConfig {
             out_tun_buf: 1000,
             data_udp_buf: 1000,
             data_tun_buf: 1000,
+        }
+    }
+}
+
+impl Default for InterfaceConfig {
+    fn default() -> Self {
+        Self {
+            name: find_available_ifname("holynet"),
+            mtu: 1500
         }
     }
 }

@@ -10,13 +10,14 @@ use self::{
 use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
 use shared::session::Alg;
-use shared::connection_config::{CredentialsConfig, RuntimeConfig};
+use shared::connection_config::{CredentialsConfig, InterfaceConfig, RuntimeConfig};
 
 pub struct Runtime {
     sock: SocketAddr,
     alg: Alg,
     cred: CredentialsConfig,
     config: RuntimeConfig,
+    iface_config: InterfaceConfig,
     pub stop_tx: broadcast::Sender<RuntimeError>
 }
 
@@ -26,7 +27,8 @@ impl Runtime {
         port: u16,
         alg: Alg,
         cred: CredentialsConfig,
-        config: RuntimeConfig
+        config: RuntimeConfig,
+        iface_config: InterfaceConfig,
     ) -> Self {
         let (stop_tx, _) = broadcast::channel::<RuntimeError>(10);
         Self {
@@ -34,6 +36,7 @@ impl Runtime {
             alg,
             cred,
             config,
+            iface_config,
             stop_tx
         }
     }
@@ -46,7 +49,8 @@ impl Runtime {
             self.stop_tx.clone(),
             self.cred.clone(),
             self.alg.clone(),
-            self.config.clone()
+            self.config.clone(),
+            self.iface_config.clone(),
         );
         
         let mut stop_rx = self.stop_tx.subscribe();

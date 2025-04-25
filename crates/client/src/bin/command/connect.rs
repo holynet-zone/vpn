@@ -72,7 +72,8 @@ impl ConnectCmd {
             config.general.port,
             config.general.alg,
             config.credentials,
-            config.runtime.unwrap_or_default()
+            config.runtime.unwrap_or_default(),
+            config.interface.unwrap_or_default(),
         );
 
         let stop_tx = runtime.stop_tx.clone();
