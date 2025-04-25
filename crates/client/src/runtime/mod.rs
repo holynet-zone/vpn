@@ -93,8 +93,8 @@ impl Runtime {
             true
         );
 
-        let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(self.config.out_udp_buf);
-        let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(self.config.out_tun_buf);
+        let (udp_sender_tx, udp_sender_rx) = mpsc::unbounded_channel::<Packet>();
+        let (tun_sender_tx, tun_sender_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
         let mut data_udp_senders = Vec::new();
         let mut data_tun_senders = Vec::new();
@@ -105,8 +105,8 @@ impl Runtime {
             let udp_sender = udp_sender_tx.clone();
             let tun_sender = tun_sender_tx.clone();
 
-            let (data_udp_sender, data_udp_rx) = mpsc::channel::<EncryptedData>(self.config.data_udp_buf);
-            let (data_tun_sender, data_tun_rx) = mpsc::channel::<Vec<u8>>(self.config.data_tun_buf);
+            let (data_udp_sender, data_udp_rx) = mpsc::unbounded_channel::<EncryptedData>();
+            let (data_tun_sender, data_tun_rx) = mpsc::unbounded_channel::<Vec<u8>>();
             data_udp_senders.push(data_udp_sender);
             data_tun_senders.push(data_tun_sender);
 

@@ -5,8 +5,8 @@ use shared::session::SessionId;
 use snow::StatelessTransportState;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast::{Receiver, Sender};
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tracing::{info, warn};
 
 
@@ -43,10 +43,10 @@ fn encrypt_body(
 
 
 pub(crate) async fn data_udp_executor(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
-    mut queue: mpsc::Receiver<EncryptedData>,
-    tun_sender: mpsc::Sender<Vec<u8>>,
+    stop_sender: broadcast::Sender<RuntimeError>,
+    mut stop: broadcast::Receiver<RuntimeError>,
+    mut queue: UnboundedReceiver<EncryptedData>,
+    tun_sender: UnboundedSender<Vec<u8>>,
     state: Arc<StatelessTransportState>,
 ) {
     loop {
@@ -69,7 +69,7 @@ pub(crate) async fn data_udp_executor(
                             continue;
                         },
                         DataServerBody::Payload(payload) => {
-                            tun_sender.send(payload.0).await.unwrap()
+                            tun_sender.send(payload.0).unwrap()
                         }
                     },
                     Err(e) => {
@@ -84,10 +84,10 @@ pub(crate) async fn data_udp_executor(
 }
 
 pub(crate) async fn data_tun_executor(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
-    mut queue: mpsc::Receiver<Vec<u8>>,
-    udp_sender: mpsc::Sender<Packet>,
+    stop_sender: broadcast::Sender<RuntimeError>,
+    mut stop: broadcast::Receiver<RuntimeError>,
+    mut queue: UnboundedReceiver<Vec<u8>>,
+    udp_sender: UnboundedSender<Packet>,
     state: Arc<StatelessTransportState>,
     sid: SessionId
 ) {
@@ -97,7 +97,7 @@ pub(crate) async fn data_tun_executor(
             body = queue.recv() => match body { // todo: may exec in another thread from pool??
                Some(packet) => match encrypt_body(&DataClientBody::Payload(packet.into()), &state) {
                     Ok(encrypted) => {
-                        udp_sender.send(Packet::DataClient{ sid, encrypted }).await.unwrap(); // todo remove await
+                        udp_sender.send(Packet::DataClient{ sid, encrypted }).unwrap(); // todo remove await
                     },
                     Err(e) => {
                         stop_sender.send(RuntimeError::Unexpected(
@@ -112,9 +112,9 @@ pub(crate) async fn data_tun_executor(
 }
 
 pub(crate) async fn keepalive_sender(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
-    udp_sender: mpsc::Sender<Packet>,
+    stop_sender: broadcast::Sender<RuntimeError>,
+    mut stop: broadcast::Receiver<RuntimeError>,
+    udp_sender: UnboundedSender<Packet>,
     duration: Duration,
     state: Arc<StatelessTransportState>,
     sid: SessionId
@@ -125,7 +125,7 @@ pub(crate) async fn keepalive_sender(
             _ = stop.recv() => break,
             _ = timer.tick() => match encrypt_body(&DataClientBody::KeepAlive(micros_since_start()), &state) {
                 Ok(encrypted) => {
-                    udp_sender.send(Packet::DataClient{ sid, encrypted }).await.unwrap();  // todo: if channel is full then we can ignore sending
+                    udp_sender.send(Packet::DataClient{ sid, encrypted }).unwrap();  // todo: if channel is full then we can ignore sending
                 },
                 Err(e) => {
                     stop_sender.send(RuntimeError::Unexpected(

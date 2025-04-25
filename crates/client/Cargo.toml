@@ -39,3 +39,4 @@ bincode = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
+bytes = "1.10.1"

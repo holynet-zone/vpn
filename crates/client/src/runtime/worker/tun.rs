@@ -2,15 +2,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::mpsc;
-use tracing::{error, warn};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::{error, info, warn};
 use tun_rs::AsyncDevice;
+use bytes::BytesMut;
 use crate::runtime::error::RuntimeError;
 
 pub async fn tun_sender(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     tun: Arc<AsyncDevice>,
-    mut queue: mpsc::Receiver<Vec<u8>>
+    mut queue: UnboundedReceiver<Vec<u8>>
 ) {
     loop {
         tokio::select! {
@@ -34,7 +36,7 @@ pub async fn tun_listener(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     tun: Arc<AsyncDevice>,
-    queues: Vec<mpsc::Sender<Vec<u8>>>
+    queues: Vec<UnboundedSender<Vec<u8>>>
 ) {
     let queues_len = queues.len();
     let mut index = 0;
@@ -54,9 +56,9 @@ pub async fn tun_listener(
                         continue;
                     }
 
-                    let tx = unsafe{queues.get_unchecked(index % queues_len)};
-                    index += 1;
-                    if let Err(err) = tx.send(buffer[..n].to_vec()).await {
+                    let tx = unsafe{queues.get_unchecked(index)};
+                    index = (index + 1) % queues_len;
+                    if let Err(err) = tx.send(buffer[..n].to_vec()) {
                         error!("failed to send data to tun queue[{}]: {}", index, err);
                     }
                 }

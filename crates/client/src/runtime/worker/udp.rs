@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{error, warn};
 use shared::protocol::{EncryptedData, Packet};
 use crate::runtime::error::RuntimeError;
@@ -12,7 +13,7 @@ pub async fn udp_sender(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     socket: Arc<UdpSocket>,
-    mut queue: mpsc::Receiver<Packet>
+    mut queue: UnboundedReceiver<Packet>
 ) {
     loop {
         tokio::select! {
@@ -34,7 +35,7 @@ pub async fn udp_listener(
     stop_sender: Sender<RuntimeError>,
     mut stop: Receiver<RuntimeError>,
     socket: Arc<UdpSocket>,
-    queues: Vec<mpsc::Sender<EncryptedData>>
+    queues: Vec<UnboundedSender<EncryptedData>>
 ) {
     let queues_len = queues.len();
     let mut index = 0;
@@ -57,9 +58,9 @@ pub async fn udp_listener(
                     match Packet::try_from(&udp_buffer[..n]) {
                         Ok(packet) => match packet {
                             Packet::DataServer(data) => {
-                                let tx = unsafe{queues.get_unchecked(index % queues_len)};
-                                index += 1;
-                                if let Err(err) = tx.send(data).await {
+                                let tx = unsafe{queues.get_unchecked(index)};
+                                index = (index + 1) % queues_len;
+                                if let Err(err) = tx.send(data) {
                                     error!("failed to send data to data_receiver[{}]: {}", index, err);
                                 }
                             },
