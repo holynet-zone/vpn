@@ -29,18 +29,23 @@ fn encrypt_body(
     body: &DataClientBody,
     state: &StatelessTransportState
 ) -> anyhow::Result<EncryptedData> {
-    let mut buffer = [0u8; 65536];
-    let len = state.write_message(
-        0, 
-        &bincode::serde::encode_to_vec(
-            body,
-            bincode::config::standard()
-        )?,
-        &mut buffer
-    )?;
-    Ok(buffer[..len].to_vec().into())
-}
 
+    let mut temp_buffer = [0u8; 65536];
+    let encoded_len= bincode::serde::encode_into_slice(
+        body,
+        &mut temp_buffer,
+        bincode::config::standard()
+    )?;
+
+    let mut encrypted_buffer = [0u8; 65536];
+    let encrypted_len = state.write_message(
+        0,
+        &temp_buffer[..encoded_len],
+        &mut encrypted_buffer
+    )?;
+
+    Ok(encrypted_buffer[..encrypted_len].to_vec().into())
+}
 
 pub(super) async fn data_udp_executor(
     stop_sender: Sender<RuntimeError>,

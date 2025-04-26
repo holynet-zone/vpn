@@ -6,7 +6,6 @@ use std::{
     net::{IpAddr, SocketAddr},
     thread
 };
-use std::fmt::format;
 use std::sync::Arc;
 use std::time::Duration;
 use dashmap::DashMap;
@@ -41,7 +40,6 @@ pub struct Runtime {
 }
 
 impl Runtime {
-
     pub fn from_config(config: Config) -> Result<Self, RuntimeError> {
         let (stop_tx, _) = broadcast::channel::<RuntimeError>(8);
 
@@ -63,28 +61,25 @@ impl Runtime {
             stop_tx,
         })
     }
-    
+
     pub fn insert_clients(&mut self, clients: Vec<(PublicKey, SecretKey)>) {
-        self.known_clients = Arc::new(DashMap::from_iter(
-            clients.into_iter()
-                .map(|(peer_pk, psk)| (peer_pk, psk))
-        ));
+        self.known_clients = Arc::new(DashMap::from_iter(clients));
     }
-    
+
     pub async fn run(&mut self) -> Result<(), Vec<RuntimeError>> {
         let workers = match self.config.workers == 0 {
             true => thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
             false => self.config.workers
         };
-        
+
         tracing::info!(
-            "Runtime running on udp://{} with {} workers",
-            self.sock,
-            workers
-        );
-        
+        "Runtime running on udp://{} with {} workers",
+        self.sock,
+        workers
+    );
+
         set_ipv4_forwarding(true).map_err(|err| vec![RuntimeError::from(err)])?;
-        
+
         let tun = setup_tun(
             &self.tun_name,
             self.tun_mtu,
@@ -92,9 +87,15 @@ impl Runtime {
             self.tun_prefix,
             true
         ).await.map_err(|err| vec![RuntimeError::from(err)])?;
+        
+        let rt = Builder::new_multi_thread()
+            .worker_threads(workers)
+            .enable_all()
+            .build()
+            .expect("failed to create Tokio runtime");
 
         let mut handles = Vec::new();
-        
+
         for worker_id in 1..workers + 1 {
             let addr = self.sock;
             let stop_tx = self.stop_tx.clone();
@@ -105,37 +106,31 @@ impl Runtime {
                 format!("failed to clone tun device: {}", err)
             )])?;
             let config = self.config.clone();
-            
-            let handle = thread::spawn(move || {
-                let rt = Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("failed to create Tokio runtime");
-                
+
+            let handle = rt.spawn(async move {
                 tracing::debug!("worker {} started", worker_id);
 
-                if let Err(err) = rt.block_on(worker::create(
-                    addr, 
+                if let Err(err) = worker::create(
+                    addr,
                     stop_tx,
-                    sessions, 
+                    sessions,
                     known_clients,
                     sk,
                     tun,
                     worker_id,
                     config
-                )) {
+                ).await {
                     tracing::error!("worker {worker_id} failed: {err}");
                     return Err(err);
                 }
-                
-                tracing::debug!("worker {} stopped", worker_id);
 
+                tracing::debug!("worker {} stopped", worker_id);
                 Ok(())
             });
 
             handles.push(handle);
         }
-        
+
         // session cleanup
         let session = self.config.session.clone().unwrap_or_default();
         if session.timeout != 0 {
@@ -146,23 +141,23 @@ impl Runtime {
                 Duration::from_secs(session.timeout as u64),
                 Duration::from_secs(session.cleanup_interval as u64),
             ));
-        } else { 
+        } else {
             tracing::info!("session cleanup worker disabled");
         }
-        
+
         let mut errors = Vec::new();
         for handle in handles {
-            if let Err(err) = handle.join() {
+            if let Err(err) = handle.await.unwrap() {
                 errors.push(RuntimeError::Unexpected(format!("{:?}", err)));
             }
         }
 
-        set_ipv4_forwarding(false).map_err(|err| vec![RuntimeError::from(err)])?;; // todo save bef aft state
+        set_ipv4_forwarding(false).map_err(|err| vec![RuntimeError::from(err)])?;
 
         if !errors.is_empty() {
             return Err(errors);
         }
-        
+
         let mut stop_rx = self.stop_tx.subscribe();
 
         if let Ok(err) = stop_rx.recv().await {
