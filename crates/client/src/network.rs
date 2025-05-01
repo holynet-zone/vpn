@@ -1,9 +1,7 @@
-use std::collections::HashSet;
 use std::net::{IpAddr};
 use tracing::{info, warn};
 use std::process::Command;
-use pnet::datalink;
-
+use crate::runtime::error::RuntimeError;
 
 pub enum RouteType {
     Net,
@@ -11,48 +9,67 @@ pub enum RouteType {
 }
 
 pub struct DefaultGateway {
-    origin: String,
-    remote: String,
+    origin: IpAddr,
+    remote: IpAddr,
     default: bool,
 }
 
 impl DefaultGateway {
-    pub fn create(gateway: &IpAddr, remote: &str, default: bool) -> DefaultGateway {
-        let origin = get_default_gateway().unwrap();
-        info!("Original default gateway: {}.", origin);
-        add_route(RouteType::Host, remote, &origin).unwrap();
+    pub fn create(new_gateway: &IpAddr, remote: &IpAddr, default: bool) -> Result<DefaultGateway, RuntimeError> {
+        let origin = default_gateway()
+            .map_err(|e| RuntimeError::Network(format!("getting default gateway: {}", e)))?;
+        info!("original default gateway: {}.", origin);
+        add_route(RouteType::Host, &remote.to_string(), &origin.to_string())
+            .map_err(|error| RuntimeError::Network(format!(
+                "failed to add route: {} -> {}: {}",
+                remote, 
+                origin, 
+                error
+            )))?;
+        
         if default {
-            delete_default_gateway().unwrap();
-            set_default_gateway(&gateway.to_string()).unwrap();
+            delete_route(RouteType::Net, "default");
+            add_route(RouteType::Net, "default", &new_gateway.to_string())
+                .map_err(|error| RuntimeError::Network(format!(
+                    "failed to add new default route: {} (new) -> {} (old): {}",
+                    new_gateway, 
+                    origin, 
+                    error
+                )))?;
         }
-        DefaultGateway {
-            origin: origin,
-            remote: String::from(remote),
-            default: default,
-        }
+        
+        Ok(DefaultGateway {
+            origin,
+            remote: *remote,
+            default,
+        })
     }
 
-    pub fn delete(&mut self) {
+    pub fn restore(&mut self) {
         if self.default {
-            delete_default_gateway().unwrap();
-            set_default_gateway(&self.origin).unwrap();
+            delete_route(RouteType::Net, "default");
+            if let Err(e) = add_route(RouteType::Net, "default", &self.origin.to_string()) {
+                warn!("failed to restore default route: {}", e);
+            } else {
+                info!("restored default route: {}.", self.origin);
+            }
         }
-        delete_route(RouteType::Host, &self.remote).unwrap();
+        delete_route(RouteType::Host, &self.remote.to_string());
     }
 }
 
-impl Drop for DefaultGateway {
-    fn drop(&mut self) {
-        self.delete();
-    }
-}
+// impl Drop for DefaultGateway {
+//     fn drop(&mut self) {
+//         self.restore();
+//     }
+// }
 
-pub fn delete_route(route_type: RouteType, route: &str) -> Result<(), String> {
+pub fn delete_route(route_type: RouteType, route: &str) {
     let mode = match route_type {
         RouteType::Net => "-net",
         RouteType::Host => "-host",
     };
-    info!("Deleting route: {} {}.", mode, route);
+    info!("deleting route: {} {}.", mode, route);
     let status = if cfg!(target_os = "linux") {
         Command::new("ip")
             .arg("route")
@@ -71,29 +88,26 @@ pub fn delete_route(route_type: RouteType, route: &str) -> Result<(), String> {
     } else {
         unimplemented!("Unsupported OS");
     };
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("route: {}", status))
+    if !status.success() {
+        warn!("failed to delete route: {}", status);
     }
 }
 
-pub fn add_route(route_type: RouteType, route: &str, gateway: &str) -> Result<(), String> {
+pub fn add_route(route_type: RouteType, route: &str, gateway: &str) -> anyhow::Result<()> {
     let mode = match route_type {
         RouteType::Net => "-net",
         RouteType::Host => "-host",
     };
-    info!("Adding route: {} {} gateway {}.", mode, route, gateway);
+    info!("adding route: {} {} gateway {}.", mode, route, gateway);
     let status = if cfg!(target_os = "linux") {
         let check = Command::new("ip")
             .arg("route")
             .arg("show")
             .arg(route)
-            .output()
-            .unwrap();
+            .output()?;
 
         if !check.stdout.is_empty() {
-            warn!("Route already exists");
+            warn!("route already exists");
             return Ok(());
         }
 
@@ -103,8 +117,7 @@ pub fn add_route(route_type: RouteType, route: &str, gateway: &str) -> Result<()
             .arg(route)
             .arg("via")
             .arg(gateway)
-            .status()
-            .unwrap()
+            .status()?
     } else if cfg!(target_os = "macos") {
         Command::new("route")
             .arg("-n")
@@ -112,76 +125,39 @@ pub fn add_route(route_type: RouteType, route: &str, gateway: &str) -> Result<()
             .arg(mode)
             .arg(route)
             .arg(gateway)
-            .status()
-            .unwrap()
+            .status()?
     } else {
         unimplemented!("Unsupported OS");
     };
-    if status.success() {
-        Ok(())
+    if !status.success() {
+        Err(anyhow::anyhow!("failed to add route: {}", status))
     } else {
-        Err(format!("route: {}", status))
+        Ok(())
     }
 }
 
-pub fn set_default_gateway(gateway: &str) -> Result<(), String> {
-    add_route(RouteType::Net, "default", gateway)
-}
-
-pub fn delete_default_gateway() -> Result<(), String> {
-    delete_route(RouteType::Net, "default")
-}
-
-pub fn get_default_gateway() -> Result<String, String> {
+pub fn default_gateway() -> anyhow::Result<IpAddr> {
     let cmd = if cfg!(target_os = "linux") {
         "ip -4 route list 0/0 | awk '{print $3}'"
     } else if cfg!(target_os = "macos") {
         "route -n get default | grep gateway | awk '{print $2}'"
     } else {
-        unimplemented!()
+        unimplemented!("Unsupported OS");
     };
-    let output = Command::new("bash").arg("-c").arg(cmd).output().unwrap();
+    let output = Command::new("bash").arg("-c").arg(cmd).output()?;
     if output.status.success() {
-        Ok(String::from_utf8(output.stdout)
-            .unwrap()
-            .trim_end()
-            .to_string())
+        Ok(String::from_utf8(output.stdout)?.trim_end().parse()?)
     } else {
-        Err(String::from_utf8(output.stderr).unwrap())
+        Err(anyhow::anyhow!(String::from_utf8(output.stderr)?))
     }
 }
 
-pub fn get_public_ip() -> Result<String, String> {
-    let output = Command::new("curl")
-        .arg("ipecho.net/plain")
-        .output()
-        .unwrap();
-    if output.status.success() {
-        Ok(String::from_utf8(output.stdout).unwrap())
-    } else {
-        Err(String::from_utf8(output.stderr).unwrap())
-    }
-}
-
-fn get_route_gateway(route: &str) -> Result<String, String> {
-    let cmd = format!("ip -4 route list {}", route);
-    let output = Command::new("bash").arg("-c").arg(cmd).output().unwrap();
-    if output.status.success() {
-        Ok(String::from_utf8(output.stdout)
-            .unwrap()
-            .trim_end()
-            .to_string())
-    } else {
-        Err(String::from_utf8(output.stderr).unwrap())
-    }
-}
-
-pub fn set_dns(dns: &str) -> Result<String, String> {
-    let cmd = format!("echo nameserver {} > /etc/resolv.conf", dns);
-    let output = Command::new("bash").arg("-c").arg(cmd).output().unwrap();
-    if output.status.success() {
-        Ok(String::from_utf8(output.stdout).unwrap())
-    } else {
-        Err(String::from_utf8(output.stderr).unwrap())
-    }
-}
+// pub fn set_dns(dns: &str) -> Result<String, String> {
+//     let cmd = format!("echo nameserver {} > /etc/resolv.conf", dns);
+//     let output = Command::new("bash").arg("-c").arg(cmd).output().unwrap();
+//     if output.status.success() {
+//         Ok(String::from_utf8(output.stdout).unwrap())
+//     } else {
+//         Err(String::from_utf8(output.stderr).unwrap())
+//     }
+// }

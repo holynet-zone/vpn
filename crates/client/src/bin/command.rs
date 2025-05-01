@@ -1,6 +1,5 @@
-use std::path::PathBuf;
-use clap::Subcommand;
 use crate::command::connect::ConnectCmd;
+use clap::Subcommand;
 
 mod connect;
 

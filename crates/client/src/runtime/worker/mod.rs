@@ -15,7 +15,6 @@ use tracing::{error, info, warn};
 use tun_rs::AsyncDevice;
 use shared::protocol::{EncryptedData, Packet};
 use shared::connection_config::{CredentialsConfig, InterfaceConfig, RuntimeConfig};
-use shared::network::find_available_ifname;
 use shared::session::Alg;
 use shared::tun::setup_tun;
 use crate::network::DefaultGateway;
@@ -99,9 +98,9 @@ pub(crate) async fn create(
 
     let mut gw = DefaultGateway::create(
         &handshake_payload.ipaddr,
-        addr.ip().to_string().as_str(),
+        &addr.ip(),
         true
-    );
+    )?;
 
     // Handle incoming TUN packets
     tokio::spawn(tun_listener(
@@ -138,7 +137,7 @@ pub(crate) async fn create(
     let mut stop_rx = stop_tx.subscribe();
     tokio::select! {
         _ = stop_rx.recv() => {
-            gw.delete();
+            gw.restore();
             info!("listener stopped")
         }
     }

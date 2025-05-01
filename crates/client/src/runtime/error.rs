@@ -7,6 +7,8 @@ pub enum RuntimeError {
     IO(String),
     #[error("Tun: {0}")]
     Tun(String),
+    #[error("Network: {0}")]
+    Network(String),
     #[error("Handshake: {0}")]
     Handshake(String),
     #[error("Disconnect: {0}")]
