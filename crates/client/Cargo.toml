@@ -39,3 +39,4 @@ bincode = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
+async-trait = "0.1.88"

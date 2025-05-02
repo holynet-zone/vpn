@@ -19,19 +19,18 @@ use dashmap::DashMap;
 use shared::keys::handshake::{PublicKey, SecretKey};
 use shared::protocol::{EncryptedData, EncryptedHandshake, Packet};
 use shared::session::SessionId;
-use socket2::Socket;
 use std::{
     net::SocketAddr,
     sync::Arc
 };
-use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 use tun_rs::AsyncDevice;
+use crate::runtime::transport::Transport;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create(
-    socket: Socket,
+    transport: Arc<dyn Transport>,
     stop_tx: broadcast::Sender<RuntimeError>,
     sessions: Sessions,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
@@ -41,7 +40,6 @@ pub(crate) async fn create(
     config: RuntimeConfig
 ) -> Result<(), RuntimeError> {
 
-    let socket = Arc::new(UdpSocket::from_std(socket.into())?);
     let tun = Arc::new(tun);
     
     let (out_udp_tx, out_udp_rx) = mpsc::channel::<(Packet, SocketAddr)>(config.out_udp_buf);
@@ -52,10 +50,10 @@ pub(crate) async fn create(
 
 
     // Handle incoming UDP packets
-    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), handshake_tx, data_udp_tx));
+    tokio::spawn(udp_listener(stop_tx.subscribe(), transport.clone(), handshake_tx, data_udp_tx));
 
     // Handle outgoing UDP packets
-    tokio::spawn(udp_sender(stop_tx.subscribe(), socket.clone(), out_udp_rx));
+    tokio::spawn(udp_sender(stop_tx.subscribe(), transport.clone(), out_udp_rx));
     
     // Handle incoming TUN packets
     tokio::spawn(tun_listener(stop_tx.subscribe(), tun.clone(), data_tun_tx));

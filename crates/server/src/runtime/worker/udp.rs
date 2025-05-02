@@ -1,16 +1,16 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::UdpSocket;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use shared::protocol::{EncryptedData, EncryptedHandshake, Packet};
 use shared::session::SessionId;
 use crate::runtime::error::RuntimeError;
+use crate::runtime::transport::{TransportReceiver, TransportSender};
 
 pub async fn udp_sender(
     mut stop: Receiver<RuntimeError>,
-    socket: Arc<UdpSocket>,
+    transport: Arc<dyn TransportSender>,
     mut out_udp_rx: mpsc::Receiver<(Packet, SocketAddr)>
 ) {
     loop {
@@ -18,8 +18,15 @@ pub async fn udp_sender(
             _ = stop.recv() => break,
             result = out_udp_rx.recv() => match result {
                 Some((data, client_addr)) => {
-                    if let Err(e) = socket.send_to(&data.to_bytes(), &client_addr).await {
-                        warn!("failed to send data to {}: {}", client_addr, e);
+                    match transport.send_to(&data.to_bytes(), &client_addr).await {
+                        Ok(len) => {
+                            debug!("sent packet to {}: len: {}", client_addr, len);
+
+                        },
+                        Err(e) => {
+                            error!("failed to send data to {}: {}", client_addr, e);
+                            continue;
+                        }
                     }
                 },
                 None => break
@@ -30,7 +37,7 @@ pub async fn udp_sender(
 
 pub async fn udp_listener(
     mut stop: Receiver<RuntimeError>,
-    socket: Arc<UdpSocket>,
+    transport: Arc<dyn TransportReceiver>,
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
     data_tx: mpsc::Sender<(SessionId, EncryptedData, SocketAddr)>
 ) {
@@ -38,7 +45,7 @@ pub async fn udp_listener(
     loop {
         tokio::select! {
             _ = stop.recv() => break,
-            result = socket.recv_from(&mut udp_buffer) => {
+            result = transport.recv_from(&mut udp_buffer) => {
                 match result {
                     Ok((n, client_addr)) => {
                         if n == 0 {

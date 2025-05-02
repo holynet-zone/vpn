@@ -2,6 +2,7 @@ pub mod session;
 mod worker;
 pub mod error;
 mod network;
+mod transport;
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -10,10 +11,9 @@ use std::{
 use std::sync::Arc;
 use std::time::Duration;
 use dashmap::DashMap;
-use socket2::{Domain, Protocol, Socket, Type};
 use self::{
     error::RuntimeError,
-    session::{ Sessions}
+    session::Sessions
 };
 
 use tokio::runtime::Builder;
@@ -24,6 +24,7 @@ use shared::{
     network::set_ipv4_forwarding
 };
 use shared::tun::setup_tun;
+use crate::runtime::transport::udp::UdpTransport;
 
 pub struct Runtime {
     sock: SocketAddr,
@@ -90,19 +91,12 @@ impl Runtime {
             true
         ).await.map_err(|err| vec![RuntimeError::from(err)])?;
 
-        let socket = Socket::new(
-            Domain::for_address(self.sock),
-            Type::DGRAM,
-            Some(Protocol::UDP)
+        let mut transports = UdpTransport::new_pool(
+            self.sock,
+            self.config.so_rcvbuf,
+            self.config.so_sndbuf,
+            workers
         ).map_err(|err| vec![RuntimeError::from(err)])?;
-        
-        socket.set_nonblocking(true).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_reuse_port(true).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_reuse_address(true).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_recv_buffer_size(self.config.so_rcvbuf).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_send_buffer_size(self.config.so_sndbuf).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_tos(0b101110 << 2).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.bind(&self.sock.into()).map_err(|err| vec![RuntimeError::from(err)])?;
         
         let rt = Builder::new_multi_thread()
             .worker_threads(workers)
@@ -120,16 +114,14 @@ impl Runtime {
             let tun = tun.try_clone().map_err(|err| vec![RuntimeError::Tun(
                 format!("failed to clone tun device: {}", err)
             )])?;
-            let socket = socket.try_clone().map_err(|err| vec![RuntimeError::IO(
-                format!("failed to clone socket: {}", err)
-            )])?;
+            let transport = Arc::new(transports.pop().unwrap()); // unwrap is safe here
             let config = self.config.clone();
 
             let handle = rt.spawn(async move {
                 tracing::debug!("worker {} started", worker_id);
 
                 if let Err(err) = worker::create(
-                    socket,
+                    transport,
                     stop_tx,
                     sessions,
                     known_clients,
