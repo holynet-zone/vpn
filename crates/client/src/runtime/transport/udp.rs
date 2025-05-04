@@ -15,6 +15,7 @@ impl UdpTransport {
         so_rcvbuf: usize, 
         so_sndbuf: usize,
     ) -> Result<Self, RuntimeError> {
+        tracing::info!("Connecting to udp://{}", addr);
         let socket = Socket::new(
             Domain::for_address(addr),
             Type::DGRAM,

@@ -18,13 +18,19 @@ use self::{
 
 use tokio::runtime::Builder;
 use tokio::sync::{broadcast};
+use tracing::info;
 use crate::config::{Config, RuntimeConfig};
 use shared::{
     keys::handshake::{PublicKey, SecretKey},
     network::set_ipv4_forwarding
 };
 use shared::tun::setup_tun;
+use crate::runtime::transport::Transport;
+#[cfg(feature = "udp")]
 use crate::runtime::transport::udp::UdpTransport;
+
+#[cfg(feature = "ws")]
+use crate::runtime::transport::ws::WsTransport;
 
 pub struct Runtime {
     sock: SocketAddr,
@@ -75,12 +81,6 @@ impl Runtime {
             false => self.config.workers
         };
 
-        tracing::info!(
-        "Runtime running on udp://{} with {} workers",
-        self.sock,
-        workers
-    );
-
         set_ipv4_forwarding(true).map_err(|err| vec![RuntimeError::from(err)])?;
 
         let tun = setup_tun(
@@ -91,12 +91,33 @@ impl Runtime {
             true
         ).await.map_err(|err| vec![RuntimeError::from(err)])?;
 
-        let mut transports = UdpTransport::new_pool(
-            self.sock,
-            self.config.so_rcvbuf,
-            self.config.so_sndbuf,
-            workers
-        ).map_err(|err| vec![RuntimeError::from(err)])?;
+        let mut transports: Vec<Arc<dyn Transport>> = match () {
+            #[cfg(feature = "udp")]
+            _ if cfg!(feature = "udp") => {
+                UdpTransport::new_pool(
+                    self.sock,
+                    self.config.so_rcvbuf,
+                    self.config.so_sndbuf,
+                    workers
+                ).map_err(|err| vec![err])?
+                    .into_iter()
+                    .map(|t| Arc::new(t) as Arc<dyn Transport>)
+                    .collect()
+            }
+            #[cfg(feature = "ws")]
+            _ if cfg!(feature = "ws") => {
+                WsTransport::new_pool(
+                    self.sock,
+                    self.config.so_rcvbuf,
+                    self.config.so_sndbuf,
+                    workers
+                ).map_err(|err| vec![err])?
+                    .into_iter()
+                    .map(|t| Arc::new(t) as Arc<dyn Transport>)
+                    .collect()
+            }
+            _ => unreachable!("transport is not selected, please enable one of transport features")
+        };
         
         let rt = Builder::new_multi_thread()
             .worker_threads(workers)
@@ -114,7 +135,7 @@ impl Runtime {
             let tun = tun.try_clone().map_err(|err| vec![RuntimeError::Tun(
                 format!("failed to clone tun device: {}", err)
             )])?;
-            let transport = Arc::new(transports.pop().unwrap()); // unwrap is safe here
+            let transport = transports.pop().unwrap(); // unwrap is safe here
             let config = self.config.clone();
 
             let handle = rt.spawn(async move {
@@ -144,7 +165,7 @@ impl Runtime {
         // session cleanup
         let session = self.config.session.clone().unwrap_or_default();
         if session.timeout != 0 {
-            tracing::info!("session cleanup worker started");
+            info!("session cleanup worker started");
             tokio::spawn(session::worker::run(
                 self.stop_tx.clone(),
                 self.sessions.clone(),
@@ -152,7 +173,7 @@ impl Runtime {
                 Duration::from_secs(session.cleanup_interval as u64),
             ));
         } else {
-            tracing::info!("session cleanup worker disabled");
+            info!("session cleanup worker disabled");
         }
 
         let mut errors = Vec::new();

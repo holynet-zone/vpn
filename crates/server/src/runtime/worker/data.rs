@@ -43,10 +43,10 @@ fn encode_body(body: &DataServerBody, state: &StatelessTransportState) -> anyhow
     Ok(encrypted_buffer[..encrypted_len].to_vec().into())
 }
 
-pub(super) async fn data_udp_executor(
+pub(super) async fn data_transport_executor(
     mut stop: Receiver<RuntimeError>,
     mut queue: mpsc::Receiver<(SessionId, EncryptedData, SocketAddr)>,
-    udp_tx: mpsc::Sender<(Packet, SocketAddr)>,
+    transport_tx: mpsc::Sender<(Packet, SocketAddr)>,
     tun_tx: mpsc::Sender<Vec<u8>>,
     sessions: Sessions,
     inf_sessions_timeout: bool,
@@ -69,8 +69,8 @@ pub(super) async fn data_udp_executor(
                                         if !inf_sessions_timeout {
                                             sessions.touch(sid)
                                         }
-                                        if let Err(e) = udp_tx.send((Packet::DataServer(value), addr)).await {
-                                            error!("failed to send server data packet to udp queue: {}", e);
+                                        if let Err(e) = transport_tx.send((Packet::DataServer(value), addr)).await {
+                                            error!("failed to send server data packet to transport queue: {}", e);
                                         }
                                     },
                                     Err(e) => {
@@ -97,7 +97,7 @@ pub(super) async fn data_udp_executor(
                     None => warn!("[{}] received data packet for unknown session {}", addr, sid)
                 },
                 None => {
-                    error!("data_udp_executor channel is closed");
+                    error!("data_transport_executor channel is closed");
                     break
                 }
             }
@@ -108,7 +108,7 @@ pub(super) async fn data_udp_executor(
 pub(super) async fn data_tun_executor(
     mut stop: Receiver<RuntimeError>,
     mut queue: mpsc::Receiver<(Vec<u8>, HolyIp)>,
-    udp_tx: mpsc::Sender<(Packet, SocketAddr)>,
+    transport_tx: mpsc::Sender<(Packet, SocketAddr)>,
     sessions: Sessions,
 ) {
     loop {
@@ -118,8 +118,8 @@ pub(super) async fn data_tun_executor(
                 Some((packet, holy_ip)) => match sessions.get(&holy_ip) {
                     Some(session) => match encode_body(&DataServerBody::Payload(packet.into()), &session.state) {
                         Ok(body) => {
-                            if let Err(e) = udp_tx.send((Packet::DataServer(body), session.sock_addr())).await {
-                                error!("failed to send server data packet to udp queue: {}", e);
+                            if let Err(e) = transport_tx.send((Packet::DataServer(body), session.sock_addr())).await {
+                                error!("failed to send server data packet to transport queue: {}", e);
                             }
                         },
                         Err(err) => warn!("[{}] failed to encode tun data packet (sid: {}): {}", session.sock_addr(), session.id, err)

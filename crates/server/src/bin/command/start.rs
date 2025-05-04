@@ -1,5 +1,4 @@
-use std::{process, thread};
-use std::time::Duration;
+use std::process;
 use clap::Parser;
 use tracing::{debug, error, info, warn};
 use server::config::Config;
@@ -70,8 +69,8 @@ impl StartCmd {
                     debug!("stop signal not sent from Ctrl-C handler: {}", err);
                 }
             }
-            thread::sleep(Duration::from_secs(1));
-            process::exit(0);
+            // thread::sleep(Duration::from_secs(1));
+            // process::exit(0);
         }).expect("error setting Ctrl-C handler");
 
         if let Err(errors) = runtime.run().await {

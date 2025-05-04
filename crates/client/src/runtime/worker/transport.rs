@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::mpsc;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use shared::protocol::{EncryptedData, Packet};
 use crate::runtime::error::RuntimeError;
 use crate::runtime::transport::{TransportReceiver, TransportSender};
@@ -16,8 +16,9 @@ pub async fn transport_sender(
         tokio::select! {
             _ = stop.recv() => break,
             result = queue.recv() => match result {
-                Some(packet) => {
-                    if let Err(err) = transport.send(&packet.to_bytes()).await {
+                Some(packet) => match transport.send(&packet.to_bytes()).await {
+                    Ok(n) => debug!("sent transport packet with {} bytes", n),
+                    Err(err) => {
                         stop_sender.send(RuntimeError::IO(format!("failed to send udp: {}", err))).unwrap();
                     }
                 },
@@ -33,21 +34,22 @@ pub async fn transport_listener(
     transport: Arc<dyn TransportReceiver>,
     data_receiver: mpsc::Sender<EncryptedData>
 ) {
-    let mut udp_buffer = [0u8; 65536];
+    let mut transport_buffer = [0u8; 65536];
     loop {
         tokio::select! {
             _ = stop.recv() => break,
-            result = transport.recv(&mut udp_buffer) => match result {
+            result = transport.recv(&mut transport_buffer) => match result {
                 Ok(n) => {
+                    debug!("received transport packet with {} bytes", n);
                     if n == 0 {
-                        warn!("received UDP packet with 0 bytes, dropping it");
+                        warn!("received transport packet with 0 bytes, dropping it");
                         continue;
                     }
                     if n > 65536 {
-                        warn!("received UDP packet larger than 65536 bytes, dropping it");
+                        warn!("received transport packet larger than 65536 bytes, dropping it");
                         continue;
                     }
-                    match Packet::try_from(&udp_buffer[..n]) {
+                    match Packet::try_from(&transport_buffer[..n]) {
                         Ok(packet) => match packet {
                             Packet::DataServer(data) => {
                                 if let Err(err) = data_receiver.send(data).await {
@@ -64,13 +66,13 @@ pub async fn transport_listener(
                             }
                         },
                         Err(err) => {
-                            warn!("failed to parse UDP packet: {}", err);
+                            warn!("failed to parse transport packet: {}", err);
                             continue;
                         }
                     }
                 }
                 Err(err) => {
-                    stop_sender.send(RuntimeError::IO(format!("failed to receive udp: {}", err))).unwrap();
+                    stop_sender.send(RuntimeError::IO(format!("failed to receive transport: {}", err))).unwrap();
                 }
             }
         }

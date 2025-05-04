@@ -3,11 +3,16 @@ mod data;
 mod tun;
 mod transport;
 
+#[cfg(feature = "udp")]
+pub use crate::runtime::transport::udp::UdpTransport;
+
+#[cfg(feature = "ws")]
+pub use crate::runtime::transport::ws::WsTransport;
+
 use crate::{
-    network::DefaultGateway,
+    network::RouteState,
     runtime::{
         error::RuntimeError,
-        transport::udp::UdpTransport,
         worker::{
             data::{data_tun_executor, data_udp_executor, keepalive_sender},
             handshake::handshake_step,
@@ -28,7 +33,7 @@ use std::{
 use tokio::sync::broadcast::{Sender};
 use tokio::sync::mpsc;
 use tracing::{info};
-
+use crate::runtime::transport::Transport;
 
 pub(crate) async fn create(
     addr: SocketAddr,
@@ -39,11 +44,24 @@ pub(crate) async fn create(
     iface_config: InterfaceConfig,
 ) -> Result<(), RuntimeError> {
 
-    let transport = Arc::new(UdpTransport::new(
-        addr,
-        runtime_config.so_rcvbuf,
-        runtime_config.so_sndbuf,
-    )?);
+    let transport: Arc<dyn Transport> = match () {
+        #[cfg(feature = "udp")]
+        _ if cfg!(feature = "udp") => {
+            info!("using UDP transport");
+            Arc::new(UdpTransport::new(
+                addr,
+                runtime_config.so_rcvbuf,
+                runtime_config.so_sndbuf,
+            )?)
+        }
+        #[cfg(feature = "ws")]
+        _ if cfg!(feature = "ws") => {
+            info!("using WebSocket transport");
+            Arc::new(WsTransport::connect(addr).await?)
+        }
+        _ => unreachable!("transport is not enabled, please enable transport features")
+    };
+    
     let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(runtime_config.out_udp_buf);
     let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(runtime_config.out_tun_buf);
     let (data_udp_tx, data_udp_rx) = mpsc::channel::<EncryptedData>(runtime_config.data_udp_buf);
@@ -89,19 +107,17 @@ pub(crate) async fn create(
     ));
     
     let tun = Arc::new(setup_tun(
-        iface_config.name,
+        iface_config.name.clone(),
         iface_config.mtu,
         handshake_payload.ipaddr,
         32,
         false
     ).await?);
-
-    let mut gw = DefaultGateway::create(
-        &handshake_payload.ipaddr,
-        &addr.ip(),
-        true
-    )?;
-
+    
+    // move from runtime
+    let mut routes = RouteState::new(addr.ip(), iface_config.name)
+        .build()?;
+    
     // Handle incoming TUN packets
     tokio::spawn(tun_listener(
         stop_tx.clone(),
@@ -137,7 +153,7 @@ pub(crate) async fn create(
     let mut stop_rx = stop_tx.subscribe();
     tokio::select! {
         _ = stop_rx.recv() => {
-            gw.restore();
+            routes.restore();
             info!("listener stopped")
         }
     }

@@ -1,4 +1,7 @@
+#[cfg(feature = "udp")]
 pub mod udp;
+#[cfg(feature = "ws")]
+pub mod ws;
 
 use async_trait::async_trait;
 use std::io;
