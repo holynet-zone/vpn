@@ -1,27 +1,39 @@
 mod handshake;
 mod data;
+mod tun;
+mod transport;
 
+#[cfg(feature = "udp")]
+pub use crate::runtime::transport::udp::UdpTransport;
+
+#[cfg(feature = "ws")]
+pub use crate::runtime::transport::ws::WsTransport;
+
+use crate::{
+    network::RouteState,
+    runtime::{
+        error::RuntimeError,
+        worker::{
+            data::{data_tun_executor, data_udp_executor, keepalive_sender},
+            handshake::handshake_step,
+            transport::{transport_listener, transport_sender},
+            tun::{tun_listener, tun_sender},
+        }
+    },
+};
+use shared::connection_config::{CredentialsConfig, InterfaceConfig, RuntimeConfig};
+use shared::protocol::{EncryptedData, Packet};
+use shared::session::Alg;
+use shared::tun::setup_tun;
+use std::time::Duration;
 use std::{
     net::SocketAddr,
     sync::Arc
 };
-use std::net::{IpAddr, Ipv4Addr};
-use std::time::Duration;
-use socket2::{Domain, Protocol, Socket, Type};
-use tokio::net::UdpSocket;
+use tokio::sync::broadcast::{Sender};
 use tokio::sync::mpsc;
-use tokio::sync::broadcast::{Receiver, Sender};
-use tracing::{error, info, warn};
-use tun_rs::AsyncDevice;
-use shared::protocol::{EncryptedData, Packet};
-use shared::connection_config::{CredentialsConfig, InterfaceConfig, RuntimeConfig};
-use shared::session::Alg;
-use shared::tun::setup_tun;
-use crate::network::DefaultGateway;
-use crate::runtime::worker::data::{data_tun_executor, data_udp_executor, keepalive_sender};
-use crate::runtime::worker::handshake::handshake_step;
-use super::error::RuntimeError;
-
+use tracing::{info};
+use crate::runtime::transport::Transport;
 
 pub(crate) async fn create(
     addr: SocketAddr,
@@ -31,19 +43,25 @@ pub(crate) async fn create(
     runtime_config: RuntimeConfig,
     iface_config: InterfaceConfig,
 ) -> Result<(), RuntimeError> {
-    let socket = Socket::new(
-        Domain::for_address(addr),
-        Type::DGRAM,
-        Some(Protocol::UDP)
-    )?;
-    socket.set_nonblocking(true)?;
-    // socket.set_reuse_port(true)?;
-    socket.set_recv_buffer_size(runtime_config.so_rcvbuf)?;
-    socket.set_send_buffer_size(runtime_config.so_sndbuf)?;
-    socket.bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0,0,0,0)), 0).into())?;
-    socket.connect(&addr.into())?;
 
-    let socket = Arc::new(UdpSocket::from_std(socket.into())?);
+    let transport: Arc<dyn Transport> = match () {
+        #[cfg(feature = "udp")]
+        _ if cfg!(feature = "udp") => {
+            info!("using UDP transport");
+            Arc::new(UdpTransport::new(
+                addr,
+                runtime_config.so_rcvbuf,
+                runtime_config.so_sndbuf,
+            )?)
+        }
+        #[cfg(feature = "ws")]
+        _ if cfg!(feature = "ws") => {
+            info!("using WebSocket transport");
+            Arc::new(WsTransport::connect(addr).await?)
+        }
+        _ => unreachable!("transport is not enabled, please enable transport features")
+    };
+    
     let (udp_sender_tx, udp_sender_rx) = mpsc::channel::<Packet>(runtime_config.out_udp_buf);
     let (tun_sender_tx, tun_sender_rx) = mpsc::channel::<Vec<u8>>(runtime_config.out_tun_buf);
     let (data_udp_tx, data_udp_rx) = mpsc::channel::<EncryptedData>(runtime_config.data_udp_buf);
@@ -51,7 +69,7 @@ pub(crate) async fn create(
     
     // Handshake step
     let (handshake_payload, state) = match tokio::spawn(handshake_step(
-        socket.clone(),
+        transport.clone(),
         cred,
         alg,
         Duration::from_millis(runtime_config.handshake_timeout)
@@ -64,10 +82,10 @@ pub(crate) async fn create(
     };
 
     // Handle incoming UDP packets
-    tokio::spawn(udp_listener(stop_tx.clone(), stop_tx.subscribe(), socket.clone(), data_udp_tx));
+    tokio::spawn(transport_listener(stop_tx.clone(), stop_tx.subscribe(), transport.clone(), data_udp_tx));
 
     // Handle outgoing UDP packets
-    tokio::spawn(udp_sender(stop_tx.clone(), stop_tx.subscribe(), socket.clone(), udp_sender_rx));
+    tokio::spawn(transport_sender(stop_tx.clone(), stop_tx.subscribe(), transport.clone(), udp_sender_rx));
 
 
     // Executors
@@ -89,19 +107,17 @@ pub(crate) async fn create(
     ));
     
     let tun = Arc::new(setup_tun(
-        iface_config.name,
+        iface_config.name.clone(),
         iface_config.mtu,
         handshake_payload.ipaddr,
         32,
         false
     ).await?);
-
-    let mut gw = DefaultGateway::create(
-        &handshake_payload.ipaddr,
-        &addr.ip(),
-        true
-    )?;
-
+    
+    // move from runtime
+    let mut routes = RouteState::new(addr.ip(), iface_config.name)
+        .build()?;
+    
     // Handle incoming TUN packets
     tokio::spawn(tun_listener(
         stop_tx.clone(),
@@ -121,7 +137,7 @@ pub(crate) async fn create(
 
     match runtime_config.keepalive {
         Some(duration) => {
-            info!("starting keepalive sender with interval {:?}", duration);
+            info!("starting keepalive transport with interval {:?}", duration);
             tokio::spawn(keepalive_sender(
                 stop_tx.clone(),
                 stop_tx.subscribe(),
@@ -131,141 +147,16 @@ pub(crate) async fn create(
                 handshake_payload.sid,
             ));
         },
-        None => info!("keepalive sender is disabled")
+        None => info!("keepalive transport is disabled")
     }
 
     let mut stop_rx = stop_tx.subscribe();
     tokio::select! {
         _ = stop_rx.recv() => {
-            gw.restore();
+            routes.restore();
             info!("listener stopped")
         }
     }
     
     Ok(())
-}
-
-async fn tun_sender(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
-    tun: Arc<AsyncDevice>,
-    mut queue: mpsc::Receiver<Vec<u8>>
-) {
-    loop {
-        tokio::select! {
-            _ = stop.recv() => break,
-            result = queue.recv() => match result {
-                Some(packet) => {
-                    if let Err(err) = tun.send(&packet).await {
-                        stop_sender.send(RuntimeError::IO(format!("failed to send tun: {}", err))).unwrap();
-                    }
-                },
-                None => break
-            }
-        }
-    }
-}
-
-async fn tun_listener(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
-    tun: Arc<AsyncDevice>,
-    queue: mpsc::Sender<Vec<u8>>
-) {
-    let mut buffer = [0u8; 65536];
-    loop {
-        tokio::select! {
-            _ = stop.recv() => break,
-            result = tun.recv(&mut buffer) => match result {
-                Ok(n) => {
-                    if n == 0 {
-                        warn!("received tun packet with 0 bytes, dropping it");
-                        continue;
-                    }
-                    if n > 65536 {
-                        warn!("received tun packet larger than 65536 bytes, dropping it (check ur mtu)");
-                        continue;
-                    }
-                    if let Err(err) = queue.send(buffer[..n].to_vec()).await {
-                        error!("failed to send data to data_receiver: {}", err);
-                    }
-                }
-                Err(err) => {
-                    stop_sender.send(RuntimeError::IO(format!("failed to receive tun: {}",err))).unwrap();
-                }
-            }
-        }
-    }
-}
-
-
-async fn udp_sender(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
-    socket: Arc<UdpSocket>,
-    mut queue: mpsc::Receiver<Packet>
-) {
-    loop {
-        tokio::select! {
-            _ = stop.recv() => break,
-            result = queue.recv() => match result {
-                Some(packet) => {
-                    if let Err(err) = socket.send(&packet.to_bytes()).await {
-                        stop_sender.send(RuntimeError::IO(format!("failed to send udp: {}", err))).unwrap();
-                    }
-                },
-                None => break
-            }
-        }
-    }
-}
-
-async fn udp_listener(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
-    socket: Arc<UdpSocket>,
-    data_receiver: mpsc::Sender<EncryptedData>
-) {
-    let mut udp_buffer = [0u8; 65536];
-    loop {
-        tokio::select! {
-            _ = stop.recv() => break,
-            result = socket.recv(&mut udp_buffer) => match result {
-                Ok(n) => {
-                    if n == 0 {
-                        warn!("received UDP packet with 0 bytes, dropping it");
-                        continue;
-                    }
-                    if n > 65536 {
-                        warn!("received UDP packet larger than 65536 bytes, dropping it");
-                        continue;
-                    }
-                    match Packet::try_from(&udp_buffer[..n]) {
-                        Ok(packet) => match packet {
-                            Packet::DataServer(data) => {
-                                if let Err(err) = data_receiver.send(data).await {
-                                    error!("failed to send data to data_receiver: {}", err);
-                                }
-                            },
-                            Packet::HandshakeResponder(_) => {
-                                warn!("received handshake packet, but expected data packet");
-                                continue;
-                            },
-                            _ => {
-                                warn!("received unexpected packet type");
-                                continue;
-                            }
-                        },
-                        Err(err) => {
-                            warn!("failed to parse UDP packet: {}", err);
-                            continue;
-                        }
-                    }
-                }
-                Err(err) => {
-                    stop_sender.send(RuntimeError::IO(format!("failed to receive udp: {}", err))).unwrap();
-                }
-            }
-        }
-    }
 }

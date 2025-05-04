@@ -88,7 +88,7 @@ impl ConnectCmd {
                     debug!("stop signal not sent from Ctrl-C handler: {}", err);
                 }
             }
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(2));
             process::exit(0);
         }).expect("error setting Ctrl-C handler");
 

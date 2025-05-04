@@ -2,6 +2,7 @@ pub mod session;
 mod worker;
 pub mod error;
 mod network;
+mod transport;
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -10,20 +11,26 @@ use std::{
 use std::sync::Arc;
 use std::time::Duration;
 use dashmap::DashMap;
-use socket2::{Domain, Protocol, Socket, Type};
 use self::{
     error::RuntimeError,
-    session::{ Sessions}
+    session::Sessions
 };
 
 use tokio::runtime::Builder;
 use tokio::sync::{broadcast};
+use tracing::info;
 use crate::config::{Config, RuntimeConfig};
 use shared::{
     keys::handshake::{PublicKey, SecretKey},
     network::set_ipv4_forwarding
 };
 use shared::tun::setup_tun;
+use crate::runtime::transport::Transport;
+#[cfg(feature = "udp")]
+use crate::runtime::transport::udp::UdpTransport;
+
+#[cfg(feature = "ws")]
+use crate::runtime::transport::ws::WsTransport;
 
 pub struct Runtime {
     sock: SocketAddr,
@@ -74,12 +81,6 @@ impl Runtime {
             false => self.config.workers
         };
 
-        tracing::info!(
-        "Runtime running on udp://{} with {} workers",
-        self.sock,
-        workers
-    );
-
         set_ipv4_forwarding(true).map_err(|err| vec![RuntimeError::from(err)])?;
 
         let tun = setup_tun(
@@ -90,19 +91,33 @@ impl Runtime {
             true
         ).await.map_err(|err| vec![RuntimeError::from(err)])?;
 
-        let socket = Socket::new(
-            Domain::for_address(self.sock),
-            Type::DGRAM,
-            Some(Protocol::UDP)
-        ).map_err(|err| vec![RuntimeError::from(err)])?;
-        
-        socket.set_nonblocking(true).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_reuse_port(true).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_reuse_address(true).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_recv_buffer_size(self.config.so_rcvbuf).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_send_buffer_size(self.config.so_sndbuf).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.set_tos(0b101110 << 2).map_err(|err| vec![RuntimeError::from(err)])?;
-        socket.bind(&self.sock.into()).map_err(|err| vec![RuntimeError::from(err)])?;
+        let mut transports: Vec<Arc<dyn Transport>> = match () {
+            #[cfg(feature = "udp")]
+            _ if cfg!(feature = "udp") => {
+                UdpTransport::new_pool(
+                    self.sock,
+                    self.config.so_rcvbuf,
+                    self.config.so_sndbuf,
+                    workers
+                ).map_err(|err| vec![err])?
+                    .into_iter()
+                    .map(|t| Arc::new(t) as Arc<dyn Transport>)
+                    .collect()
+            }
+            #[cfg(feature = "ws")]
+            _ if cfg!(feature = "ws") => {
+                WsTransport::new_pool(
+                    self.sock,
+                    self.config.so_rcvbuf,
+                    self.config.so_sndbuf,
+                    workers
+                ).map_err(|err| vec![err])?
+                    .into_iter()
+                    .map(|t| Arc::new(t) as Arc<dyn Transport>)
+                    .collect()
+            }
+            _ => unreachable!("transport is not selected, please enable one of transport features")
+        };
         
         let rt = Builder::new_multi_thread()
             .worker_threads(workers)
@@ -120,16 +135,14 @@ impl Runtime {
             let tun = tun.try_clone().map_err(|err| vec![RuntimeError::Tun(
                 format!("failed to clone tun device: {}", err)
             )])?;
-            let socket = socket.try_clone().map_err(|err| vec![RuntimeError::IO(
-                format!("failed to clone socket: {}", err)
-            )])?;
+            let transport = transports.pop().unwrap(); // unwrap is safe here
             let config = self.config.clone();
 
             let handle = rt.spawn(async move {
                 tracing::debug!("worker {} started", worker_id);
 
                 if let Err(err) = worker::create(
-                    socket,
+                    transport,
                     stop_tx,
                     sessions,
                     known_clients,
@@ -152,7 +165,7 @@ impl Runtime {
         // session cleanup
         let session = self.config.session.clone().unwrap_or_default();
         if session.timeout != 0 {
-            tracing::info!("session cleanup worker started");
+            info!("session cleanup worker started");
             tokio::spawn(session::worker::run(
                 self.stop_tx.clone(),
                 self.sessions.clone(),
@@ -160,7 +173,7 @@ impl Runtime {
                 Duration::from_secs(session.cleanup_interval as u64),
             ));
         } else {
-            tracing::info!("session cleanup worker disabled");
+            info!("session cleanup worker disabled");
         }
 
         let mut errors = Vec::new();

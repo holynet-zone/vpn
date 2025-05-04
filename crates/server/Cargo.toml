@@ -6,7 +6,9 @@ autobins = false
 
 [features]
 default = ["cli"]
-cli = ["clap", "inquire", "anstyle", "ctrlc"]
+udp = ["socket2"]
+ws = ["tokio-tungstenite", "futures", "socket2"]
+cli = ["clap", "inquire", "anstyle", "ctrlc", "rocksdb"]
 
 [[bin]]
 name = "server"
@@ -40,10 +42,13 @@ tracing-appender = { workspace = true }
 snow = { workspace = true }
 
 # IO
-rocksdb = { version = "0.23", features = ["multi-threaded-cf"] }
+rocksdb = { version = "0.23", features = ["multi-threaded-cf"], optional = true }
 tun-rs = { workspace = true }
 tokio = { workspace = true }
-socket2 = "0.5.8"
+socket2 = { workspace = true, optional = true }
 async-trait = "0.1"
 hex = "0.4.3"
 rand = "0.9.1"
+tokio-tungstenite = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+

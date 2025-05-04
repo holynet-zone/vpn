@@ -1,5 +1,6 @@
 pub mod error;
 mod worker;
+mod transport;
 
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
@@ -42,8 +43,6 @@ impl Runtime {
     }
 
     pub async fn run(&self) -> Result<(), RuntimeError> {
-        tracing::info!("Connecting to udp://{}", self.sock);
-        
         let worker = worker::create(
             self.sock,
             self.stop_tx.clone(),

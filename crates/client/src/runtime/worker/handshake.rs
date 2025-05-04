@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 use snow::{Builder, HandshakeState, StatelessTransportState};
-use tokio::net::UdpSocket;
 use tracing::warn;
 use shared::connection_config::CredentialsConfig;
 use shared::handshake::{
@@ -16,6 +15,7 @@ use shared::protocol::{
     Packet
 };
 use shared::session::Alg;
+use crate::runtime::transport::Transport;
 use super::super::{
     error::RuntimeError
 };
@@ -54,7 +54,7 @@ fn complete(
 }
 
 pub(super) async fn handshake_step(
-    socket: Arc<UdpSocket>,
+    transport: Arc<dyn Transport>,
     cred: CredentialsConfig,
     alg: Alg,
     timeout: Duration
@@ -65,7 +65,7 @@ pub(super) async fn handshake_step(
         &cred
     )?;
     
-    socket.send(&Packet::HandshakeInitial(handshake).to_bytes()).await?;
+    transport.send(&Packet::HandshakeInitial(handshake).to_bytes()).await?;
 
     // [step 2] Server complete
     let mut buffer = [0u8; 65536];
@@ -74,11 +74,13 @@ pub(super) async fn handshake_step(
             format!("server timeout ({:?})", timeout)
         )),
         handshake = async { loop {
-            let size = socket.recv(&mut buffer).await?;
+            let size = transport.recv(&mut buffer).await.map_err(
+                |err| RuntimeError::IO(format!("receive handshake: {}", err))
+            )?;
             match Packet::try_from(&buffer[..size]) {
                 Ok(Packet::HandshakeResponder(handshake)) => break Ok(handshake),
                 Err(err) => {
-                    warn!("failed to parse handshake packet: {}", err);
+                    warn!("parse handshake packet: {}", err);
                     continue;
                 },
                 _ => {

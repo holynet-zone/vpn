@@ -1,7 +1,7 @@
 mod handshake;
 mod data;
 mod tun;
-mod udp;
+mod transport;
 
 use super::session::HolyIp;
 use super::{
@@ -10,28 +10,27 @@ use super::{
 };
 use crate::config::RuntimeConfig;
 use crate::runtime::worker::{
-    data::{data_tun_executor, data_udp_executor},
+    data::{data_tun_executor, data_transport_executor},
     handshake::handshake_executor,
     tun::{tun_listener, tun_sender},
-    udp::{udp_listener, udp_sender}
+    transport::{transport_listener, transport_sender}
 };
 use dashmap::DashMap;
 use shared::keys::handshake::{PublicKey, SecretKey};
 use shared::protocol::{EncryptedData, EncryptedHandshake, Packet};
 use shared::session::SessionId;
-use socket2::Socket;
 use std::{
     net::SocketAddr,
     sync::Arc
 };
-use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 use tun_rs::AsyncDevice;
+use crate::runtime::transport::Transport;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create(
-    socket: Socket,
+    transport: Arc<dyn Transport>,
     stop_tx: broadcast::Sender<RuntimeError>,
     sessions: Sessions,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
@@ -41,21 +40,28 @@ pub(crate) async fn create(
     config: RuntimeConfig
 ) -> Result<(), RuntimeError> {
 
-    let socket = Arc::new(UdpSocket::from_std(socket.into())?);
     let tun = Arc::new(tun);
     
-    let (out_udp_tx, out_udp_rx) = mpsc::channel::<(Packet, SocketAddr)>(config.out_udp_buf);
+    let (out_transport_tx, out_transport_rx) = mpsc::channel::<(Packet, SocketAddr)>(config.out_udp_buf);
     let (out_tun_tx, out_tun_rx) = mpsc::channel::<Vec<u8>>(config.out_tun_buf);
     let (handshake_tx, handshake_rx) = mpsc::channel::<(EncryptedHandshake, SocketAddr)>(config.handshake_buf);
-    let (data_udp_tx, data_udp_rx) = mpsc::channel::<(SessionId, EncryptedData, SocketAddr)>(config.data_udp_buf);
+    let (data_transport_tx, data_transport_rx) = mpsc::channel::<(SessionId, EncryptedData, SocketAddr)>(config.data_udp_buf);
     let (data_tun_tx, data_tun_rx) = mpsc::channel::<(Vec<u8>, HolyIp)>(config.data_tun_buf);
 
+    #[cfg(feature = "ws")]
+    {
+        use crate::runtime::transport::ws::WsTransport;
+        if let Ok(ws_transport) = transport.clone().downcast::<WsTransport>() {
+            tokio::spawn(async move {
+                ws_transport.start().await
+            });
+        }
+    }
+    // Handle incoming transport packets
+    tokio::spawn(transport_listener(stop_tx.subscribe(), transport.clone(), handshake_tx, data_transport_tx));
 
-    // Handle incoming UDP packets
-    tokio::spawn(udp_listener(stop_tx.subscribe(), socket.clone(), handshake_tx, data_udp_tx));
-
-    // Handle outgoing UDP packets
-    tokio::spawn(udp_sender(stop_tx.subscribe(), socket.clone(), out_udp_rx));
+    // Handle outgoing transport packets
+    tokio::spawn(transport_sender(stop_tx.subscribe(), transport.clone(), out_transport_rx));
     
     // Handle incoming TUN packets
     tokio::spawn(tun_listener(stop_tx.subscribe(), tun.clone(), data_tun_tx));
@@ -67,15 +73,15 @@ pub(crate) async fn create(
     tokio::spawn(handshake_executor(
         stop_tx.subscribe(), 
         handshake_rx, 
-        out_udp_tx.clone(), 
+        out_transport_tx.clone(), 
         known_clients.clone(), 
         sessions.clone(),
         sk
     ));
-    tokio::spawn(data_udp_executor(
+    tokio::spawn(data_transport_executor(
         stop_tx.subscribe(), 
-        data_udp_rx,
-        out_udp_tx.clone(),
+        data_transport_rx,
+        out_transport_tx.clone(),
         out_tun_tx.clone(),
         sessions.clone(),
         config.session.unwrap_or_default().timeout == 0
@@ -84,7 +90,7 @@ pub(crate) async fn create(
     tokio::spawn(data_tun_executor(
         stop_tx.subscribe(),
         data_tun_rx,
-        out_udp_tx.clone(),
+        out_transport_tx.clone(),
         sessions.clone(),
     ));
     
@@ -135,7 +141,7 @@ pub(crate) async fn create(
 //         tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 // 
 //         let (stop_tx, _) = broadcast::channel::<RuntimeError>(1);
-//         let (out_udp_tx, mut out_udp_rx) = mpsc::channel::<(Packet, SocketAddr)>(1000);
+//         let (out_transport_tx, mut out_transport_rx) = mpsc::channel::<(Packet, SocketAddr)>(1000);
 //         let (handshake_tx, handshake_rx) = mpsc::channel::<(storage::packet::Handshake, SocketAddr)>(1000);
 //         let (data_tx, data_rx) = mpsc::channel::<(storage::packet::DataPacket, SocketAddr)>(1000);
 // 
@@ -149,7 +155,7 @@ pub(crate) async fn create(
 //         tokio::spawn(handshake_executor(
 //             stop_tx.subscribe(),
 //             handshake_rx,
-//             out_udp_tx.clone(),
+//             out_transport_tx.clone(),
 //             known_clients.clone(),
 //             sessions.clone(),
 //             server_sk
@@ -157,7 +163,7 @@ pub(crate) async fn create(
 //         tokio::spawn(data_executor(
 //             stop_tx.subscribe(),
 //             data_rx,
-//             out_udp_tx.clone(),
+//             out_transport_tx.clone(),
 //             sessions.clone(),
 //             Some(
 //                 std::sync::Arc::new(|req| {
@@ -194,7 +200,7 @@ pub(crate) async fn create(
 //         handshake_tx.send((handshake, client_sock)).await?;
 // 
 //         // [step 2] Server Complete
-//         let (packet, s) = out_udp_rx.recv().await.unwrap();
+//         let (packet, s) = out_transport_rx.recv().await.unwrap();
 // 
 // 
 //         // [step 3] Client Complete
@@ -216,7 +222,7 @@ pub(crate) async fn create(
 //         data_tx.send((packet, client_sock)).await?;
 // 
 //         // Server
-//         let (packet, _) = out_udp_rx.recv().await.unwrap();
+//         let (packet, _) = out_transport_rx.recv().await.unwrap();
 // 
 //         // Client
 //         let body = match packet {
