@@ -18,6 +18,8 @@ snow = "0.9"
 tokio = { version = "1.44", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
 tun-rs = { version = "2.0.9", features = ["async_tokio"] }
 socket2 = "0.5.9"
+tokio-tungstenite = "0.26.2"
+futures = "0.3.31"
 ctrlc = "3.4"
 
 # data
