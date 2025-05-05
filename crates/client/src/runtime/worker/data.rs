@@ -73,7 +73,7 @@ pub(super) async fn data_udp_executor(
                             )).unwrap();
                             continue;
                         },
-                        DataServerBody::Payload(payload) => {
+                        DataServerBody::Packet(payload) => {
                             tun_sender.send(payload.0).await.unwrap()
                         }
                     },
@@ -100,7 +100,7 @@ pub(super) async fn data_tun_executor(
         tokio::select! {
             _ = stop.recv() => break,
             body = queue.recv() => match body { // todo: may exec in another thread from pool??
-               Some(packet) => match encrypt_body(&DataClientBody::Payload(packet.into()), &state) {
+               Some(packet) => match encrypt_body(&DataClientBody::Packet(packet.into()), &state) {
                     Ok(encrypted) => {
                         udp_sender.send(Packet::DataClient{ sid, encrypted }).await.unwrap(); // todo remove await
                     },

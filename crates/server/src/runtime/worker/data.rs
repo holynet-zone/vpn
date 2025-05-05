@@ -78,7 +78,7 @@ pub(super) async fn data_transport_executor(
                                     }
                                 }
                             },
-                            DataClientBody::Payload(data) => {
+                            DataClientBody::Packet(data) => {
                                 // sessions. - check HolyIp in sessions
                                 if !inf_sessions_timeout {
                                     sessions.touch(sid)
@@ -116,7 +116,7 @@ pub(super) async fn data_tun_executor(
             _ = stop.recv() => break,
             data = queue.recv() => match data {
                 Some((packet, holy_ip)) => match sessions.get(&holy_ip) {
-                    Some(session) => match encode_body(&DataServerBody::Payload(packet.into()), &session.state) {
+                    Some(session) => match encode_body(&DataServerBody::Packet(packet.into()), &session.state) {
                         Ok(body) => {
                             if let Err(e) = transport_tx.send((Packet::DataServer(body), session.sock_addr())).await {
                                 error!("failed to send server data packet to transport queue: {}", e);

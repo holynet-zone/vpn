@@ -48,8 +48,8 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Client->>Server: Handshake Initial
-    Server->>Client: Handshake Response
+    Client->>+Server: Handshake(Initial)
+    Server-->>-Client: Handshake(Response)
 ```
 
 #### Handshake Initial
@@ -72,7 +72,7 @@ sequenceDiagram
 └──────┴───────┴──────────────┬───────────────┘                                     
                               │                                                     
                               │                                                     
-                              ▼                                                     
+                              │                                                     
                                                                                     
                    HandshakeResponderBody                                           
                                                                                     
@@ -99,17 +99,17 @@ sequenceDiagram
                               │                │   └──────┴───────┴──────┴─────────┘
                               │                │                    ServerOverloaded
                               │                │   0      8                         
-                              │                │   ┌──────┐                         
-                              │                │   │ TYPE │                         
-                              └──   DISCONNECT ├── │ 0x01 │                         
-                                       0x01    │   │(8bit)│                         
-                                               │   └──────┘                         
+                              │                │   ┌────────┐                         
+                              │                │   │  TYPE  │                         
+                              └──   DISCONNECT ├── │  0x01  │                         
+                                       0x01    │   │ (8bit) │                         
+                                               │   └────────┘                         
                                                │                          Unexpected
                                                │   0      8      72                N
                                                │   ┌──────┬───────┬────────────────┐
                                                │   │ TYPE │  LEN  │      TEXT      │
                                                └── │ 0x02 │   N   │                │
-                                                   │(8bit)│(64bit)│     (N-72bit)  │
+                                                   │(8bit)│(64bit)│    (N-72bit)   │
                                                    └──────┴───────┴────────────────┘
 ```
 
@@ -119,11 +119,13 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Client->>Server: DataPayload
-    Client->>Server: DataPayload
-    Server->>Client: DataPayload
-    Client->>Server: DataKeepAlive
-    Server->>Client: DataKeepAlive
+    Client->>Server: Packet(IP Packet)
+    Client->>Server: Packet(IP Packet)
+    Server->>Client: Packet(IP Packet)
+    Client->>Server: KeepAlive(timestamp)
+    loop Every N sec
+        Client-->Server: KeepAlive(timestamp)
+    end
 ```
 
 #### DataClient
@@ -137,7 +139,7 @@ sequenceDiagram
                                   │                                         
                                   │                                         
                                   │                                         
-                                  ▼                                         
+                                  │                                         
                                                                             
                            DataClientBody                                   
                                                                             
@@ -149,7 +151,7 @@ sequenceDiagram
                                   │               0      16                N
                                   │               ┌───────┬────────────────┐
                                   │               │  LEN  │      BYTES     │
-                                  ├────  PAYLOAD  │   N   │                │
+                                  ├────  PACKET   │   N   │                │
                                   │       0x00    │(16bit)│     (N-16bit)  │
                                   │               └───────┴────────────────┘
                                   │                                         
@@ -178,7 +180,7 @@ sequenceDiagram
                               │                                          
                               │                                          
                               │                                          
-                              ▼                                          
+                              │                                          
                                                                          
                        DataClientBody                                    
                                                                          
@@ -190,7 +192,7 @@ sequenceDiagram
                               │                0      16                N
                               │                ┌───────┬────────────────┐
                               │                │  LEN  │      BYTES     │
-                              ├────  PAYLOAD   │   N   │                │
+                              ├────  PACKET    │   N   │                │
                               │       0x00     │(16bit)│    (N-16bit)   │
                               │                └───────┴────────────────┘
                               │                                          
@@ -201,10 +203,10 @@ sequenceDiagram
                               │       0x01     │        (128bit)        │
                               │                └────────────────────────┘
                               │                                          
-                              │                0       8                 
-                              │                ┌───────┐                 
-                              │                │  CODE │                 
-                              └──── Disconnect │       │                 
-                                      0x02     │ (8bit)│                 
-                                               └───────┘                 
+                              │                0        8                 
+                              │                ┌────────┐                 
+                              │                │  CODE  │                 
+                              └──── Disconnect │        │                 
+                                      0x02     │ (8bit) │                 
+                                               └────────┘                 
 ```

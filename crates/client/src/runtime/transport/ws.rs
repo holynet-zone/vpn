@@ -26,7 +26,7 @@ impl WsTransport {
             .map_err(|e| RuntimeError::IO(format!(
                 "Failed to connect to WebSocket server: {}", e
             )))?;
-        
+
         let (write, read) = ws_stream.split();
 
         Ok(Self { write: Arc::new(Mutex::new(write)) , read: Arc::new(Mutex::new(read)) })
@@ -55,6 +55,7 @@ impl TransportReceiver for WsTransport {
 
 #[async_trait]
 impl TransportSender for WsTransport {
+    
     #[inline(always)]
     async fn send(&self, data: &[u8]) -> std::io::Result<usize> {
         self.write.lock().await
