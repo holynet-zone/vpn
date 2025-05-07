@@ -12,7 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::{Bytes, Message};
 use tokio_tungstenite::{accept_async, WebSocketStream};
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct WsTransport {
     listener: TcpListener,
@@ -41,13 +41,15 @@ impl WsTransport {
         socket.set_send_buffer_size(so_sndbuf)?;
         socket.set_tos(0b101110 << 2)?;
         socket.bind(&addr.into())?;
-        socket.listen(1024)?;
+        socket.listen(10000)?;
 
         info!(
             "Runtime running on ws://{} with {} workers",
             addr,
             count
         );
+        
+        let active_connections = Arc::new(DashMap::new());
 
         let mut listeners = Vec::with_capacity(count);
         for _ in 0..count - 1 {
@@ -56,7 +58,7 @@ impl WsTransport {
             let (sender, receiver) = mpsc::unbounded_channel();
             listeners.push(Self {
                 listener,
-                active_connections: Arc::new(DashMap::new()),
+                active_connections: active_connections.clone(),
                 message_queue: Arc::new(Mutex::new(receiver)),
                 message_sender: sender,
             });
@@ -66,10 +68,12 @@ impl WsTransport {
         let listener = TcpListener::from_std(socket.into())?;
         listeners.push(Self {
             listener,
-            active_connections: Arc::new(DashMap::new()),
+            active_connections,
             message_queue: Arc::new(Mutex::new(receiver)),
             message_sender: sender,
         });
+        
+        debug!("make ws transport pool with {} workers", listeners.len());
         Ok(listeners)
     }
 
@@ -88,7 +92,6 @@ impl WsTransport {
                 };
                 let (write, read) = ws_stream.split();
                 connections.insert(addr, write);
-                // Обработка входящих сообщений
                 tokio::spawn(async move {
                     let mut read = read;
                     while let Some(Ok(msg)) = read.next().await {
