@@ -1,25 +1,59 @@
+use std::ops::Deref;
 use std::sync::Arc;
-use tokio::sync::broadcast::{Receiver, Sender};
+use std::time::Duration;
+use tokio::sync::watch::Sender;
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 use shared::protocol::{EncryptedData, Packet};
-use crate::runtime::error::RuntimeError;
+use crate::runtime::state::RuntimeState;
 use crate::runtime::transport::{TransportReceiver, TransportSender};
 
 pub async fn transport_sender(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
+    state_tx: Sender<RuntimeState>,
     transport: Arc<dyn TransportSender>,
     mut queue: mpsc::Receiver<Packet>
 ) {
+    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
+
+    let mut state_rx = state_tx.subscribe();
+    let mut is_connected = false;
+    
     loop {
+        match state_rx.has_changed() {
+            Ok(has_changed) => if has_changed {
+                state_rx.mark_unchanged();
+                match state_rx.borrow().deref() {
+                    RuntimeState::Error(_) => break,
+                    RuntimeState::Connecting => {
+                        is_connected = false;
+                    },
+                    RuntimeState::Connected(_) => {
+                        is_connected = true;
+                    }
+                }
+            },
+            Err(err) => {
+                warn!("state channel broken: {}", err);
+                break;
+            }
+        }
+
+        if !is_connected {
+            state_wait_timer.tick().await;
+            continue;
+        }
+        
+        
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = state_rx.changed() => {
+                state_rx.mark_changed();
+                continue
+            },
             result = queue.recv() => match result {
                 Some(packet) => match transport.send(&packet.to_bytes()).await {
                     Ok(n) => debug!("sent transport packet with {} bytes", n),
-                    Err(err) => {
-                        stop_sender.send(RuntimeError::IO(format!("failed to send udp: {}", err))).unwrap();
+                    Err(_) => {
+                        state_tx.send(RuntimeState::Connecting).unwrap(); // todo log
                     }
                 },
                 None => break
@@ -29,15 +63,46 @@ pub async fn transport_sender(
 }
 
 pub async fn transport_listener(
-    stop_sender: Sender<RuntimeError>,
-    mut stop: Receiver<RuntimeError>,
+    state_tx: Sender<RuntimeState>,
     transport: Arc<dyn TransportReceiver>,
     data_receiver: mpsc::Sender<EncryptedData>
 ) {
+    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
+
+    let mut state_rx = state_tx.subscribe();
+    let mut is_connected = false;
     let mut transport_buffer = [0u8; 65536];
     loop {
+        match state_rx.has_changed() {
+            Ok(has_changed) => if has_changed {
+                state_rx.mark_unchanged();
+                match state_rx.borrow().deref() {
+                    RuntimeState::Error(_) => break,
+                    RuntimeState::Connecting => {
+                        is_connected = false;
+                    },
+                    RuntimeState::Connected(_) => {
+                        is_connected = true;
+                    }
+                }
+            },
+            Err(err) => {
+                warn!("state channel broken: {}", err);
+                break;
+            }
+        }
+
+        if !is_connected {
+            state_wait_timer.tick().await;
+            continue;
+        }
+        debug!("transport listener ok");
+        
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = state_rx.changed() => {
+                state_rx.mark_changed();
+                continue
+            },
             result = transport.recv(&mut transport_buffer) => match result {
                 Ok(n) => {
                     debug!("received transport packet with {} bytes", n);
@@ -71,9 +136,7 @@ pub async fn transport_listener(
                         }
                     }
                 }
-                Err(err) => {
-                    stop_sender.send(RuntimeError::IO(format!("failed to receive transport: {}", err))).unwrap();
-                }
+                Err(_) => state_tx.send(RuntimeState::Connecting).unwrap() // todo log
             }
         }
     }

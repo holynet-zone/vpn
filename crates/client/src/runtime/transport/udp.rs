@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
+use tracing::info;
+
 
 pub struct UdpTransport {
     socket: UdpSocket
@@ -15,7 +17,6 @@ impl UdpTransport {
         so_rcvbuf: usize, 
         so_sndbuf: usize,
     ) -> Result<Self, RuntimeError> {
-        tracing::info!("Connecting to udp://{}", addr);
         let socket = Socket::new(
             Domain::for_address(addr),
             Type::DGRAM,
@@ -48,4 +49,10 @@ impl TransportSender for UdpTransport {
     }
 }
 
-impl Transport for UdpTransport{}
+#[async_trait]
+impl Transport for UdpTransport {
+    async fn connect(&self) -> std::io::Result<()> {
+        info!("connecting to udp://{}", addr);
+        self.socket.connect(self.socket.local_addr()?).await
+    }
+}

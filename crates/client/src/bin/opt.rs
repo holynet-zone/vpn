@@ -25,19 +25,19 @@ impl Opt {
         } else {
             tracing::Level::INFO
         });
-
+        
         let file_appender = tracing_appender::rolling::daily(LOG_DIR, LOG_PREFIX);
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
+        
         let file_layer = fmt::layer()
             .with_writer(non_blocking)
             .with_ansi(false)
             .with_filter(log_level);
-
+        
         let console_layer = fmt::layer()
             .with_ansi(std::io::stdout().is_terminal())
             .with_filter(log_level);
-
+        
         tracing_subscriber::registry()
             .with(file_layer)
             .with(console_layer)
