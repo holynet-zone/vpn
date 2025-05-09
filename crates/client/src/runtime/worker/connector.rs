@@ -55,6 +55,7 @@ pub(crate) async fn executor(
                                 },
                                 true => {
                                     error!("{}, trying again in {:?}", err, RECONNECT_DELAY);
+                                    state_rx.mark_changed();
                                     ticker.tick().await;
                                 }
                             }

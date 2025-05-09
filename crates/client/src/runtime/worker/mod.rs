@@ -117,7 +117,7 @@ pub(crate) async fn create(
         state_tx.clone(),
         cred,
         alg,
-        Duration::from_secs(runtime_config.handshake_timeout)
+        Duration::from_millis(runtime_config.handshake_timeout)
     ).await;
 
     Ok(())

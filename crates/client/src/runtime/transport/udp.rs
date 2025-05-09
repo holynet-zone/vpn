@@ -3,6 +3,7 @@ use crate::runtime::transport::{Transport, TransportReceiver, TransportSender};
 use async_trait::async_trait;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tracing::info;
 
@@ -53,6 +54,9 @@ impl TransportSender for UdpTransport {
 impl Transport for UdpTransport {
     async fn connect(&self) -> std::io::Result<()> {
         info!("connecting to udp://{}", self.socket.peer_addr()?);
-        self.socket.connect(self.socket.peer_addr()?).await
+        tokio::select! {
+            _ = self.socket.connect(self.socket.peer_addr()?) => Ok(()),
+            _ = tokio::time::sleep(Duration::from_secs(5)) => Err(std::io::Error::other("connection timeout"))
+        }
     }
 }
