@@ -52,46 +52,23 @@ pub(super) async fn data_udp_executor(
     mut queue: mpsc::Receiver<EncryptedData>,
     tun_sender: mpsc::Sender<Vec<u8>>,
 ) {
-    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
-
     let mut state_rx = state_tx.subscribe();
     let mut state = None;
-    let mut is_connected = false;
-    
+
     loop {
-        match state_rx.has_changed() {
-            Ok(has_changed) => if has_changed {
-                state_rx.mark_unchanged();
+        tokio::select! {
+            _ = state_rx.changed() => {
                 match state_rx.borrow().deref() {
                     RuntimeState::Error(_) => break,
                     RuntimeState::Connecting => {
-                        is_connected = false;
                         continue
                     },
                     RuntimeState::Connected((_, transport_state)) => {
                         state = Some(transport_state.clone());
-                        is_connected = true;
                     }
                 }
             },
-            Err(err) => {
-                warn!("state channel broken: {}", err);
-                break;
-            }
-        }
-
-        if !is_connected {
-            state_wait_timer.tick().await;
-            continue;
-        }
-        
-        
-        tokio::select! {
-            _ = state_rx.changed() => {
-                state_rx.mark_changed();
-                continue
-            },
-            data = queue.recv() => match data { // todo: may exec in another thread from pool
+            data = queue.recv() => match data {
                 Some(data) => match decrypt_body(&data, state.as_deref().unwrap()) {
                     Ok(data_body) => match data_body {
                         DataServerBody::KeepAlive(time) => {
@@ -126,47 +103,25 @@ pub(super) async fn data_tun_executor(
     mut queue: mpsc::Receiver<Vec<u8>>,
     udp_sender: mpsc::Sender<Packet>,
 ) {
-    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
-
     let mut state_rx = state_tx.subscribe();
     let mut sid = SessionId::default();
     let mut state = None;
-    let mut is_connected = false;
     
     loop {
-        match state_rx.has_changed() {
-            Ok(has_changed) => if has_changed {
-                state_rx.mark_unchanged();
+        tokio::select! {
+            _ = state_rx.changed() => {
                 match state_rx.borrow().deref() {
                     RuntimeState::Error(_) => break,
                     RuntimeState::Connecting => {
-                        is_connected = false;
                         continue
                     },
                     RuntimeState::Connected((payload, transport_state)) => {
                         sid = payload.sid;
                         state = Some(transport_state.clone());
-                        is_connected = true;
                     }
                 }
             },
-            Err(err) => {
-                warn!("state channel broken: {}", err);
-                break;
-            }
-        }
-
-        if !is_connected {
-            state_wait_timer.tick().await;
-            continue;
-        }
-        
-        tokio::select! {
-            _ = state_rx.changed() => {
-                state_rx.mark_changed();
-                continue
-            },
-            body = queue.recv() => match body { // todo: may exec in another thread from pool??
+            body = queue.recv() => match body {
                Some(packet) => match encrypt_body(&DataClientBody::Packet(packet.into()), state.as_deref().unwrap()) {
                     Ok(encrypted) => {
                         udp_sender.send(Packet::DataClient{ sid, encrypted }).await.unwrap(); // todo remove await

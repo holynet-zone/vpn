@@ -19,35 +19,20 @@ pub async fn transport_sender(
     let mut is_connected = false;
     
     loop {
-        match state_rx.has_changed() {
-            Ok(has_changed) => if has_changed {
-                state_rx.mark_unchanged();
-                match state_rx.borrow().deref() {
-                    RuntimeState::Error(_) => break,
-                    RuntimeState::Connecting => {
-                        is_connected = false;
-                    },
-                    RuntimeState::Connected(_) => {
-                        is_connected = true;
-                    }
-                }
-            },
-            Err(err) => {
-                warn!("state channel broken: {}", err);
-                break;
-            }
-        }
-
-        if !is_connected {
+        if !is_connected && !state_rx.has_changed().unwrap() {
             state_wait_timer.tick().await;
             continue;
         }
         
-        
         tokio::select! {
-            _ = state_rx.changed() => {
-                state_rx.mark_changed();
-                continue
+            _ = state_rx.changed() => match state_rx.borrow().deref() {
+                RuntimeState::Error(_) => break,
+                RuntimeState::Connecting => {
+                    is_connected = false;
+                },
+                RuntimeState::Connected(_) => {
+                    is_connected = true;
+                }
             },
             result = queue.recv() => match result {
                 Some(packet) => match transport.send(&packet.to_bytes()).await {
@@ -73,34 +58,20 @@ pub async fn transport_listener(
     let mut is_connected = false;
     let mut transport_buffer = [0u8; 65536];
     loop {
-        match state_rx.has_changed() {
-            Ok(has_changed) => if has_changed {
-                state_rx.mark_unchanged();
-                match state_rx.borrow().deref() {
-                    RuntimeState::Error(_) => break,
-                    RuntimeState::Connecting => {
-                        is_connected = false;
-                    },
-                    RuntimeState::Connected(_) => {
-                        is_connected = true;
-                    }
-                }
-            },
-            Err(err) => {
-                warn!("state channel broken: {}", err);
-                break;
-            }
-        }
-
-        if !is_connected {
+        if !is_connected && !state_rx.has_changed().unwrap() {
             state_wait_timer.tick().await;
             continue;
         }
         
         tokio::select! {
-            _ = state_rx.changed() => {
-                state_rx.mark_changed();
-                continue
+            _ = state_rx.changed() => match state_rx.borrow().deref() {
+                RuntimeState::Error(_) => break,
+                RuntimeState::Connecting => {
+                    is_connected = false;
+                },
+                RuntimeState::Connected(_) => {
+                    is_connected = true;
+                }
             },
             result = transport.recv(&mut transport_buffer) => match result {
                 Ok(n) => {

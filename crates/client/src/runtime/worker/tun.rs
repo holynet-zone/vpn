@@ -13,39 +13,14 @@ pub async fn tun_sender(
     tun: Arc<AsyncDevice>,
     mut queue: mpsc::Receiver<Vec<u8>>
 ) {
-    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
-
     let mut state_rx = state_tx.subscribe();
-    let mut is_connected = false;
     loop {
-        match state_rx.has_changed() {
-            Ok(has_changed) => if has_changed {
-                state_rx.mark_unchanged();
-                match state_rx.borrow().deref() {
-                    RuntimeState::Error(_) => break,
-                    RuntimeState::Connecting => {
-                        is_connected = false;
-                    },
-                    RuntimeState::Connected(_) => {
-                        is_connected = true;
-                    }
-                }
-            },
-            Err(err) => {
-                warn!("state channel broken: {}", err);
-                break;
-            }
-        }
-
-        if !is_connected {
-            state_wait_timer.tick().await;
-            continue;
-        }
-        
         tokio::select! {
             _ = state_rx.changed() => {
-                state_rx.mark_changed();
-                continue
+                match state_rx.borrow().deref() {
+                    RuntimeState::Error(_) => break,
+                    _ => continue
+                }
             },
             result = queue.recv() => match result {
                 Some(packet) => {
@@ -72,9 +47,13 @@ pub async fn tun_listener(
     let mut is_connected = false;
     let mut buffer = [0u8; 65536];
     loop {
-        match state_rx.has_changed() {
-            Ok(has_changed) => if has_changed {
-                state_rx.mark_unchanged();
+        if !is_connected && !state_rx.has_changed().unwrap() {
+            state_wait_timer.tick().await;
+            continue;
+        }
+        
+        tokio::select! {
+            _ = state_rx.changed() => {
                 match state_rx.borrow().deref() {
                     RuntimeState::Error(_) => break,
                     RuntimeState::Connecting => {
@@ -84,22 +63,6 @@ pub async fn tun_listener(
                         is_connected = true;
                     }
                 }
-            },
-            Err(err) => {
-                warn!("state channel broken: {}", err);
-                break;
-            }
-        }
-
-        if !is_connected {
-            state_wait_timer.tick().await;
-            continue;
-        }
-        
-        tokio::select! {
-            _ = state_rx.changed() => {
-                state_rx.mark_changed();
-                continue
             },
             result = tun.recv(&mut buffer) => match result {
                 Ok(n) => {
