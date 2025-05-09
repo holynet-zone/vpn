@@ -38,7 +38,13 @@ impl StartCmd {
         }
 
         let clients = match database(&config.general.storage) {
-            Ok(db) => Clients::new(db),
+            Ok(db) => match Clients::new(db) {
+                Ok(store) => store,
+                Err(err) => {
+                    error!("failed to create client storage: {}", err);
+                    process::exit(1);
+                }
+            },
             Err(err) => {
                 error!("load storage: {}", err);
                 process::exit(1);

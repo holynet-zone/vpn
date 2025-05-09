@@ -224,7 +224,6 @@ pub(super) async fn keepalive_sender(
             continue;
         }
 
-
         tokio::select! {
             _ = state_rx.changed() => {
                 state_rx.mark_changed();

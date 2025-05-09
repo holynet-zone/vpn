@@ -2,7 +2,6 @@ use clap::Args;
 use std::path::PathBuf;
 use std::{process, thread};
 use std::net::{IpAddr, SocketAddr};
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use ctrlc::set_handler;
@@ -49,7 +48,7 @@ impl ConnectCmd {
                 None => unreachable!("config or key is required should protected by clap")
             }
         };
-        
+
         if config.runtime.is_none() {
             config.runtime = Some(RuntimeConfig::default());
         }
@@ -153,7 +152,8 @@ pub async fn tun_service(
         match state_rx.changed().await {
             Ok(_) => {
                 debug!("tun service execute");
-                match state_rx.borrow().deref() {
+                let state =  state_rx.borrow().clone();
+                match state {
                     RuntimeState::Connected((payload, _)) => {
                         match payload.ipaddr {
                             IpAddr::V4(addr) => {

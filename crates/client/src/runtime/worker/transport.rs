@@ -96,7 +96,6 @@ pub async fn transport_listener(
             state_wait_timer.tick().await;
             continue;
         }
-        debug!("transport listener ok");
         
         tokio::select! {
             _ = state_rx.changed() => {

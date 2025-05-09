@@ -16,7 +16,7 @@ impl RemoveCmd {
             anyhow::anyhow!("failed to parse public key: {}", error)
         })?;
 
-        let clients = Clients::new(database(&config.general.storage)?);
+        let clients = Clients::new(database(&config.general.storage)?)?;
         clients.delete(&pk).await?;
         println!("Client has been successfully removed");
         Ok(())

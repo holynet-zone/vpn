@@ -29,6 +29,7 @@ anstyle = { version = "1.0", optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 ipnetwork = "0.21.1"
+console-subscriber = "0.4.1"
 
 # Crypto
 snow = "0.9"

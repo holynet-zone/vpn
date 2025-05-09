@@ -2,6 +2,7 @@ pub mod error;
 mod worker;
 mod transport;
 pub mod state;
+mod handshake;
 
 use std::net::SocketAddr;
 use std::ops::Deref;

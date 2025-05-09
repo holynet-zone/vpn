@@ -15,7 +15,7 @@ pub struct ListCmd;
 
 impl ListCmd {
     pub async fn exec(self, config: Config) -> anyhow::Result<()> {
-        let clients = Clients::new(database(&config.general.storage)?);
+        let clients = Clients::new(database(&config.general.storage)?)?;
         let users: Vec<_> = clients.get_all().await.iter().map(|client| {
             UserRow {
                 pk: client.peer_pk.to_hex(),

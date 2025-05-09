@@ -13,7 +13,7 @@ pub struct RouteState {
 use ipnetwork::{IpNetwork, NetworkSize};
 
 impl RouteState {
-    pub fn new(remote: IpAddr, dev: String) -> Self {
+    pub fn new(remote: IpAddr, dev: String) -> Self {   
         Self {
             dev,
             default_gateway: None,

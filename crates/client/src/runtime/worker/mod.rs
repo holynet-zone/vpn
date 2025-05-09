@@ -1,4 +1,4 @@
-mod handshake;
+mod connector;
 mod data;
 mod tun;
 mod transport;
@@ -28,7 +28,7 @@ use std::{
     sync::Arc
 };
 use tokio::sync::{mpsc, watch};
-use tracing::{info};
+use tracing::{debug, warn};
 use tun_rs::AsyncDevice;
 use crate::runtime::state::RuntimeState;
 use crate::runtime::transport::Transport;
@@ -65,11 +65,11 @@ pub(crate) async fn create(
 
     // Handle incoming UDP packets
     tokio::spawn(transport_listener(state_tx.clone(), transport.clone(), data_udp_tx));
-
+    
     // Handle outgoing UDP packets
     tokio::spawn(transport_sender(state_tx.clone(), transport.clone(), udp_sender_rx));
-
-
+    
+    
     // Executors
     tokio::spawn(data_tun_executor(
         state_tx.clone(),
@@ -90,7 +90,7 @@ pub(crate) async fn create(
         tun.clone(),
         data_tun_tx
     ));
-
+    
     // Handle outgoing TUN packets
     tokio::spawn(tun_sender(
         state_tx.clone(),
@@ -101,24 +101,24 @@ pub(crate) async fn create(
 
     match runtime_config.keepalive {
         Some(duration) => {
-            info!("starting keepalive with interval {:?}", duration);
+            debug!("starting keepalive with interval {:?}", duration);
             tokio::spawn(keepalive_sender(
                 state_tx.clone(),
                 udp_sender_tx,
                 Duration::from_secs(duration),
             ));
         },
-        None => info!("keepalive is disabled")
+        None => warn!("keepalive is disabled")
     }
     
     // handshake_executor
-    handshake::handshake_executor(
+    connector::executor(
         transport.clone(),
         state_tx.clone(),
         cred,
         alg,
         Duration::from_secs(runtime_config.handshake_timeout)
     ).await;
-    
+
     Ok(())
 }

@@ -1,32 +1,29 @@
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use snow::{Builder, HandshakeState, StatelessTransportState};
 use tokio::select;
-use tokio::sync::watch;
-use tracing::{debug, error, warn};
+use tracing::warn;
 use shared::connection_config::CredentialsConfig;
 use shared::handshake::{
     NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
     NOISE_IK_PSK2_25519_AESGCM_BLAKE2S
 };
 use shared::protocol::{
-    EncryptedHandshake, 
-    HandshakeError, 
-    HandshakeResponderBody, 
-    HandshakeResponderPayload, 
+    EncryptedHandshake,
+    HandshakeError,
+    HandshakeResponderBody,
+    HandshakeResponderPayload,
     Packet
 };
 use shared::session::Alg;
-use crate::runtime::state::RuntimeState;
-use crate::runtime::transport::Transport;
-use super::super::{
-    error::RuntimeError
+use super::{
+    error::RuntimeError,
+    transport::Transport
 };
 
 
 fn initial(
-    alg: Alg, 
+    alg: Alg,
     cred: &CredentialsConfig
 ) -> Result<(EncryptedHandshake, HandshakeState), RuntimeError> {
     let mut initiator = Builder::new(match alg {
@@ -44,7 +41,7 @@ fn initial(
 }
 
 fn complete(
-    handshake: &EncryptedHandshake, 
+    handshake: &EncryptedHandshake,
     mut initiator: HandshakeState
 ) -> Result<(HandshakeResponderBody, StatelessTransportState), RuntimeError> {
     let mut buffer = [0u8; 65536];
@@ -57,7 +54,7 @@ fn complete(
     }
 }
 
-async fn handshake_step(
+pub async fn handshake_step(
     transport: Arc<dyn Transport>,
     cred: CredentialsConfig,
     alg: Alg,
@@ -68,7 +65,7 @@ async fn handshake_step(
         alg,
         &cred
     )?;
-    
+
     transport.send(&Packet::HandshakeInitial(handshake).to_bytes()).await?;
 
     // [step 2] Server complete
@@ -108,81 +105,6 @@ async fn handshake_step(
             },
             HandshakeError::Unexpected(err) => {
                 Err(RuntimeError::Handshake(format!("unexpected server error: {}", err)))
-            }
-        }
-    }
-}
-
-const RECONNECT_DELAY: Duration = Duration::from_secs(3);
-
-pub(crate) async fn handshake_executor(
-    transport: Arc<dyn Transport>,
-    state_tx: watch::Sender<RuntimeState>,
-    // for handshake step:
-    cred: CredentialsConfig,
-    alg: Alg,
-    timeout: Duration
-) {
-    let mut state_rx = state_tx.subscribe();
-    let mut ticker = tokio::time::interval(RECONNECT_DELAY);
-    let mut is_reconnect = false;
-
-    loop {
-        match state_rx.changed().await {
-            Ok(_) => {
-                match state_rx.borrow().deref() {
-                    RuntimeState::Connecting => match transport.connect().await {
-                        Ok(_) => match handshake_step(
-                            transport.clone(),
-                            cred.clone(),
-                            alg.clone(),
-                            timeout
-                        ).await {
-                            Ok((payload, transport_state)) => {
-                                is_reconnect = true;
-                                state_tx.send(RuntimeState::Connected((payload, Arc::new(transport_state)))).expect(
-                                    "broken runtime state pipe"
-                                );
-                                continue
-                            },
-                            Err(err) => match is_reconnect {
-                                false => {
-                                    state_tx.send(RuntimeState::Error(err)).expect(
-                                        "broken runtime state pipe"
-                                    );
-                                    return;
-                                },
-                                true => {
-                                    error!("{}, trying again in {:?}", err, RECONNECT_DELAY);
-                                    ticker.tick().await;
-                                }
-                            }
-                        },
-                        Err(err) => match is_reconnect {
-                            false => {
-                                state_tx.send(RuntimeState::Error(
-                                    RuntimeError::IO(format!("connecting error: {}", err))
-                                )).expect(
-                                    "broken runtime state pipe"
-                                );
-                                return;
-                            },
-                            true => {
-                                error!("failed to reconnect: {}, trying again in {:?}", err, RECONNECT_DELAY);
-                                ticker.tick().await;
-                            }
-                        }
-                    },
-                    RuntimeState::Error(_) => {
-                        debug!("handshake executor stopped by error state");
-                        break;
-                    },
-                    _ => {}
-                }
-            },
-            Err(err) => {
-                debug!("state_rx channel error in handshake executor: {}", err);
-                break;
             }
         }
     }
