@@ -8,7 +8,7 @@ pub enum HandshakeResponderBody {
     Disconnect(HandshakeError)
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HandshakeResponderPayload {
     pub sid: SessionId,
     pub ipaddr: IpAddr

@@ -1,4 +1,5 @@
-use rocksdb::DB;
+use fjall::{Keyspace, Config};
+
 use std::path::Path;
 
 mod clients;
@@ -8,10 +9,6 @@ pub use clients::{
     Clients
 };
 
-pub fn database(path: &Path) -> anyhow::Result<DB> {
-    let mut opts = rocksdb::Options::default();
-    opts.create_if_missing(true);
-    DB::open(&opts, path).map_err(|error| {
-        anyhow::anyhow!("failed to open database: {}", error)
-    })
+pub fn database(path: &Path) -> anyhow::Result<Keyspace> {
+    Ok(Config::new(path).open()?)
 }

@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
-use rocksdb::DB;
+use fjall::{Keyspace, PartitionCreateOptions, PartitionHandle};
 use serde::{Deserialize, Serialize};
 use shared::keys::handshake::{PublicKey, SecretKey};
-use std::sync::Arc;
 use tokio::task;
 
 #[derive(Serialize, Deserialize)]
@@ -15,16 +14,18 @@ pub struct Client {
 
 #[derive(Clone)]
 pub struct Clients {
-    pub db: Arc<DB>,
+    pub db: PartitionHandle
 }
 
 impl Clients {
-    pub fn new(db: DB) -> Self {
-        Self { db: Arc::new(db) }
+    pub fn new(db: Keyspace) -> anyhow::Result<Self> {
+        let items = db.open_partition("clients", PartitionCreateOptions::default())?;
+
+        Ok(Self { db: items })
     }
 
     pub async fn get(&self, pk: &PublicKey) -> Option<Client> {
-        let db = Arc::clone(&self.db);
+        let db = self.db.clone();
         let pk = pk.clone(); // todo fix
 
         task::spawn_blocking(move || {
@@ -41,10 +42,10 @@ impl Clients {
     }
 
     pub async fn get_all(&self) -> Vec<Client> {
-        let db = Arc::clone(&self.db);
+        let db = self.db.clone();
 
         task::spawn_blocking(move || {
-            db.iterator(rocksdb::IteratorMode::Start).map(|result| match result {
+            db.iter().map(|result| match result {
                 Ok((_, value)) => match bincode::serde::decode_from_slice(
                     &value,
                     bincode::config::standard()
@@ -61,25 +62,25 @@ impl Clients {
     }
 
     pub async fn save(&self, client: Client) {
-        let db = Arc::clone(&self.db);
+        let db = self.db.clone();
         let data = bincode::serde::encode_to_vec(
             &client,
             bincode::config::standard()
         ).expect("serialize client");
 
         task::spawn_blocking(move || {
-            db.put(*client.peer_pk, &data).expect("save client to db");
+            db.insert(*client.peer_pk, &data).expect("save client to db");
         })
             .await
             .unwrap()
     }
 
     pub async fn delete(&self, pk: &PublicKey) -> anyhow::Result<()> {
-        let db = Arc::clone(&self.db);
+        let db = self.db.clone();
         let pk = pk.clone(); // todo fix
 
         task::spawn_blocking(move || {
-            db.delete(pk.as_slice())
+            db.remove(pk.as_slice())
                 .map_err(anyhow::Error::from)
         })
             .await?

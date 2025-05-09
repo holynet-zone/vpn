@@ -86,10 +86,23 @@ impl Runtime {
         let tun = setup_tun(
             &self.tun_name,
             self.tun_mtu,
-            self.tun_ip,
-            self.tun_prefix,
             true
         ).await.map_err(|err| vec![RuntimeError::from(err)])?;
+        
+        match self.tun_ip {
+            IpAddr::V4(addr) => {
+                tun.set_network_address(addr, self.tun_prefix, None)
+                    .map_err(|err| vec![RuntimeError::Tun(
+                        format!("failed to set network address: {}", err)
+                    )])?;
+            }
+            IpAddr::V6(addr) => {
+                tun.add_address_v6(addr, self.tun_prefix)
+                    .map_err(|err| vec![RuntimeError::Tun(
+                        format!("failed to set network address: {}", err)
+                    )])?;
+            }
+        }
 
         let mut transports: Vec<Arc<dyn Transport>> = match () {
             #[cfg(feature = "udp")]

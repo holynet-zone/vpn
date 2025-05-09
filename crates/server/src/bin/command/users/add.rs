@@ -68,7 +68,7 @@ impl AddCmd {
         println!("Private key {}", format_opaque_bytes(sk.as_slice()));
         println!("Pre-shared key {}", format_opaque_bytes(psk.as_slice()));
 
-        let clients = Clients::new(database(&config.general.storage)?);
+        let clients = Clients::new(database(&config.general.storage)?)?;
         clients.save(Client {
             psk: psk.clone(),
             peer_pk: PublicKey::derive_from(sk.clone()),
