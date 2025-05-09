@@ -52,7 +52,7 @@ impl TransportSender for UdpTransport {
 #[async_trait]
 impl Transport for UdpTransport {
     async fn connect(&self) -> std::io::Result<()> {
-        info!("connecting to udp://{}", addr);
-        self.socket.connect(self.socket.local_addr()?).await
+        info!("connecting to udp://{}", self.socket.peer_addr()?);
+        self.socket.connect(self.socket.peer_addr()?).await
     }
 }
