@@ -11,7 +11,7 @@ ws = ["tokio-tungstenite", "futures"]
 cli = ["clap", "ctrlc", "anstyle"]
 
 [[bin]]
-name = "client-cli"
+name = "client"
 path = "src/bin/mod.rs"
 required-features = ["cli"]
 
