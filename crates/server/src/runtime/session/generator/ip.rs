@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use dashmap::DashSet;
 
 pub struct IpAddressGenerator {
     current: IpAddr,
-    borrowed: HashSet<IpAddr>,
+    borrowed: DashSet<IpAddr>,
     prefix: u8,
     start: IpAddr,
     end: IpAddr,
@@ -16,7 +17,7 @@ impl IpAddressGenerator {
         let (start, end) = Self::calculate_range(start_with, prefix);
         IpAddressGenerator {
             current: start_with,
-            borrowed: HashSet::new(),
+            borrowed: DashSet::new(),
             prefix,
             start,
             end,
@@ -24,14 +25,13 @@ impl IpAddressGenerator {
     }
 
     pub fn next(&mut self) -> Option<IpAddr> {
-        if self.borrowed.len() as u128 == self.max_addresses() {
+        if self.borrowed.len() as u128 >= self.max_addresses() {
             return None;
         }
 
         let initial = self.current;
         loop {
-            if !self.borrowed.contains(&self.current) {
-                self.borrowed.insert(self.current);
+            if self.borrowed.insert(self.current) {
                 return Some(self.current);
             }
 
