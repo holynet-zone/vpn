@@ -35,22 +35,21 @@ pub(crate) async fn executor(
                     RuntimeState::Connecting => match transport.connect().await {
                         Ok(_) => match handshake_step(
                             transport.clone(),
-                            cred.clone(),
-                            alg.clone(),
+                            &cred,
+                            &alg,
                             timeout
                         ).await {
                             Ok((payload, transport_state)) => {
                                 is_reconnect = true;
-                                state_tx.send(RuntimeState::Connected((payload, Arc::new(transport_state)))).expect(
-                                    "broken runtime state pipe"
-                                );
+                                state_tx.send(RuntimeState::Connected((payload, Arc::new(transport_state))))
+                                    .expect("broken runtime state pipe");
                                 continue
                             },
+                            // if conn is ok, but handshake no :(
                             Err(err) => match is_reconnect {
                                 false => {
-                                    state_tx.send(RuntimeState::Error(err)).expect(
-                                        "broken runtime state pipe"
-                                    );
+                                    state_tx.send(RuntimeState::Error(err))
+                                        .expect("broken runtime state pipe");
                                     return;
                                 },
                                 true => {
@@ -60,6 +59,7 @@ pub(crate) async fn executor(
                                 }
                             }
                         },
+                        // if connecting err
                         Err(err) => match is_reconnect {
                             false => {
                                 state_tx.send(RuntimeState::Error(
@@ -71,6 +71,7 @@ pub(crate) async fn executor(
                             },
                             true => {
                                 error!("failed to reconnect: {}, trying again in {:?}", err, RECONNECT_DELAY);
+                                state_rx.mark_changed();
                                 ticker.tick().await;
                             }
                         }

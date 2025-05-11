@@ -23,7 +23,7 @@ use super::{
 
 
 fn initial(
-    alg: Alg,
+    alg: &Alg,
     cred: &CredentialsConfig
 ) -> Result<(EncryptedHandshake, HandshakeState), RuntimeError> {
     let mut initiator = Builder::new(match alg {
@@ -56,14 +56,14 @@ fn complete(
 
 pub async fn handshake_step(
     transport: Arc<dyn Transport>,
-    cred: CredentialsConfig,
-    alg: Alg,
+    cred: &CredentialsConfig,
+    alg: &Alg,
     timeout: Duration
 ) -> Result<(HandshakeResponderPayload, StatelessTransportState), RuntimeError> {
     // [step 1] Client initial
     let (handshake, handshake_state) = initial(
         alg,
-        &cred
+        cred
     )?;
 
     transport.send(&Packet::HandshakeInitial(handshake).to_bytes()).await?;
