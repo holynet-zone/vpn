@@ -43,6 +43,64 @@ Options:
 ## Protocol schema
 
 ### Handshake
+The responder is initialized with a pre-shared long-term static key, which is assumed 
+to be pre-authenticated out of band by the initiator.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+
+    Server->>Client: S (Trusted setup)
+    Note over Server,Client: ...
+
+    Client->>+Server: Handshake Initial (e, es, s, ss)
+    Server-->>-Client: Handshake Complete (e, ee, se, psk)
+    Note over Server,Client: Handshake completed! <br/>Packets can be transmit
+    
+```
+
+**Message A show detailed analysis**  
+Message A, sent by the initiator, benefits from receiver authentication but 
+is vulnerable to Key Compromise Impersonation. If the responder's long-term 
+private key has been compromised, this authentication can be forged. However, 
+if the initiator carries out a separate session with a separate, compromised 
+responder, this other session can be used to forge the authentication of this 
+message with this session's responder. Message contents benefit from message 
+secrecy and some forward secrecy: the compromise of the responder's long-term 
+private keys, even at a later date, will lead to message contents being decrypted 
+by the attacker.
+
+**Message B show detailed analysis**  
+Message B, sent by the responder, benefits from sender and receiver authentication 
+and is resistant to Key Compromise Impersonation. Assuming the corresponding private 
+keys are secure, this authentication cannot be forged. Message contents benefit from 
+message secrecy and weak forward secrecy under an active attacker: if the responder's 
+long-term static keys were previously compromised, the later compromise of the 
+initiator's long-term static keys can lead to message contents being decrypted 
+by an active attacker, should that attacker also have forged the initiator's 
+ephemeral key during the session.
+
+**Message C show detailed analysis**  
+Message C, sent by the initiator, benefits from sender and receiver authentication and 
+is resistant to Key Compromise Impersonation. Assuming the corresponding private keys 
+are secure, this authentication cannot be forged. Message contents benefit from message 
+secrecy and strong forward secrecy: if the ephemeral private keys are secure and the 
+responder is not being actively impersonated by an active attacker, message contents 
+cannot be decrypted.
+
+**Message D show detailed analysis**  
+Message D, sent by the responder, benefits from sender and receiver authentication and 
+is resistant to Key Compromise Impersonation. Assuming the corresponding private keys 
+are secure, this authentication cannot be forged. Message contents benefit from message 
+secrecy and strong forward secrecy: if the ephemeral private keys are secure and the 
+initiator is not being actively impersonated by an active attacker, message contents 
+cannot be decrypted.
+
+[[more here]](https://noiseexplorer.com/patterns/IKpsk2)
+
+**Noise IKpsk2**
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -122,8 +180,8 @@ sequenceDiagram
     Client->>Server: Packet(IP Packet)
     Client->>Server: Packet(IP Packet)
     Server->>Client: Packet(IP Packet)
-    Client->>Server: KeepAlive(timestamp)
     loop Every N sec
+        Client->>Server: KeepAlive(timestamp)
         Client-->Server: KeepAlive(timestamp)
     end
 ```
