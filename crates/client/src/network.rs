@@ -1,5 +1,5 @@
 use std::net::{IpAddr};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use std::process::Command;
 use anyhow::format_err;
 use std::fmt::Write;
@@ -13,7 +13,7 @@ pub struct RouteState {
 use ipnetwork::{IpNetwork, NetworkSize};
 
 impl RouteState {
-    pub fn new(remote: IpAddr, dev: String) -> Self {
+    pub fn new(remote: IpAddr, dev: String) -> Self {   
         Self {
             dev,
             default_gateway: None,
@@ -30,7 +30,7 @@ impl RouteState {
             format_err!("failed to get default device: {}", e)
         )?;
         self.default_gateway = Some(default_gateway);
-        info!("default gateway: {} from dev {}", default_gateway, default_dev_name);
+        debug!("default gateway: {} from dev {}", default_gateway, default_dev_name);
         add_route(
             &IpNetwork::from_str("0.0.0.0/1")?,
             None,
@@ -56,7 +56,7 @@ impl RouteState {
         Ok(self)
     }
 
-    pub fn restore(&mut self) {
+    pub fn restore(&self) {
         for addr in self.exclude.iter() {
             match delete_route(
                 addr,

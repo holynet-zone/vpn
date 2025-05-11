@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use snow::{Builder, HandshakeState, StatelessTransportState};
+use tokio::select;
 use tracing::warn;
 use shared::connection_config::CredentialsConfig;
 use shared::handshake::{
@@ -8,21 +9,21 @@ use shared::handshake::{
     NOISE_IK_PSK2_25519_AESGCM_BLAKE2S
 };
 use shared::protocol::{
-    EncryptedHandshake, 
-    HandshakeError, 
-    HandshakeResponderBody, 
-    HandshakeResponderPayload, 
+    EncryptedHandshake,
+    HandshakeError,
+    HandshakeResponderBody,
+    HandshakeResponderPayload,
     Packet
 };
 use shared::session::Alg;
-use crate::runtime::transport::Transport;
-use super::super::{
-    error::RuntimeError
+use super::{
+    error::RuntimeError,
+    transport::Transport
 };
 
 
 fn initial(
-    alg: Alg, 
+    alg: Alg,
     cred: &CredentialsConfig
 ) -> Result<(EncryptedHandshake, HandshakeState), RuntimeError> {
     let mut initiator = Builder::new(match alg {
@@ -40,7 +41,7 @@ fn initial(
 }
 
 fn complete(
-    handshake: &EncryptedHandshake, 
+    handshake: &EncryptedHandshake,
     mut initiator: HandshakeState
 ) -> Result<(HandshakeResponderBody, StatelessTransportState), RuntimeError> {
     let mut buffer = [0u8; 65536];
@@ -53,7 +54,7 @@ fn complete(
     }
 }
 
-pub(super) async fn handshake_step(
+pub async fn handshake_step(
     transport: Arc<dyn Transport>,
     cred: CredentialsConfig,
     alg: Alg,
@@ -64,12 +65,12 @@ pub(super) async fn handshake_step(
         alg,
         &cred
     )?;
-    
+
     transport.send(&Packet::HandshakeInitial(handshake).to_bytes()).await?;
 
     // [step 2] Server complete
     let mut buffer = [0u8; 65536];
-    let resp = tokio::select! {
+    let resp = select! {
         _ = tokio::time::sleep(timeout) => Err(RuntimeError::Handshake(
             format!("server timeout ({:?})", timeout)
         )),

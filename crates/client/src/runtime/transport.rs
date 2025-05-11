@@ -16,4 +16,7 @@ pub trait TransportReceiver: Send + Sync {
     async fn recv(&self, buffer: &mut [u8]) -> io::Result<usize>;
 }
 
-pub trait Transport: TransportSender + TransportReceiver{}
+#[async_trait]
+pub trait Transport: TransportSender + TransportReceiver + Send + Sync {
+    async fn connect(&self) -> io::Result<()>;
+}
