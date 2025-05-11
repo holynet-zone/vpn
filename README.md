@@ -58,6 +58,9 @@ sequenceDiagram
     Server-->>-Client: Handshake Complete (e, ee, se, psk)
     Note over Server,Client: Handshake completed! <br/>Packets can be transmit
     
+    Client->>Server: Encrypted Packet
+    Client->>Server: Encrypted Packet
+    Server->>Client: Encrypted Packet
 ```
 
 **Message A show detailed analysis**  
@@ -112,63 +115,66 @@ sequenceDiagram
 
 #### Handshake Initial
 ```text
-0      8      24                              N  bit
-┌──────┬───────┬──────────────────────────────┐     
-│ TYPE │  LEN  │      HANDSHAKE PAYLOAD       │     
-│ 0x00 │   N   │         (ENCRYPTED)          │     
-│(8bit)│(16bit)│          (N-24bit)           │     
-└──────┴───────┴──────────────────────────────┘   
+0      8        24                                            792  bit
+┌──────┬─────────┬──────────────────────────────────────────────┐     
+│ TYPE │   LEN   │              NOISE METADATA                  │     
+│ 0x01 │    N    │                (ENCRYPTED)                   │     
+│(8bit)│ (16bit) │                 (768 bit)                    │     
+└──────┴─────────┴──────────────────────────────────────────────┘     
 ```
 
 #### Handshake Response
 ```text
-0      8      24                              N  bit                                
-┌──────┬───────┬──────────────────────────────┐                                     
-│ TYPE │  LEN  │      HANDSHAKE PAYLOAD       │                                     
-│ 0x01 │   N   │         (ENCRYPTED)          │                                     
-│(8bit)│(16bit)│          (N-24bit)           │                                     
-└──────┴───────┴──────────────┬───────────────┘                                     
-                              │                                                     
-                              │                                                     
-                              │                                                     
-                                                                                    
-                   HandshakeResponderBody                                           
-                                                                                    
-                              │                                                     
-                              │                    0      32     40        72       
-                              │                    ┌───────┬──────┬─────────┐       
-                              │                    │       │ TYPE │         │       
-                              │                ┌── │  SID  │ 0x00 │  IPv4   │       
-                              │                │   │(32bit)│(8bit)│ (32bit) │       
-                              │                │   └───────┴──────┴─────────┘       
-                              ├──   COMPLETE   │   0      32     40       168       
-                              │       0x00     │   ┌───────┬──────┬─────────┐       
-                              │                │   │       │ TYPE │         │       
-                              │                └── │  SID  │ 0x01 │  IPv6   │       
-                              │                    │(32bit)│(8bit)│ (128bit)│       
-                              │                    └───────┴──────┴─────────┘       
-                              │                                                     
-                              │                                  MaxConnectedDevices
-                              │                    0      8      40     48        80
-                              │                    ┌──────┬───────┬──────┬─────────┐
-                              │                    │ TYPE │       │ TYPE │         │
-                              │                ┌── │ 0x00 │  SID  │ 0x00 │  IPv4   │
-                              │                │   │(8bit)│(32bit)│(8bit)│ (32bit) │
-                              │                │   └──────┴───────┴──────┴─────────┘
-                              │                │                    ServerOverloaded
-                              │                │   0      8                         
-                              │                │   ┌────────┐                         
-                              │                │   │  TYPE  │                         
-                              └──   DISCONNECT ├── │  0x01  │                         
-                                       0x01    │   │ (8bit) │                         
-                                               │   └────────┘                         
-                                               │                          Unexpected
-                                               │   0      8      72                N
-                                               │   ┌──────┬───────┬────────────────┐
-                                               │   │ TYPE │  LEN  │      TEXT      │
-                                               └── │ 0x02 │   N   │                │
-                                                   │(8bit)│(64bit)│    (N-72bit)   │
-                                                   └──────┴───────┴────────────────┘
+0      8        24                                              N  bit
+┌──────┬─────────┬──────────────────────────────────────────────┐     
+│ TYPE │   LEN   │    HANDSHAKE PAYLOAD + NOISE METADATA        │     
+│ 0x01 │    N    │                (ENCRYPTED)                   │     
+│(8bit)│ (16bit) │                 (N-24bit)                    │     
+└──────┴─────────┴──────────────────────────────────────────────┘     
+                 0      8      40                                     
+                 ┌──────┬───────┬───────────────────────────────┐     
+                 │ TYPE │       │                               │     
+       COMPLETE  │ 0x00 │  SID  │            IP ADDR            │     
+                 │(8bit)│(32bit)│                               │     
+                 └──────┴───────┴───────────────────────────────┘     
+                               40     48                 176          
+                                ┌──────┬───────────────────┐          
+                                │ TYPE │                   │          
+                                │ 0x01 │        IPv6       │          
+                                │(8bit)│      (128bit)     │          
+                                └──────┴───────────────────┘          
+                               40     48          80                  
+                                ┌──────┬───────────┐                  
+                                │ TYPE │           │                  
+                                │ 0x00 │   IPv4    │                  
+                                │(8bit)│  (32bit)  │                  
+                                └──────┴───────────┘                  
+                                                                      
+                 0      8                                             
+                 ┌──────┬───────────────────────────────────────┐     
+                 │ TYPE │                                       │     
+     DISCONNECT  │ 0x01 │               REASON                  │     
+                 │(8bit)│                                       │     
+                 └──────┴───────────────────────────────────────┘     
+                        8     16      80                              
+                        ┌──────┬───────┬────────────────────────┐     
+                        │ TYPE │  LEN  │           TEXT         │     
+            Unexpected  │ 0x02 │   X   │           UTF-8        │     
+                        │(8bit)│(64bit)│         (X-80bit)      │     
+                        └──────┴───────┴────────────────────────┘     
+                        8     16      46                              
+                        ┌──────┬───────┐                              
+                        │ TYPE │       │                              
+   MaxConnectedDevices  │ 0x00 │ COUNT │                              
+                        │(8bit)│(32bit)│                              
+                        └──────┴───────┘                              
+                                                                      
+                        8     16                                      
+                        ┌──────┐                                      
+                        │ TYPE │                                      
+      ServerOverloaded  │ 0x01 │                                      
+                        │(8bit)│                                      
+                        └──────┘                                      
 ```
 
 ### Data
