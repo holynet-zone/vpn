@@ -89,10 +89,7 @@ impl Transport for WsTransport{
 
         let (ws_stream, _) = connect_async(request)
             .await
-            .map_err(|e| io::Error::new(
-                io::ErrorKind::Other,
-                anyhow!("failed to connect to WebSocket server: {}", e)
-            ))?;
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
         
         let (write, read) = ws_stream.split();
 
