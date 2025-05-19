@@ -19,21 +19,6 @@ impl<const SIZE: usize> Key<SIZE> {
         OsRng.fill_bytes(&mut key);
         Self(key)
     }
-    
-    pub fn to_hex(&self) -> String {
-        self.0.iter().map(|b| format!("{:02x}", b)).collect()
-    }
-    
-    pub fn from_hex(hex: &str) -> Result<Self, anyhow::Error> {
-        if hex.len() != SIZE * 2 {
-            return Err(anyhow::anyhow!("invalid key size, expected {} but actual {}", SIZE * 2, hex.len()));
-        }
-        let mut key = [0u8; SIZE];
-        for (i, byte) in hex.as_bytes().chunks(2).enumerate() {
-            key[i] = u8::from_str_radix(std::str::from_utf8(byte)?, 16)?;
-        }
-        Ok(Self(key))
-    }
 }
 
 impl<const SIZE: usize> Deref for Key<SIZE> {
@@ -64,6 +49,13 @@ impl<const SIZE: usize> TryFrom<&str> for Key<SIZE> {
     }
 }
 
+impl<const SIZE: usize> Display for Key<SIZE> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", STANDARD_NO_PAD.encode(self.0))
+    }
+}
+
+
 impl<const SIZE: usize> Into<[u8; SIZE]> for Key<SIZE> {
     fn into(self) -> [u8; SIZE] {
         self.0
@@ -76,19 +68,13 @@ impl<const SIZE: usize> From<[u8; SIZE]> for Key<SIZE> {
     }
 }
 
-impl<const SIZE: usize> Display for Key<SIZE> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{:?}", &self.0)
-    }
-}
-
 impl<const SIZE: usize> Serialize for Key<SIZE> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            let s = STANDARD_NO_PAD.encode(&self.0);
+            let s = STANDARD_NO_PAD.encode(self.0);
             serializer.serialize_str(&s)
         } else {
             serializer.serialize_bytes(&self.0)

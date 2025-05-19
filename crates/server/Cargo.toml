@@ -47,8 +47,15 @@ tun-rs = { workspace = true }
 tokio = { workspace = true }
 socket2 = { workspace = true, optional = true }
 async-trait = "0.1"
-hex = "0.4.3"
 rand = "0.9.1"
 tokio-tungstenite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
+[profile.release]
+opt-level = 3
+lto = "fat"
+panic = "abort"
+strip = true
+
+[profile.release.package."*"]
+opt-level = 3

@@ -18,7 +18,7 @@ impl ListCmd {
         let clients = Clients::new(database(&config.general.storage)?)?;
         let users: Vec<_> = clients.get_all().await.iter().map(|client| {
             UserRow {
-                pk: client.peer_pk.to_hex(),
+                pk: client.peer_pk.to_string(),
                 created_at: client.created_at.to_rfc2822()
             }
         }).collect();

@@ -1,6 +1,5 @@
-use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use dashmap::DashSet;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct IpAddressGenerator {
     current: IpAddr,

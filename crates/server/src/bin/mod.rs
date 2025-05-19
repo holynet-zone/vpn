@@ -16,7 +16,7 @@ const LOG_PREFIX: &str = "server.log";
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let mut opt = Opt::parse();
-    opt.init_logging();
+    let _guard = opt.init_logging()?;
 
     inquire::set_global_render_config(render_config());
     let config = opt.load_config(true)?;
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Users(cmd) => cmd.exec(config).await,
         Commands::Monitor => unimplemented!("Monitor command is not implemented"),
         Commands::Logs => unimplemented!("Logs command is not implemented"),
-    }
+    } 
     
     Ok(())
 }
