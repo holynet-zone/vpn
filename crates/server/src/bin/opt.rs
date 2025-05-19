@@ -1,8 +1,11 @@
-use std::{path::PathBuf, io::IsTerminal};
+use std::{path::PathBuf, io::IsTerminal, fs};
+use std::path::Path;
+use chrono::Local;
 use clap::Parser;
-use tracing::info;
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, fmt, Layer};
+use tracing::{debug, info};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, fmt, Layer, EnvFilter};
 use server::config;
 use crate::{LOG_DIR, LOG_PREFIX, CONFIG_PATH_ENV};
 use crate::command::Commands;
@@ -29,33 +32,40 @@ pub struct Opt {
 }
 
 impl Opt {
-    pub fn init_logging(&mut self) {
-        let log_level = LevelFilter::from_level(if self.debug {
-            tracing::Level::DEBUG
-        } else {
-            tracing::Level::INFO
-        });
+    pub fn init_logging(&mut self) -> anyhow::Result<WorkerGuard> {
+        let log_dir_path = Path::new(LOG_DIR);
+        if !Path::new(LOG_DIR).exists() {
+            fs::create_dir_all(log_dir_path).expect("Failed to create log directory");
+        }
+        
+        let appender = RollingFileAppender::builder()
+            .rotation(Rotation::DAILY)
+            .filename_prefix(LOG_PREFIX)
+            .build(LOG_DIR)?;
+        
+        let (non_blocking, guard) = tracing_appender::non_blocking(appender);
 
-        let file_appender = tracing_appender::rolling::daily(LOG_DIR, LOG_PREFIX);
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
+        let filter = if self.debug { "server=debug" } else { "server=info" };
+        
         let file_layer = fmt::layer()
             .with_writer(non_blocking)
             .with_ansi(false)
-            .with_filter(log_level);
-
+            .with_filter(EnvFilter::new(filter));
+        
         let console_layer = fmt::layer()
             .with_ansi(std::io::stdout().is_terminal())
-            .with_filter(log_level);
-
+            .with_filter(EnvFilter::new(filter));
+        
         tracing_subscriber::registry()
             .with(file_layer)
             .with(console_layer)
             .init();
+        
+        Ok(guard)
     }
 
     pub fn load_config(&self, auto_create: bool) -> anyhow::Result<config::Config> {
-        info!("loading configuration from file: {}", self.config.display());
+        debug!("loading configuration from file: {}", self.config.display());
 
         match self.config.exists() {
             false => match auto_create {

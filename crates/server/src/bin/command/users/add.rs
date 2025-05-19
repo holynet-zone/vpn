@@ -64,9 +64,9 @@ impl AddCmd {
 
         println!("\nClient has been successfully created!");
 
-        println!("\nPublic key {}", pk.to_hex());
-        println!("Private key {}", format_opaque_bytes(sk.as_slice()));
-        println!("Pre-shared key {}", format_opaque_bytes(psk.as_slice()));
+        println!("\nPublicKey {}", pk);
+        println!("PrivateKey {}", format_opaque_bytes(sk.as_slice()));
+        println!("PreSharedKey {}", format_opaque_bytes(psk.as_slice()));
 
         let clients = Clients::new(database(&config.general.storage)?)?;
         clients.save(Client {

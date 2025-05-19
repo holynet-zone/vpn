@@ -1,3 +1,4 @@
+use std::io::Read;
 use inquire::ui::{Attributes, Color, RenderConfig, StyleSheet, Styled};
 
 pub fn styles() -> clap::builder::Styles {
@@ -67,55 +68,29 @@ pub fn format_opaque_bytes(bytes: &[u8]) -> String {
     if bytes.len() < 8 {
         String::new()
     } else {
-        /*
-        // TODO: Hm, this can allow the same color for both, should rejig things to avoid this
-        // Select foreground and background colors based on the first 8 bytes.
-        let fg_color_index = bytes[0] % 8;
-        let bg_color_index = bytes[4] % 8;
-
-        // ANSI escape codes for foreground and background colors.
-        let fg_color_code = 37; // 30 through 37 are foreground colors
-        let bg_color_code = 40; // 40 through 47 are background colors
-        */
-
-        // to be more general, perhaps this should be configurable
-        // an opaque address needs less space than an opaque memo, etc
         let max_bytes = 32;
         let rem = if bytes.len() > max_bytes {
-            bytes[0..max_bytes].to_vec()
+            &bytes[0..max_bytes]
         } else {
-            bytes.to_vec()
+            bytes
         };
 
-        // Convert the rest of the bytes to hexadecimal.
-        let hex_str = hex::encode_upper(rem);
-        let opaque_chars: String = hex_str
-            .chars()
-            .map(|c| {
-                match c {
-                    '0' => "\u{2595}",
-                    '1' => "\u{2581}",
-                    '2' => "\u{2582}",
-                    '3' => "\u{2583}",
-                    '4' => "\u{2584}",
-                    '5' => "\u{2585}",
-                    '6' => "\u{2586}",
-                    '7' => "\u{2587}",
-                    '8' => "\u{2588}",
-                    '9' => "\u{2589}",
-                    'A' => "\u{259A}",
-                    'B' => "\u{259B}",
-                    'C' => "\u{259C}",
-                    'D' => "\u{259D}",
-                    'E' => "\u{259E}",
-                    'F' => "\u{259F}",
-                    _ => "",
-                }
-                    .to_string()
-            })
-            .collect();
+        let hex_str: String = rem.iter().map(|b| format!("{:02x}", b)).collect();
 
-        //format!("\u{001b}[{};{}m{}", fg_color_code, bg_color_code, block_chars)
-        opaque_chars
+        let block_chars = [
+            "\u{2595}", "\u{2581}", "\u{2582}", "\u{2583}", "\u{2584}", "\u{2585}",
+            "\u{2586}", "\u{2587}", "\u{2588}", "\u{2589}", "\u{259A}", "\u{259B}",
+            "\u{259C}", "\u{259D}", "\u{259E}", "\u{259F}"
+        ];
+
+        hex_str.chars()
+            .filter_map(|c| {
+                match c {
+                    '0'..='9' => Some(block_chars[c.to_digit(16).unwrap() as usize].to_string()),
+                    'a'..='f' => Some(block_chars[c.to_digit(16).unwrap() as usize].to_string()),
+                    _ => None,
+                }
+            })
+            .collect()
     }
 }
