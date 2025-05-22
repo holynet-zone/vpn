@@ -10,6 +10,8 @@ serde = { workspace = true }
 tun-rs = { workspace = true }
 base64 = "0.22.1"
 toml = { workspace = true }
+anstyle = { workspace = true }
+clap = { workspace = true }
 bincode = { workspace = true, features = ["serde"]}
 rand_core = { workspace = true }
 lazy_static = "1.5.0"

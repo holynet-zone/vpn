@@ -14,10 +14,14 @@ use client::runtime::Runtime;
 use client::runtime::state::RuntimeState;
 use shared::connection_config::{ConnectionConfig, InterfaceConfig, RuntimeConfig};
 use shared::network::find_available_ifname;
+use shared::success_err;
 
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub struct ConnectCmd {
+    /// common connection (config or key)
+    #[arg(value_name = "CONNECTION")]
+    connection: Option<String>,
     /// config file
     #[arg(short, long, value_name = "FILE PATH")]
     config: Option<PathBuf>,
@@ -29,23 +33,39 @@ pub struct ConnectCmd {
 impl ConnectCmd {
     pub async fn exec(self) {
         
-        let mut config = match self.config {
-            Some(ref path) => match ConnectionConfig::load(path) {
+        let mut config = match self.connection {
+            Some(ref connection) => match ConnectionConfig::from_base64(connection) {
                 Ok(config) => config,
-                Err(err) => {
-                    eprintln!("failed to load config: {}", err);
-                    process::exit(1);
+                Err(parse_key_err) => match ConnectionConfig::load(&PathBuf::from(connection)) {
+                    Ok(config) => config,
+                    Err(parse_config_err) => {
+                        success_err!(
+                            "parse connection\n\n\t if this key: {}\n\n\t if this config path: {}\n",
+                            parse_key_err,
+                            parse_config_err
+                        );
+                        process::exit(1);
+                    }
                 }
             },
             None => match self.key {
                 Some(key) => match ConnectionConfig::from_base64(&key) {
                     Ok(config) => config,
                     Err(err) => {
-                        eprintln!("failed to parse config key: {}", err);
+                        success_err!("parse config key: {}", err);
                         process::exit(1);
                     }
                 },
-                None => unreachable!("config or key is required should protected by clap")
+                None => match self.config {
+                    Some(ref path) => match ConnectionConfig::load(path) {
+                        Ok(config) => config,
+                        Err(err) => {
+                            success_err!("load config: {}", err);
+                            process::exit(1);
+                        }
+                    },
+                    None => unreachable!("config or key is required should protected by clap")
+                }
             }
         };
 
@@ -62,7 +82,7 @@ impl ConnectCmd {
 
         if let Some(path) = self.config {
             if let Err(err) = config.save(&path) {
-                eprintln!("failed to save config: {}", err);
+                success_err!("save config: {}", err);
                 process::exit(1);
             }
         }
@@ -70,7 +90,7 @@ impl ConnectCmd {
         let sock_addr = match config.general.host.parse() {
             Ok(addr) => SocketAddr::new(addr, config.general.port),
             Err(err) => {
-                eprintln!("failed to resolve host: {}", err);
+                success_err!("resolve host: {}", err);
                 process::exit(1);
             }
         };
@@ -83,7 +103,7 @@ impl ConnectCmd {
         ).await {
             Ok(tun) => Arc::new(tun),
             Err(err) => {
-                eprintln!("failed to setup tun: {}", err);
+                success_err!("setup tun: {}", err);
                 process::exit(1);
             }
         };
@@ -92,7 +112,7 @@ impl ConnectCmd {
         {
             Ok(routes) => Arc::new(routes),
             Err(err) => {
-                eprintln!("failed to setup routes: {}", err);
+                success_err!("setup routes: {}", err);
                 process::exit(1);
             }
         };
@@ -135,7 +155,7 @@ impl ConnectCmd {
                 }
                 _ => {
                     routes_clone.restore();
-                    error!("{}", error);
+                    success_err!("{}", error);
                 }
             }
         }

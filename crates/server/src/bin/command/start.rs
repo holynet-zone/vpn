@@ -1,11 +1,12 @@
-use std::process;
+use std::{process, thread};
+use std::time::Duration;
 use clap::Parser;
 use tracing::{debug, error, info};
 use server::config::Config;
 use server::runtime::error::RuntimeError;
 use server::runtime::Runtime;
 use crate::storage::{database, Clients};
-use crate::{success_err, success_warn};
+use shared::{success_err, success_warn};
 
 #[derive(Debug, Parser)]
 pub struct StartCmd {
@@ -76,8 +77,8 @@ impl StartCmd {
                     debug!("stop signal not sent from Ctrl-C handler: {}", err);
                 }
             }
-            // thread::sleep(Duration::from_secs(1));
-            // process::exit(0);
+            thread::sleep(Duration::from_secs(1));
+            process::exit(0);
         }).expect("error setting Ctrl-C handler");
 
         if let Err(errors) = runtime.run().await {

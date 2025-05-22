@@ -1,6 +1,5 @@
 use crate::storage::{database, Client, Clients};
 use crate::style::{format_opaque_bytes, generate_qrcode};
-use crate::{success_err, success_ok};
 use clap::Parser;
 use inquire::required;
 use inquire::validator::Validation;
@@ -9,6 +8,7 @@ use shared::connection_config::{ConnectionConfig, CredentialsConfig, GeneralConf
 use shared::keys::handshake::{PublicKey, SecretKey};
 use shared::session::Alg;
 use std::path::PathBuf;
+use shared::{success_err, success_ok};
 
 #[derive(Debug, Parser)]
 pub struct AddCmd {

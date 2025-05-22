@@ -8,7 +8,7 @@ autobins = false
 default = ["cli"]
 udp = ["socket2"]
 ws = ["tokio-tungstenite", "futures", "socket2"]
-cli = ["clap", "inquire", "anstyle", "ctrlc", "fjall"]
+cli = ["clap", "inquire", "anstyle", "ctrlc", "fjall", "qrcode"]
 
 [[bin]]
 name = "server"
@@ -17,9 +17,9 @@ required-features = ["cli"]
 
 [dependencies]
 shared = { workspace = true }
-clap = { version = "4.5", features = ["cargo", "color", "derive", "env"], optional = true}
+clap = { workspace = true, features = ["derive", "env", "wrap_help"], optional = true}
 inquire = { version = "0.7", optional = true }
-anstyle = { version = "1.0", optional = true }
+anstyle = { workspace = true, optional = true }
 ctrlc = { version = "3.4", optional = true }
 
 # data
@@ -27,7 +27,7 @@ chrono = { workspace = true }
 etherparse = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
-thiserror = "2.0.12"
+thiserror = { workspace = true }
 dashmap = "7.0.0-rc2"
 bincode = { workspace = true }
 derive_more = { version = "2.0.1", features = ["display"] }
@@ -48,7 +48,7 @@ tokio = { workspace = true }
 socket2 = { workspace = true, optional = true }
 async-trait = "0.1"
 rand = "0.9.1"
-qrcode = { version = "0.14.1", default-features = false, features = ["pic"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["pic"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 

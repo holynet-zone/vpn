@@ -3,7 +3,7 @@ use crate::storage::{database, Clients};
 use clap::Parser;
 use server::config::Config;
 use shared::keys::handshake::PublicKey;
-use crate::success_ok;
+use shared::success_ok;
 
 #[derive(Debug, Parser)]
 pub struct RemoveCmd {

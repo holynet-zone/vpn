@@ -5,7 +5,7 @@ use inquire::Select;
 use server::config::Config;
 use shared::keys::handshake::{PublicKey, SecretKey};
 use crate::style::format_opaque_bytes;
-use crate::success_ok;
+use shared::success_ok;
 
 #[derive(Clone, Display)]
 #[display("{:.8}\t{}", pk.to_string(), created_at)]

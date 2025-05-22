@@ -8,6 +8,7 @@ use style::render_config;
 use crate::command::Commands;
 use crate::opt::Opt;
 use clap::Parser;
+use shared::success_err;
 
 const CONFIG_PATH_ENV: &str = "HOLYNET_CONFIG";
 const LOG_DIR: &str = "logs";
@@ -15,7 +16,7 @@ const LOG_PREFIX: &str = "server.log";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    let mut opt = Opt::parse();
+    let opt = Opt::parse();
     let _guard = match opt.init_logging() {
         Ok(guard) => guard,
         Err(err) => {

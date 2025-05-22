@@ -22,6 +22,8 @@ tokio-tungstenite = "0.26.2"
 futures = "0.3.31"
 ctrlc = "3.4"
 rand_core = "=0.6.4"
+anstyle = "1.0"
+clap = "4.5"
 
 # data
 chrono = { version = "0.4", features = ["serde"] }
@@ -30,6 +32,7 @@ anyhow = "1.0.95"
 etherparse = "0.18"
 bincode = "2.0.1"
 toml = "0.8.22"
+thiserror = "2.0.12"
 
 # crypto
 x25519-dalek = "2.0.1"

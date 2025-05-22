@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use snow::{Builder};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use shared::credential::Credential;
 use shared::keys::handshake::{PublicKey, SecretKey};
 
@@ -140,7 +140,7 @@ pub(super) async fn handshake_executor(
                     }
                 },
                 None => {
-                    error!("handshake_executor channel is closed");
+                    debug!("handshake_executor channel is closed");
                     break
                 }
             }

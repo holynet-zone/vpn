@@ -97,7 +97,7 @@ pub(super) async fn data_transport_executor(
                     None => warn!("[{}] received data packet for unknown session {}", addr, sid)
                 },
                 None => {
-                    error!("data_transport_executor channel is closed");
+                    debug!("data_transport_executor channel is closed");
                     break
                 }
             }
@@ -127,7 +127,7 @@ pub(super) async fn data_tun_executor(
                     None => warn!("[{}] received data packet for unknown session", holy_ip)
                 },
                 None => {
-                    error!("data_tun_executor channel is closed");
+                    debug!("data_tun_executor channel is closed");
                     break
                 }
             }

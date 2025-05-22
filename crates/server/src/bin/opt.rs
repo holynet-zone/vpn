@@ -30,7 +30,7 @@ pub struct Opt {
 }
 
 impl Opt {
-    pub fn init_logging(&mut self) -> anyhow::Result<WorkerGuard> {
+    pub fn init_logging(&self) -> anyhow::Result<WorkerGuard> {
         let appender = RollingFileAppender::builder()
             .rotation(Rotation::DAILY)
             .filename_prefix(LOG_PREFIX)
