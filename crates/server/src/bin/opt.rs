@@ -1,6 +1,4 @@
-use std::{path::PathBuf, io::IsTerminal, fs};
-use std::path::Path;
-use chrono::Local;
+use std::{path::PathBuf, io::IsTerminal};
 use clap::Parser;
 use tracing::{debug, info};
 use tracing_appender::non_blocking::WorkerGuard;
