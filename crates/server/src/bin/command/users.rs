@@ -7,6 +7,7 @@ use server::config::Config;
 use crate::command::users::add::AddCmd;
 use crate::command::users::list::ListCmd;
 use crate::command::users::remove::RemoveCmd;
+use crate::success_err;
 
 #[derive(Debug, Subcommand)]
 pub enum UsersCmd {
@@ -25,7 +26,7 @@ impl UsersCmd {
             UsersCmd::List(cmd) => cmd.exec(config).await,
             UsersCmd::Remove(cmd) => cmd.exec(config).await
         } {
-            eprintln!("{}", error);
+            success_err!("{}\n", error);
             std::process::exit(1);
         }
     }

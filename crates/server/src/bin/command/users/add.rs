@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use crate::storage::{database, Client, Clients};
+use crate::style::{format_opaque_bytes, generate_qrcode};
 use clap::Parser;
 use inquire::required;
 use inquire::validator::Validation;
@@ -6,8 +7,8 @@ use server::config::Config;
 use shared::connection_config::{ConnectionConfig, CredentialsConfig, GeneralConfig};
 use shared::keys::handshake::{PublicKey, SecretKey};
 use shared::session::Alg;
-use crate::storage::{database, Client, Clients};
-use crate::style::format_opaque_bytes;
+use std::path::PathBuf;
+use shared::{success_err, success_ok};
 
 #[derive(Debug, Parser)]
 pub struct AddCmd {
@@ -49,7 +50,7 @@ impl AddCmd {
 
         let sk = match self.sk {
             Some(sk) => SecretKey::try_from(sk.as_str()).map_err(|error| {
-                anyhow::anyhow!("failed to parse private key: {}", error)
+                anyhow::anyhow!("parse private key: {}", error)
             })?,
             None => SecretKey::generate_x25519()
         };
@@ -57,16 +58,16 @@ impl AddCmd {
         let pk = PublicKey::derive_from(sk.clone());
         let psk = match self.psk {
             Some(psk) => SecretKey::try_from(psk.as_str()).map_err(|error| {
-                anyhow::anyhow!("failed to parse pre-shared key: {}", error)
+                anyhow::anyhow!("parse pre-shared key: {}", error)
             })?,
             None => SecretKey::generate_x25519()
         };
 
-        println!("\nClient has been successfully created!");
-
-        println!("\nPublicKey {}", pk);
-        println!("PrivateKey {}", format_opaque_bytes(sk.as_slice()));
-        println!("PreSharedKey {}", format_opaque_bytes(psk.as_slice()));
+        println!();
+        success_ok!("PubKey", pk);
+        success_ok!("PrivKey", format_opaque_bytes(sk.as_slice()));
+        success_ok!("SharedKey", format_opaque_bytes(psk.as_slice()));
+        println!();
 
         let clients = Clients::new(database(&config.general.storage)?)?;
         clients.save(Client {
@@ -90,18 +91,23 @@ impl AddCmd {
             runtime: None,
         };
 
-        println!("\nConnection key\n{}", connection_config.to_base64()?);
-
         let config_path = PathBuf::from(format!(
             "connection-{}.toml",
             chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
         ));
 
         connection_config.save(config_path.as_path()).map_err(|error| {
-            anyhow::anyhow!("failed to save connection config: {}", error)
+            anyhow::anyhow!("save connection config: {}", error)
         })?;
 
-        println!("\nConnection config saved as {}\n", config_path.display());
+        match generate_qrcode((connection_config.to_base64()?).as_ref()) {
+            Ok(qr) => println!("{}\n", qr),
+            Err(err) => success_err!("generate qrcode: {}", err)
+        }
+
+        success_ok!("Saved", "config to {}", config_path.display());
+        success_ok!("Generated", "key: {}\n", connection_config.to_base64()?);
+
         Ok(())
     }
 }

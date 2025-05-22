@@ -1,5 +1,6 @@
-use std::io::Read;
-use inquire::ui::{Attributes, Color, RenderConfig, StyleSheet, Styled};
+use inquire::ui::{Attributes, Color, IndexPrefix, RenderConfig, StyleSheet, Styled};
+use qrcode::render::unicode;
+use qrcode::{EcLevel, QrCode, Version};
 
 pub fn styles() -> clap::builder::Styles {
     clap::builder::Styles::styled()
@@ -43,11 +44,13 @@ pub fn render_config() -> RenderConfig<'static> {
     let mut render_config = RenderConfig::default();
     render_config.answered_prompt_prefix = Styled::new("✔").with_fg(Color::LightGreen);
     render_config.prompt_prefix = Styled::new(">").with_fg(Color::LightRed);
-    render_config.highlighted_option_prefix = Styled::new("➠").with_fg(Color::LightYellow);
+    render_config.highlighted_option_prefix = Styled::new("➠").with_fg(Color::DarkGreen);
     render_config.selected_checkbox = Styled::new("☑").with_fg(Color::LightGreen);
-    render_config.scroll_up_prefix = Styled::new("⇞");
-    render_config.scroll_down_prefix = Styled::new("⇟");
+    render_config.scroll_up_prefix = Styled::new("⮝");
+    render_config.scroll_down_prefix = Styled::new("⮟");
     render_config.unselected_checkbox = Styled::new("☐");
+    render_config.selected_option = Some(StyleSheet::new().with_fg(Color::DarkGreen).with_attr(Attributes::BOLD));
+    render_config.option_index_prefix = IndexPrefix::SpacePadded;
     
     render_config.error_message.message = StyleSheet::new().with_fg(Color::DarkRed);
     render_config.error_message = render_config
@@ -58,7 +61,7 @@ pub fn render_config() -> RenderConfig<'static> {
         .with_attr(Attributes::ITALIC)
         .with_fg(Color::DarkGreen);
 
-    render_config.help_message = StyleSheet::new().with_fg(Color::DarkCyan);
+    render_config.help_message = StyleSheet::new().with_fg(Color::DarkCyan).with_attr(Attributes::BOLD);
 
     render_config
 }
@@ -78,9 +81,9 @@ pub fn format_opaque_bytes(bytes: &[u8]) -> String {
         let hex_str: String = rem.iter().map(|b| format!("{:02x}", b)).collect();
 
         let block_chars = [
-            "\u{2595}", "\u{2581}", "\u{2582}", "\u{2583}", "\u{2584}", "\u{2585}",
-            "\u{2586}", "\u{2587}", "\u{2588}", "\u{2589}", "\u{259A}", "\u{259B}",
-            "\u{259C}", "\u{259D}", "\u{259E}", "\u{259F}"
+            '\u{2595}', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}',
+            '\u{2586}', '\u{2587}', '\u{2588}', '\u{2589}', '\u{259A}', '\u{259B}',
+            '\u{259C}', '\u{259D}', '\u{259E}', '\u{259F}'
         ];
 
         hex_str.chars()
@@ -93,4 +96,15 @@ pub fn format_opaque_bytes(bytes: &[u8]) -> String {
             })
             .collect()
     }
+}
+
+pub fn generate_qrcode(data: &[u8]) -> anyhow::Result<String> {
+    let code = QrCode::with_version(data, Version::Normal(7), EcLevel::L)?;
+    let string = code.render::<unicode::Dense1x2>()
+        .dark_color(unicode::Dense1x2::Dark)
+        .light_color(unicode::Dense1x2::Light)
+        .module_dimensions(1, 1)
+        .build();
+
+    Ok(string)
 }

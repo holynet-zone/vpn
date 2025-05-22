@@ -9,10 +9,12 @@ snow = { workspace = true }
 serde = { workspace = true }
 tun-rs = { workspace = true }
 base64 = "0.22.1"
-toml = "0.8.19"
+toml = { workspace = true }
+anstyle = { workspace = true }
+clap = { workspace = true }
 bincode = { workspace = true, features = ["serde"]}
-rand_core = "0.6.4"
+rand_core = { workspace = true }
 lazy_static = "1.5.0"
 anyhow = { workspace = true }
-x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+x25519-dalek = { workspace = true, features = ["static_secrets"] }
 once_cell = "1.21.3"

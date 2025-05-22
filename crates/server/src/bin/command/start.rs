@@ -1,10 +1,12 @@
-use std::process;
+use std::{process, thread};
+use std::time::Duration;
 use clap::Parser;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use server::config::Config;
 use server::runtime::error::RuntimeError;
 use server::runtime::Runtime;
 use crate::storage::{database, Clients};
+use shared::{success_err, success_warn};
 
 #[derive(Debug, Parser)]
 pub struct StartCmd {
@@ -34,19 +36,19 @@ impl StartCmd {
         }
 
         if let Err(err) = config.save() {
-            warn!("cant update configuration: {}", err);
+            success_warn!("cant update configuration: {}", err);
         }
 
         let clients = match database(&config.general.storage) {
             Ok(db) => match Clients::new(db) {
                 Ok(store) => store,
                 Err(err) => {
-                    error!("failed to create client storage: {}", err);
+                    success_err!("failed to create client storage: {}\n", err);
                     process::exit(1);
                 }
             },
             Err(err) => {
-                error!("load storage: {}", err);
+                success_err!("load storage: {}\n", err);
                 process::exit(1);
             }
         };
@@ -54,7 +56,7 @@ impl StartCmd {
         let mut runtime = match Runtime::from_config(config) {
             Ok(runtime) => runtime,
             Err(err) => {
-                error!("create runtime: {}", err);
+                success_err!("create runtime: {}\n", err);
                 process::exit(1);
             }
         };
@@ -75,8 +77,8 @@ impl StartCmd {
                     debug!("stop signal not sent from Ctrl-C handler: {}", err);
                 }
             }
-            // thread::sleep(Duration::from_secs(1));
-            // process::exit(0);
+            thread::sleep(Duration::from_secs(1));
+            process::exit(0);
         }).expect("error setting Ctrl-C handler");
 
         if let Err(errors) = runtime.run().await {
@@ -91,6 +93,5 @@ impl StartCmd {
                 }
             }
         }
-        
     }
 }
