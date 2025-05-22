@@ -62,22 +62,32 @@ impl ConnectionConfig {
         let config = toml::to_string(self)?;
         std::fs::write(path, &config).map_err(anyhow::Error::from)
     }
-
-    pub fn from_base64(base64: &str) -> anyhow::Result<Self> {
-        let bytes = STANDARD_NO_PAD.decode(base64)?;
+    
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match bincode::serde::encode_to_vec(
+            self,
+            bincode::config::standard()
+        ) {
+            Ok(bytes) => bytes,
+            Err(err) => panic!("failed to serialize connection config: {}", err)
+        }
+    }
+    
+    pub fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         let (obj, _) = bincode::serde::decode_from_slice(
-            &bytes,
+            bytes,
             bincode::config::standard()
         ).map_err(anyhow::Error::from)?;
         Ok(obj)
     }
+
+    pub fn from_base64(base64: &str) -> anyhow::Result<Self> {
+        let bytes = STANDARD_NO_PAD.decode(base64)?;
+        Self::from_bytes(&bytes)
+    }
     
     pub fn to_base64(&self) -> anyhow::Result<String> {
-        let bytes = bincode::serde::encode_to_vec(
-            self,
-            bincode::config::standard()
-        )?;
-        Ok(STANDARD_NO_PAD.encode(&bytes))
+        Ok(STANDARD_NO_PAD.encode(self.to_bytes()))
     }
 }
 

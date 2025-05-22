@@ -1,5 +1,7 @@
 use std::io::Read;
 use inquire::ui::{Attributes, Color, RenderConfig, StyleSheet, Styled};
+use qrcode::{EcLevel, QrCode, Version};
+use qrcode::render::unicode;
 
 pub fn styles() -> clap::builder::Styles {
     clap::builder::Styles::styled()
@@ -93,4 +95,71 @@ pub fn format_opaque_bytes(bytes: &[u8]) -> String {
             })
             .collect()
     }
+}
+
+#[macro_export]
+macro_rules! success_ok {
+    ($message:expr) => {
+        success_ok!("OK", $message)
+    };
+    ($level:expr, $message:expr) => {
+        println!(
+            "{}{:>12}{} {}",
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
+            $level,
+            anstyle::Reset.render(),
+            $message
+        )
+    };
+    ($level:expr, $message:expr, $($arg:tt)*) => {
+        success_ok!($level, format!($message, $($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! success_err {
+    ($message:expr) => {
+        eprintln!(
+            "{}error:{} {}",
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
+            anstyle::Reset.render(),
+            $message
+        )
+    };
+    ($message:expr, $($arg:tt)*) => {
+        success_err!(format!($message, $($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! success_warn {
+    ($message:expr) => {
+        eprintln!(
+            "{}warning:{} {}",
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow))),
+            anstyle::Reset.render(),
+            $message
+        )
+    };
+    ($message:expr, $($arg:tt)*) => {
+        success_warn!(format!($message, $($arg)*))
+    };
+}
+
+
+pub fn generate_qrcode(data: &[u8]) -> anyhow::Result<String> {
+    let code = QrCode::with_version(data, Version::Normal(7), EcLevel::L)?;
+    let string = code.render::<unicode::Dense1x2>()
+        .dark_color(unicode::Dense1x2::Dark)
+        .light_color(unicode::Dense1x2::Light)
+        .module_dimensions(1, 1)
+        .build();
+
+    Ok(string)
 }

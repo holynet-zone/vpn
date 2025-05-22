@@ -2,6 +2,7 @@ use crate::storage::{database, Clients};
 use clap::Parser;
 use server::config::Config;
 use shared::keys::handshake::PublicKey;
+use crate::success_ok;
 
 #[derive(Debug, Parser)]
 pub struct RemoveCmd {
@@ -18,7 +19,7 @@ impl RemoveCmd {
 
         let clients = Clients::new(database(&config.general.storage)?)?;
         clients.delete(&pk).await?;
-        println!("Client has been successfully removed");
+        success_ok!("Client has been successfully removed");
         Ok(())
     }
 }

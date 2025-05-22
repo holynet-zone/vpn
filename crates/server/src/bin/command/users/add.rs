@@ -7,7 +7,11 @@ use shared::connection_config::{ConnectionConfig, CredentialsConfig, GeneralConf
 use shared::keys::handshake::{PublicKey, SecretKey};
 use shared::session::Alg;
 use crate::storage::{database, Client, Clients};
-use crate::style::format_opaque_bytes;
+use crate::style::{format_opaque_bytes, generate_qrcode};
+use std::fmt::Write;
+use qrcode::{EcLevel, QrCode, Version};
+use qrcode::render::unicode;
+use crate::success_ok;
 
 #[derive(Debug, Parser)]
 pub struct AddCmd {
@@ -62,11 +66,11 @@ impl AddCmd {
             None => SecretKey::generate_x25519()
         };
 
-        println!("\nClient has been successfully created!");
-
-        println!("\nPublicKey {}", pk);
-        println!("PrivateKey {}", format_opaque_bytes(sk.as_slice()));
-        println!("PreSharedKey {}", format_opaque_bytes(psk.as_slice()));
+        println!();
+        success_ok!("PubKey", pk);
+        success_ok!("PrivKey", format_opaque_bytes(sk.as_slice()));
+        success_ok!("SharedKey", format_opaque_bytes(psk.as_slice()));
+        println!();
 
         let clients = Clients::new(database(&config.general.storage)?)?;
         clients.save(Client {
@@ -90,8 +94,6 @@ impl AddCmd {
             runtime: None,
         };
 
-        println!("\nConnection key\n{}", connection_config.to_base64()?);
-
         let config_path = PathBuf::from(format!(
             "connection-{}.toml",
             chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
@@ -101,7 +103,14 @@ impl AddCmd {
             anyhow::anyhow!("failed to save connection config: {}", error)
         })?;
 
-        println!("\nConnection config saved as {}\n", config_path.display());
+        match generate_qrcode((connection_config.to_base64()?).as_ref()) {
+            Ok(qr) => println!("{}\n", qr),
+            Err(err) => panic!("failed to generate qrcode: {}", err)
+        }
+
+        success_ok!("Saved", "config to {}", config_path.display());
+        success_ok!("Generated", "key: {}\n", connection_config.to_base64()?);
+
         Ok(())
     }
 }

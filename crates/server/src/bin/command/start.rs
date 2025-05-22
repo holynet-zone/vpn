@@ -1,10 +1,11 @@
 use std::process;
 use clap::Parser;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use server::config::Config;
 use server::runtime::error::RuntimeError;
 use server::runtime::Runtime;
 use crate::storage::{database, Clients};
+use crate::{success_err, success_warn};
 
 #[derive(Debug, Parser)]
 pub struct StartCmd {
@@ -34,19 +35,19 @@ impl StartCmd {
         }
 
         if let Err(err) = config.save() {
-            warn!("cant update configuration: {}", err);
+            success_warn!("cant update configuration: {}", err);
         }
 
         let clients = match database(&config.general.storage) {
             Ok(db) => match Clients::new(db) {
                 Ok(store) => store,
                 Err(err) => {
-                    error!("failed to create client storage: {}", err);
+                    success_err!("failed to create client storage: {}\n", err);
                     process::exit(1);
                 }
             },
             Err(err) => {
-                error!("load storage: {}", err);
+                success_err!("load storage: {}\n", err);
                 process::exit(1);
             }
         };
@@ -54,7 +55,7 @@ impl StartCmd {
         let mut runtime = match Runtime::from_config(config) {
             Ok(runtime) => runtime,
             Err(err) => {
-                error!("create runtime: {}", err);
+                success_err!("create runtime: {}\n", err);
                 process::exit(1);
             }
         };
@@ -91,6 +92,5 @@ impl StartCmd {
                 }
             }
         }
-        
     }
 }
