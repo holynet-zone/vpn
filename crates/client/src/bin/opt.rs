@@ -28,7 +28,7 @@ impl Opt {
 
         let (non_blocking, guard) = tracing_appender::non_blocking(appender);
 
-        let filter = if self.debug { "server=debug" } else { "server=info" };
+        let filter = if self.debug { "client=debug" } else { "client=info" };
 
         let file_layer = fmt::layer()
             .with_writer(non_blocking)

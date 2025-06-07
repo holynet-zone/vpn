@@ -2,13 +2,15 @@ use clap::Args;
 use std::path::PathBuf;
 use std::{process, thread};
 use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use ctrlc::set_handler;
+use ipnetwork::IpNetwork;
 use tokio::sync::watch;
 use tracing::{debug, error, info};
 use tun_rs::AsyncDevice;
-use client::network::RouteState;
+use client::network::{add_route, RouteState};
 use client::runtime::error::RuntimeError;
 use client::runtime::Runtime;
 use client::runtime::state::RuntimeState;
@@ -32,12 +34,11 @@ pub struct ConnectCmd {
 
 impl ConnectCmd {
     pub async fn exec(self) {
-        
-        let mut config = match self.connection {
+        let (mut config, path) = match self.connection {
             Some(ref connection) => match ConnectionConfig::from_base64(connection) {
-                Ok(config) => config,
+                Ok(config) => (config, None),
                 Err(parse_key_err) => match ConnectionConfig::load(&PathBuf::from(connection)) {
-                    Ok(config) => config,
+                    Ok(config) => (config, Some(connection.clone())),
                     Err(parse_config_err) => {
                         success_err!(
                             "parse connection\n\n\t if this key: {}\n\n\t if this config path: {}\n",
@@ -50,7 +51,7 @@ impl ConnectCmd {
             },
             None => match self.key {
                 Some(key) => match ConnectionConfig::from_base64(&key) {
-                    Ok(config) => config,
+                    Ok(config) => (config, None),
                     Err(err) => {
                         success_err!("parse config key: {}", err);
                         process::exit(1);
@@ -58,7 +59,7 @@ impl ConnectCmd {
                 },
                 None => match self.config {
                     Some(ref path) => match ConnectionConfig::load(path) {
-                        Ok(config) => config,
+                        Ok(config) => (config, Some(path.to_string_lossy().to_string())),
                         Err(err) => {
                             success_err!("load config: {}", err);
                             process::exit(1);
@@ -80,8 +81,8 @@ impl ConnectCmd {
             });
         }
 
-        if let Some(path) = self.config {
-            if let Err(err) = config.save(&path) {
+        if let Some(path) = path {
+            if let Err(err) = config.save(path.as_ref()) {
                 success_err!("save config: {}", err);
                 process::exit(1);
             }
@@ -108,7 +109,7 @@ impl ConnectCmd {
             }
         };
 
-        let routes = match RouteState::new(sock_addr.ip(), iface_config.name).build()
+        let routes = match RouteState::new(sock_addr.ip(), iface_config.name).build() // todo move to tun service
         {
             Ok(routes) => Arc::new(routes),
             Err(err) => {
@@ -177,12 +178,31 @@ pub async fn tun_service(
                     RuntimeState::Connected((payload, _)) => {
                         match payload.ipaddr {
                             IpAddr::V4(addr) => {
+                                info!("{}", addr);
                                 if let Err(err) = tun.set_network_address(addr, 32, None) {
+                                    info!("err set");
                                     state_tx.send(RuntimeState::Error(RuntimeError::IO(
                                         format!("failed to set ipv4 network address: {}", err)
                                     ))).expect("state_tx channel broken in tun_service");
                                     break;
                                 }
+                                if let Err(err) = add_route(
+                                    &IpNetwork::from_str("0.0.0.0/1").unwrap(),
+                                    None,
+                                    &tun.name().expect("tun should have name"),
+                                    Some(1),
+                                ) {
+                                    error!("cant update route after reconnect {}", err)
+                                }
+                                if let Err(err) = add_route(
+                                    &IpNetwork::from_str("128.0.0.0/1").unwrap(),
+                                    None,
+                                    &tun.name().expect("tun should have name"),
+                                    Some(1),
+                                ) {
+                                    error!("cant update route after reconnect {}", err)
+                                }
+
                             },
                             IpAddr::V6(addr) => {
                                 if let Err(err) = tun.add_address_v6(addr, 128) {
