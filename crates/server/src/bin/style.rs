@@ -99,7 +99,7 @@ pub fn format_opaque_bytes(bytes: &[u8]) -> String {
 }
 
 pub fn generate_qrcode(data: &[u8]) -> anyhow::Result<String> {
-    let code = QrCode::with_version(data, Version::Normal(7), EcLevel::L)?;
+    let code = QrCode::with_version(data, Version::Normal(8), EcLevel::L)?;
     let string = code.render::<unicode::Dense1x2>()
         .dark_color(unicode::Dense1x2::Dark)
         .light_color(unicode::Dense1x2::Light)

@@ -114,7 +114,7 @@ pub fn delete_route(route: &IpNetwork, via: &IpAddr,) -> anyhow::Result<()> {
 }
 
 
-fn add_route(route: &IpNetwork, via: Option<IpAddr>, dev: &str, metric: Option<usize>) -> anyhow::Result<()> {
+pub fn add_route(route: &IpNetwork, via: Option<IpAddr>, dev: &str, metric: Option<usize>) -> anyhow::Result<()> {
     let mut buffer = format!("adding route: {} ", route);
     if let Some(via) = via {
         write!(buffer, "via {} ", via)?;
