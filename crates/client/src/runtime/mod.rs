@@ -3,6 +3,7 @@ mod worker;
 mod transport;
 pub mod state;
 mod handshake;
+mod buffer;
 
 use std::net::SocketAddr;
 use std::ops::Deref;

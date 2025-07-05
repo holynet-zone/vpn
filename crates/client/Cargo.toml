@@ -29,6 +29,7 @@ anstyle = { version = "1.0", optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 ipnetwork = "0.21.1"
+crossbeam = "0.8.4"
 # console-subscriber = "0.4.1"
 
 # Crypto
@@ -44,4 +45,3 @@ tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 async-trait = "0.1.88"
-
