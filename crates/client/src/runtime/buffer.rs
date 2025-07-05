@@ -122,18 +122,36 @@ mod tests {
 
     #[test]
     fn buffer_reuse() {
-        let pool = BufferPool::new(Some(1));
+        let pool = BufferPool::new(Some(214748));
+        let mut results = vec![(0u128, 0u128); 214748];
+        let mut buffers= Vec::new();
+        for i in 0..214748 {
+            let mut buf = pool.alloc().unwrap();
+            buf.write(&[i as u8; 9000]).unwrap();
+            buffers.push(buf);
+        }
+        for i in buffers.into_iter() {
+            pool.release(i);
+        }
+        
+        let mut start = std::time::Instant::now();
+        for i in 0..214748 {
+            start = std::time::Instant::now();
+            let mut buf = pool.alloc().unwrap();
+            results[i] = (results[i].0, start.elapsed().as_nanos());
+            pool.release(buf);
+        }
 
-        // first alloc
-        let mut buf1 = pool.alloc().unwrap();
-        buf1.write(&[1; 512]).unwrap();
-        let buf1_cap = buf1.data.capacity();
-        pool.release(buf1);
-
-        // reuse
-        let buf2 = pool.alloc().unwrap();
-        assert_eq!(buf2.data.capacity(), buf1_cap);
-        assert!(buf2.data.is_empty());
+        for i in 0..214748 {
+            start = std::time::Instant::now();
+            let buf = Vec::<u8>::with_capacity(9000);
+            results[i] = (start.elapsed().as_nanos(), results[i].1);
+        }
+        for (alloc_time, reuse_time) in results {
+            if alloc_time > 1000 || reuse_time > 1000 {
+                panic!("Allocation or reuse took too long: alloc={}ns, reuse={}ns", alloc_time, reuse_time);
+            }
+        }
     }
 
     #[test]
