@@ -10,6 +10,9 @@ Holynet VPN is a high-performance VPN protocol built with Rust, designed for fas
 * Cross-platform support for **Linux**, **macOS**, (and Windows planned);
 * **Optimized for performance** with minimal impact on speed and overhead.
 
+> [!WARNING]  
+> Not ready for prod
+
 ## Usage
 ```
 Usage: server [OPTIONS] <COMMAND>
