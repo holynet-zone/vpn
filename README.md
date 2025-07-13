@@ -241,3 +241,13 @@ sequenceDiagram
                │ (8bit) │ (8bit) │                                    
                └────────┴────────┘                                    
 ```
+
+## License
+Licensed under the [Apache License 2.0](LICENSE)  
+Copyright © 2024 Nikita Boyarshinov (JKearnsl)
+
+**Attribution Requirements:**  
+All distributions must retain:
+- Original copyright notices
+- License text
+- NOTICE file contents
