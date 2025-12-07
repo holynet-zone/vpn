@@ -1,6 +1,6 @@
-use crate::session::SessionId;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use super::session::SessionId;
 
 #[derive(Serialize, Deserialize)]
 pub enum HandshakeResponderBody {

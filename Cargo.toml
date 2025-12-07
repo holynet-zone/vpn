@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/client",
+    "crates/client", "crates/holynet-sdk",
     "crates/server",
     "crates/shared"
 ]

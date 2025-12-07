@@ -1,6 +1,7 @@
 use std::any::Any;
-use crate::runtime::error::RuntimeError;
-use crate::runtime::transport::{Transport, TransportReceiver, TransportSender};
+use std::io;
+use crate::error::RuntimeError;
+use crate::transport::{Transport, TransportReceiver, TransportSender};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream::SplitSink;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::{Bytes, Message};
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio_tungstenite::{accept_async, connect_async, WebSocketStream};
 use tracing::{debug, info};
 
 pub struct WsTransport {
@@ -22,6 +23,8 @@ pub struct WsTransport {
 }
 
 impl WsTransport {
+
+    #[cfg(feature = "ws-reuse-port")]
     pub fn new_pool(
         addr: SocketAddr,
         so_rcvbuf: usize,
@@ -77,6 +80,10 @@ impl WsTransport {
         Ok(listeners)
     }
 
+    pub fn new(addr: SocketAddr) -> Self {
+        Self {addr, write: Arc::new(Mutex::new(None)) , read: Arc::new(Mutex::new(None)) }
+    }
+
     pub async fn start(&self) -> Result<(), RuntimeError> {
         loop {
             let (tcp_stream, addr) = self.listener.accept().await?;
@@ -120,6 +127,30 @@ impl TransportReceiver for WsTransport {
             None => Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Channel closed")),
         }
     }
+
+    #[inline(always)]
+    async fn recv(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self.read.lock().await.as_mut() {
+            Some(read) => {
+                while let Some(Ok(msg)) = read.next().await {
+                    if let Message::Binary(data) = msg {
+                        let len = data.len().min(buffer.len());
+                        buffer[..len].copy_from_slice(&data[..len]);
+                        return Ok(len);
+                    }
+                }
+
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "WebSocket connection closed"
+                ))
+            },
+            None => Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "WebSocket connection not established"
+            ))
+        }
+    }
 }
 
 #[async_trait]
@@ -134,11 +165,53 @@ impl TransportSender for WsTransport {
             Err(std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "Address not found"))
         }
     }
+
+    #[inline(always)]
+    async fn send(&self, data: &[u8]) -> io::Result<usize> {
+        match self.write.lock().await.as_mut() {
+            Some(write) => write
+                .send(Message::Binary(data.to_vec().into()))
+                .await
+                .map(|_| data.len())
+                .map_err(|e| io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    e.to_string()
+                )),
+            None => Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "WebSocket connection not established"
+            ))
+        }
+    }
 }
 
+#[async_trait]
 impl Transport for WsTransport {
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    async fn connect(&self) -> io::Result<()> {
+        info!("connecting to ws://{}", self.addr);
+        let request = format!("ws://{}", self.addr).into_client_request().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                anyhow!("failed to create WebSocket request: {}", e)
+            )
+        })?;
+
+        let (ws_stream, _) = connect_async(request)
+            .await
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+
+        let (write, read) = ws_stream.split();
+
+        let mut write_lock = self.write.lock().await;
+        *write_lock = Some(write);
+        let mut read_lock = self.read.lock().await;
+        *read_lock = Some(read);
+
+        Ok(())
     }
 }
 

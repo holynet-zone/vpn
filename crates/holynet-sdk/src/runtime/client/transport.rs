@@ -1,44 +1,59 @@
-use std::ops::Deref;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::watch::Sender;
-use tokio::sync::mpsc;
+use std::{
+    ops::Deref,
+    sync::Arc,
+};
+
+use tokio::{
+    time::interval,
+    sync::{
+        watch::Sender,
+        mpsc
+    }
+};
 use tracing::{debug, error, warn};
-use shared::protocol::{EncryptedData, Packet};
-use crate::runtime::state::RuntimeState;
-use crate::runtime::transport::{TransportReceiver, TransportSender};
+use crate::{
+    gateway::transport::{TransportReceiver, TransportSender},
+    protocol::{Packet, EncryptedData},
+    runtime::{
+        state::RuntimeState,
+        client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE}
+    }
+};
 
 pub async fn transport_sender(
-    state_tx: Sender<RuntimeState>,
+    state: Sender<RuntimeState>,
     transport: Arc<dyn TransportSender>,
     mut queue: mpsc::Receiver<Packet>
 ) {
-    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
+    let mut state_wait_timer = interval(AWAIT_STATE_DELAY);
 
-    let mut state_rx = state_tx.subscribe();
+    let mut state_rx = state.subscribe();
     let mut is_connected = false;
     
     loop {
+        // If the application's state has changed (the connection has been lost, etc.),
+        // it makes sense to stop and wait for everything to recover, rather than waste
+        // CPU on executing unnecessary tasks.
         if !is_connected && !state_rx.has_changed().unwrap() {
             state_wait_timer.tick().await;
             continue;
         }
-        
+
         tokio::select! {
             _ = state_rx.changed() => match state_rx.borrow().deref() {
                 RuntimeState::Error(_) => break,
+                RuntimeState::Listening | RuntimeState::Connected(_) => {
+                    is_connected = true;
+                }
                 RuntimeState::Connecting => {
                     is_connected = false;
-                },
-                RuntimeState::Connected(_) => {
-                    is_connected = true;
                 }
             },
             result = queue.recv() => match result {
                 Some(packet) => match transport.send(&packet.to_bytes()).await {
                     Ok(n) => debug!("sent transport packet with {} bytes", n),
-                    Err(_) => {
-                        state_tx.send(RuntimeState::Connecting).unwrap(); // todo log
+                    Err(_) => { // todo provide error and resolve it in higher level
+                        state.send(RuntimeState::Connecting).unwrap();
                     }
                 },
                 None => break
@@ -47,17 +62,20 @@ pub async fn transport_sender(
     }
 }
 
-pub async fn transport_listener(
-    state_tx: Sender<RuntimeState>,
+pub async fn transport_receiver(
+    state: Sender<RuntimeState>,
     transport: Arc<dyn TransportReceiver>,
     data_receiver: mpsc::Sender<EncryptedData>
 ) {
-    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
+    let mut state_wait_timer = interval(AWAIT_STATE_DELAY);
 
-    let mut state_rx = state_tx.subscribe();
+    let mut state_rx = state.subscribe();
     let mut is_connected = false;
-    let mut transport_buffer = [0u8; 65536];
+    let mut transport_buffer = [0u8; MAX_PACKET_SIZE];
     loop {
+        // If the application's state has changed (the connection has been lost, etc.),
+        // it makes sense to stop and wait for everything to recover, rather than waste
+        // CPU on executing unnecessary tasks.
         if !is_connected && !state_rx.has_changed().unwrap() {
             state_wait_timer.tick().await;
             continue;
@@ -66,11 +84,11 @@ pub async fn transport_listener(
         tokio::select! {
             _ = state_rx.changed() => match state_rx.borrow().deref() {
                 RuntimeState::Error(_) => break,
+                 RuntimeState::Listening | RuntimeState::Connected(_) => {
+                    is_connected = true;
+                },
                 RuntimeState::Connecting => {
                     is_connected = false;
-                },
-                RuntimeState::Connected(_) => {
-                    is_connected = true;
                 }
             },
             result = transport.recv(&mut transport_buffer) => match result {
@@ -80,7 +98,7 @@ pub async fn transport_listener(
                         warn!("received transport packet with 0 bytes, dropping it");
                         continue;
                     }
-                    if n > 65536 {
+                    if n > MAX_PACKET_SIZE {
                         warn!("received transport packet larger than 65536 bytes, dropping it");
                         continue;
                     }
@@ -106,7 +124,7 @@ pub async fn transport_listener(
                         }
                     }
                 }
-                Err(_) => state_tx.send(RuntimeState::Connecting).unwrap() // todo log
+                Err(_) => state.send(RuntimeState::Connecting).unwrap() // todo provide error and resolve it in higher level
             }
         }
     }

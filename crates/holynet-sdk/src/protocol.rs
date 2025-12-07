@@ -1,5 +1,7 @@
 mod handshake;
 mod data;
+mod primitives;
+mod session;
 
 use bincode::{Decode, Encode};
 pub use data::{
@@ -11,8 +13,8 @@ pub use handshake::{
     HandshakeResponderPayload,
     HandshakeError
 };
-use crate::session::SessionId;
-use crate::types::VecU16;
+use primitives::VecU16;
+pub use session::{SessionId, Alg};
 
 pub type EncryptedHandshake = VecU16<u8>;
 pub type EncryptedData = VecU16<u8>;
@@ -30,20 +32,21 @@ pub enum Packet {
 
 
 impl TryFrom<&[u8]> for Packet {
-    type Error = anyhow::Error;
+    type Error = &'static str;
 
     fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
         match bincode::decode_from_slice(
             data,
-            bincode::config::standard()
+            bincode::config::standard() // todo: can we reuse config?
         ) {
             Ok((obj, _)) => Ok(obj),
-            Err(err) => Err(anyhow::anyhow!(err))
+            Err(_) => Err("error decoding packet")
         }
     }
 }
 
 impl Packet {
+    /// todo: handle error
     pub fn to_bytes(&self) -> Vec<u8> {
         bincode::encode_to_vec(
             self,

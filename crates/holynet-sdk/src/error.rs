@@ -1,15 +1,14 @@
-use thiserror::Error;
 
 
-#[derive(Error, Debug, Clone)]
+pub enum BuildError {
+    MissingRequiredField(&'static str),
+}
+
+#[derive(Debug, Clone)]
 pub enum RuntimeError {
-    #[error("IO: {0}")]
     IO(String),
-    #[error("Handshake: {0}")]
     Handshake(String),
-    #[error("Unexpected: {0}")]
     Unexpected(String),
-    #[error("StopSignal")]
     StopSignal
 }
 
@@ -21,18 +20,12 @@ impl From<std::io::Error> for RuntimeError {
 
 impl From<snow::Error> for RuntimeError {
     fn from(err: snow::Error) -> Self {
-        RuntimeError::Handshake(format!("snow error: {}", err))
-    }
-}
-
-impl From<anyhow::Error> for RuntimeError {
-    fn from(err: anyhow::Error) -> Self {
-        RuntimeError::Unexpected(err.to_string())
+        RuntimeError::Handshake(format!("snow error: {err}"))
     }
 }
 
 impl<T> From<tokio::sync::broadcast::error::SendError<T>> for RuntimeError  {
     fn from(err: tokio::sync::broadcast::error::SendError<T>) -> Self {
-        RuntimeError::IO(format!("broadcast send: {}", err))
+        RuntimeError::IO(format!("broadcast send: {err}"))
     }
 }

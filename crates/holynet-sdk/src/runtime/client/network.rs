@@ -1,16 +1,24 @@
-use std::ops::Deref;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::watch::Sender;
-use tokio::sync::mpsc;
+use std::{
+    ops::Deref,
+    sync::Arc,
+};
+use tokio::sync::{
+    watch::Sender,
+    mpsc
+};
 use tracing::{error, warn};
-use tun_rs::AsyncDevice;
-use crate::runtime::error::RuntimeError;
-use crate::runtime::state::RuntimeState;
+use crate::{
+    gateway::network::Network,
+    error::RuntimeError,
+    runtime::{
+        state::RuntimeState,
+        client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE}
+    }
+};
 
-pub async fn tun_sender(
+pub async fn network_sender(
     state_tx: Sender<RuntimeState>,
-    tun: Arc<AsyncDevice>,
+    network: Arc<dyn Network>,
     mut queue: mpsc::Receiver<Vec<u8>>
 ) {
     let mut state_rx = state_tx.subscribe();
@@ -24,9 +32,9 @@ pub async fn tun_sender(
             },
             result = queue.recv() => match result {
                 Some(packet) => {
-                    if let Err(err) = tun.send(&packet).await {
+                    if let Err(err) = network.send(&packet).await {
                         state_tx.send(RuntimeState::Error(
-                            RuntimeError::IO(format!("failed to send tun: {}", err))
+                            RuntimeError::IO(format!("failed to send network: {}", err))
                         )).unwrap();
                     }
                 },
@@ -36,16 +44,17 @@ pub async fn tun_sender(
     }
 }
 
-pub async fn tun_listener(
+pub async fn network_receiver(
     state_tx: Sender<RuntimeState>,
-    tun: Arc<AsyncDevice>,
+    network: Arc<dyn Network>,
     queue: mpsc::Sender<Vec<u8>>
 ) {
-    let mut state_wait_timer = tokio::time::interval(Duration::from_secs(1));
+    let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
     let mut state_rx = state_tx.subscribe();
     let mut is_connected = false;
-    let mut buffer = [0u8; 65536];
+
+    let mut buffer = [0u8; MAX_PACKET_SIZE];
     loop {
         if !is_connected && !state_rx.has_changed().unwrap() {
             state_wait_timer.tick().await;
@@ -62,16 +71,17 @@ pub async fn tun_listener(
                     RuntimeState::Connected(_) => {
                         is_connected = true;
                     }
+                _ => {}
                 }
             },
-            result = tun.recv(&mut buffer) => match result {
+            result = network.recv(&mut buffer) => match result {
                 Ok(n) => {
                     if n == 0 {
-                        warn!("received tun packet with 0 bytes, dropping it");
+                        warn!("received network packet with 0 bytes, dropping it");
                         continue;
                     }
-                    if n > 65536 {
-                        warn!("received tun packet larger than 65536 bytes, dropping it (check ur mtu)");
+                    if n > MAX_PACKET_SIZE {
+                        warn!("received network packet larger than 65536 bytes, dropping it (check your mtu)");
                         continue;
                     }
                     if let Err(err) = queue.send(buffer[..n].to_vec()).await {
@@ -80,11 +90,10 @@ pub async fn tun_listener(
                 }
                 Err(err) => {
                     state_tx.send(RuntimeState::Error(
-                        RuntimeError::IO(format!("failed to receive tun: {}",err))
+                        RuntimeError::IO(format!("failed to receive network: {}",err))
                     )).unwrap();
                 }
             }
         }
     }
 }
-
