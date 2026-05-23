@@ -1,45 +1,15 @@
 use std::ops::Deref;
 use std::time::Duration;
 
-use snow::StatelessTransportState;
 use tokio::sync::mpsc;
 use tokio::sync::watch::Sender;
 use tracing::{info, warn};
 
 use crate::protocol::{DataClientBody, DataServerBody, EncryptedData, Packet, SessionId};
+use crate::runtime::crypto::{noise_decrypt, noise_encrypt};
 use crate::runtime::error::RuntimeError;
 use crate::runtime::state::RuntimeState;
 use crate::time::{format_duration_millis, micros_since_start};
-
-fn decrypt_body(
-    encrypted: &EncryptedData,
-    state: &StatelessTransportState,
-) -> anyhow::Result<DataServerBody> {
-    let mut buffer = [0u8; 65536];
-    state.read_message(0, encrypted, &mut buffer)?;
-    match bincode::serde::decode_from_slice(&buffer, bincode::config::standard()) {
-        Ok((obj, _)) => Ok(obj),
-        Err(err) => Err(anyhow::anyhow!(err)),
-    }
-}
-
-fn encrypt_body(
-    body: &DataClientBody,
-    state: &StatelessTransportState,
-) -> anyhow::Result<EncryptedData> {
-    let mut temp_buffer = [0u8; 65536];
-    let encoded_len = bincode::serde::encode_into_slice(
-        body,
-        &mut temp_buffer,
-        bincode::config::standard(),
-    )?;
-
-    let mut encrypted_buffer = [0u8; 65536];
-    let encrypted_len =
-        state.write_message(0, &temp_buffer[..encoded_len], &mut encrypted_buffer)?;
-
-    Ok(encrypted_buffer[..encrypted_len].to_vec().into())
-}
 
 pub(super) async fn data_udp_executor(
     state_tx: Sender<RuntimeState>,
@@ -62,26 +32,38 @@ pub(super) async fn data_udp_executor(
                 }
             },
             data = queue.recv() => match data {
-                Some(data) => match decrypt_body(&data, state.as_deref().unwrap()) {
-                    Ok(data_body) => match data_body {
-                        DataServerBody::KeepAlive(time) => {
-                            info!("keepalive rtt: {}", format_duration_millis(
-                                time,
-                                micros_since_start()
-                            ));
+                Some(data) => {
+                    let Some(ref s) = state else {
+                        warn!("received data before connected state, dropping");
+                        continue;
+                    };
+                    match noise_decrypt::<DataServerBody>(&data, s) {
+                        Ok(data_body) => match data_body {
+                            DataServerBody::KeepAlive(time) => {
+                                info!("keepalive rtt: {}", format_duration_millis(
+                                    time,
+                                    micros_since_start()
+                                ));
+                            }
+                            DataServerBody::Disconnect(ref code) => {
+                                warn!("got server disconnect code {}", code);
+                                if let Err(e) = state_tx.send(RuntimeState::Connecting) {
+                                    warn!("state channel closed: {}", e);
+                                    break;
+                                }
+                            }
+                            DataServerBody::Packet(payload) => {
+                                if let Err(e) = tun_sender.send(payload).await {
+                                    warn!("tun channel closed: {}", e);
+                                    break;
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            warn!("received damaged package: {}", e);
                         }
-                        DataServerBody::Disconnect(ref code) => {
-                            warn!("got server disconnect code {}", code);
-                            state_tx.send(RuntimeState::Connecting).unwrap();
-                        }
-                        DataServerBody::Packet(payload) => {
-                            tun_sender.send(payload.0).await.unwrap();
-                        }
-                    },
-                    Err(e) => {
-                        warn!("received damaged package: {}", e);
                     }
-                },
+                }
                 None => return,
             }
         }
@@ -111,19 +93,28 @@ pub(super) async fn data_tun_executor(
                 }
             },
             body = queue.recv() => match body {
-                Some(packet) => match encrypt_body(
-                    &DataClientBody::Packet(packet.into()),
-                    state.as_deref().unwrap()
-                ) {
-                    Ok(encrypted) => {
-                        udp_sender.send(Packet::DataClient { sid, encrypted }).await.unwrap();
+                Some(packet) => {
+                    let Some(ref s) = state else {
+                        warn!("received tun packet before connected state, dropping");
+                        continue;
+                    };
+                    match noise_encrypt(&DataClientBody::Packet(packet), s) {
+                        Ok(encrypted) => {
+                            if let Err(e) = udp_sender.send(Packet::DataClient { sid, encrypted }).await {
+                                warn!("transport channel closed: {}", e);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(send_err) = state_tx.send(RuntimeState::Error(
+                                RuntimeError::Unexpected(format!("failed to encrypt data: {}", e))
+                            )) {
+                                warn!("state channel closed: {}", send_err);
+                                break;
+                            }
+                        }
                     }
-                    Err(e) => {
-                        state_tx.send(RuntimeState::Error(RuntimeError::Unexpected(
-                            format!("failed to encrypt data: {}", e)
-                        ))).expect("broken runtime state pipe in data_tun_executor");
-                    }
-                },
+                }
                 None => return,
             }
         }
@@ -178,17 +169,21 @@ pub(super) async fn keepalive_sender(
                 state_rx.mark_changed();
             }
             _ = keepalive_timer.tick() => {
-                match encrypt_body(
-                    &DataClientBody::KeepAlive(micros_since_start()),
-                    state.as_deref().unwrap()
-                ) {
+                let Some(ref s) = state else { continue; };
+                match noise_encrypt(&DataClientBody::KeepAlive(micros_since_start()), s) {
                     Ok(encrypted) => {
-                        udp_sender.send(Packet::DataClient { sid, encrypted }).await.unwrap();
+                        if let Err(e) = udp_sender.send(Packet::DataClient { sid, encrypted }).await {
+                            warn!("transport channel closed: {}", e);
+                            break;
+                        }
                     }
                     Err(e) => {
-                        state_tx.send(RuntimeState::Error(RuntimeError::Unexpected(
-                            format!("failed to encrypt keepalive: {}", e)
-                        ))).unwrap();
+                        if let Err(send_err) = state_tx.send(RuntimeState::Error(
+                            RuntimeError::Unexpected(format!("failed to encrypt keepalive: {}", e))
+                        )) {
+                            warn!("state channel closed: {}", send_err);
+                            break;
+                        }
                     }
                 }
             }

@@ -72,8 +72,8 @@ pub async fn network_receiver(
                         warn!("received network packet with 0 bytes, dropping it");
                         continue;
                     }
-                    if n > MAX_PACKET_SIZE {
-                        warn!("received network packet larger than {} bytes, dropping it (check your mtu)", MAX_PACKET_SIZE);
+                    if n >= buffer.len() {
+                        warn!("received network packet >= {} bytes, possible truncation (check your mtu)", buffer.len());
                         continue;
                     }
                     if let Err(err) = queue.send(buffer[..n].to_vec()).await {

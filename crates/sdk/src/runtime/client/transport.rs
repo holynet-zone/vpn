@@ -98,8 +98,8 @@ pub async fn transport_receiver(
                         warn!("received transport packet with 0 bytes, dropping it");
                         continue;
                     }
-                    if n > MAX_PACKET_SIZE {
-                        warn!("received transport packet larger than 65536 bytes, dropping it");
+                    if n >= transport_buffer.len() {
+                        warn!("received transport packet >= {} bytes, possible truncation", transport_buffer.len());
                         continue;
                     }
                     match Packet::try_from(&transport_buffer[..n]) {

@@ -71,16 +71,9 @@ impl<T: Serialize + bincode::Encode> Serialize for VecU16<T> {
         if self.0.len() > u16::MAX as usize {
             return Err(serde::ser::Error::custom("length exceeds u16::MAX"));
         }
-        
-        let mut buffer = [0u8; 65536];
-        match bincode::encode_into_slice(
-            &self.0,
-            &mut buffer,
-            bincode::config::standard()
-        ) {
-            Ok(n) => serializer.serialize_bytes(&buffer[..n]),
-            Err(err) => Err(serde::ser::Error::custom(err))
-        }
+        let encoded = bincode::encode_to_vec(&self.0, bincode::config::standard())
+            .map_err(serde::ser::Error::custom)?;
+        serializer.serialize_bytes(&encoded)
     }
 }
 
