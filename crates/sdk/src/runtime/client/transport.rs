@@ -31,12 +31,13 @@ pub async fn transport_sender(
     let mut is_connected = false;
     
     loop {
-        // If the application's state has changed (the connection has been lost, etc.),
-        // it makes sense to stop and wait for everything to recover, rather than waste
-        // CPU on executing unnecessary tasks.
-        if !is_connected && !state_rx.has_changed().unwrap() {
-            state_wait_timer.tick().await;
-            continue;
+        // If not yet connected, pause until state changes rather than spin.
+        if !is_connected {
+            match state_rx.has_changed() {
+                Ok(false) => { state_wait_timer.tick().await; continue; }
+                Err(_) => break, // watch sender dropped — runtime is shutting down
+                Ok(true) => {}
+            }
         }
 
         tokio::select! {
@@ -52,8 +53,9 @@ pub async fn transport_sender(
             result = queue.recv() => match result {
                 Some(packet) => match transport.send(&packet.to_bytes()).await {
                     Ok(n) => debug!("sent transport packet with {} bytes", n),
-                    Err(_) => { // todo provide error and resolve it in higher level
-                        state.send(RuntimeState::Connecting).unwrap();
+                    Err(e) => {
+                        warn!("transport send error, signalling reconnect: {}", e);
+                        if state.send(RuntimeState::Connecting).is_err() { break; }
                     }
                 },
                 None => break
@@ -73,18 +75,19 @@ pub async fn transport_receiver(
     let mut is_connected = false;
     let mut transport_buffer = [0u8; MAX_PACKET_SIZE];
     loop {
-        // If the application's state has changed (the connection has been lost, etc.),
-        // it makes sense to stop and wait for everything to recover, rather than waste
-        // CPU on executing unnecessary tasks.
-        if !is_connected && !state_rx.has_changed().unwrap() {
-            state_wait_timer.tick().await;
-            continue;
+        // If not yet connected, pause until state changes rather than spin.
+        if !is_connected {
+            match state_rx.has_changed() {
+                Ok(false) => { state_wait_timer.tick().await; continue; }
+                Err(_) => break, // watch sender dropped — runtime is shutting down
+                Ok(true) => {}
+            }
         }
-        
+
         tokio::select! {
             _ = state_rx.changed() => match state_rx.borrow().deref() {
                 RuntimeState::Error(_) => break,
-                 RuntimeState::Listening | RuntimeState::Connected(_) => {
+                RuntimeState::Listening | RuntimeState::Connected(_) => {
                     is_connected = true;
                 },
                 RuntimeState::Connecting => {
@@ -124,7 +127,10 @@ pub async fn transport_receiver(
                         }
                     }
                 }
-                Err(_) => state.send(RuntimeState::Connecting).unwrap() // todo provide error and resolve it in higher level
+                Err(e) => {
+                    warn!("transport recv error, signalling reconnect: {}", e);
+                    if state.send(RuntimeState::Connecting).is_err() { break; }
+                }
             }
         }
     }

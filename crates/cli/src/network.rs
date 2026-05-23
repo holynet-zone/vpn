@@ -1,3 +1,6 @@
+#[cfg(not(target_os = "linux"))]
+compile_error!("holynet-cli: network routing is only supported on Linux");
+
 use anyhow::format_err;
 use ipnetwork::{IpNetwork, NetworkSize};
 use std::fmt::Write;
@@ -67,7 +70,7 @@ pub fn delete_route(route: &IpNetwork, via: &IpAddr) -> anyhow::Result<()> {
             warn!("cant delete route: {}", status);
         }
     } else {
-        unimplemented!("Unsupported OS");
+        unreachable!("compile_error enforces linux-only at build time");
     }
     Ok(())
 }
@@ -105,7 +108,7 @@ pub fn add_route(
             return Err(anyhow::anyhow!("failed to add route: {}", status));
         }
     } else {
-        unimplemented!("Unsupported OS");
+        unreachable!("compile_error enforces linux-only at build time");
     }
     Ok(())
 }

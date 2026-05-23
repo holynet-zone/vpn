@@ -2,7 +2,6 @@ use crate::runtime::error::RuntimeError;
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
 use async_trait::async_trait;
 use socket2::{Domain, Protocol, Socket, Type};
-use std::any::Any;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tokio::net::UdpSocket;
@@ -109,11 +108,7 @@ impl TransportSender for UdpTransport {
     }
 }
 
-impl Transport for UdpTransport {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl Transport for UdpTransport {}
 
 #[async_trait]
 impl ClientTransport for UdpTransport {

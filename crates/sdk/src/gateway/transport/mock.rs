@@ -1,7 +1,6 @@
 use crate::runtime::error::RuntimeError;
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
 use async_trait::async_trait;
-use std::any::Any;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -162,11 +161,7 @@ impl TransportReceiver for MockTransport {
     }
 }
 
-impl Transport for MockTransport {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl Transport for MockTransport {}
 
 #[async_trait]
 impl ClientTransport for MockTransport {

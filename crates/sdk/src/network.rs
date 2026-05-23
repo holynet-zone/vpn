@@ -25,7 +25,10 @@ pub fn set_ipv4_forwarding(value: bool) -> std::io::Result<()> {
     } else if cfg!(target_os = "macos") {
         format!("net.inet.ip.forwarding={}", if value { 1 } else { 0 })
     } else {
-        unimplemented!()
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "set_ipv4_forwarding is not supported on this platform (only linux and macos)",
+        ));
     };
 
     match Command::new("sysctl")

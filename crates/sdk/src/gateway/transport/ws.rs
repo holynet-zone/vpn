@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -161,11 +160,7 @@ impl TransportSender for WsTransport {
     }
 }
 
-impl Transport for WsTransport {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl Transport for WsTransport {}
 
 // ---------------------------------------------------------------------------
 // Client-side transport
@@ -250,11 +245,7 @@ impl TransportSender for WsClientTransport {
     }
 }
 
-impl Transport for WsClientTransport {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+impl Transport for WsClientTransport {}
 
 #[async_trait]
 impl ClientTransport for WsClientTransport {
@@ -273,20 +264,5 @@ impl ClientTransport for WsClientTransport {
         *self.read.lock().await = Some(read);
 
         Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Downcast helper for dyn Transport
-// ---------------------------------------------------------------------------
-
-impl dyn Transport {
-    pub fn downcast<T: Transport + 'static>(self: Arc<Self>) -> Result<Arc<T>, Arc<dyn Transport>> {
-        if self.as_any().is::<T>() {
-            let ptr = Arc::into_raw(self);
-            Ok(unsafe { Arc::from_raw(ptr as *const T) })
-        } else {
-            Err(self)
-        }
     }
 }

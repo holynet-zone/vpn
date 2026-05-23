@@ -5,7 +5,6 @@ pub mod udp;
 pub mod ws;
 mod mock;
 
-use std::any::Any;
 use std::io;
 use std::net::SocketAddr;
 use async_trait::async_trait;
@@ -26,9 +25,7 @@ pub trait TransportReceiver: Send + Sync {
 
 /// Base transport — shared by server and client.
 /// Does not include `connect()`, which is client-specific.
-pub trait Transport: TransportSender + TransportReceiver {
-    fn as_any(&self) -> &dyn Any;
-}
+pub trait Transport: TransportSender + TransportReceiver {}
 
 /// Client-side transport — extends `Transport` with connection setup.
 /// Only client transports (`UdpTransport::new`, `WsClientTransport`) implement this.

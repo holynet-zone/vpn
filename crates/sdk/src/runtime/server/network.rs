@@ -4,7 +4,7 @@ use std::sync::Arc;
 use etherparse::SlicedPacket;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tracing::error;
+use tracing::{error, warn};
 use tun_rs::AsyncDevice;
 
 use super::session::HolyIp;
@@ -68,7 +68,7 @@ pub async fn tun_listener(
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("failed to parse tun packet: {}", e);
+                        warn!("failed to parse tun packet: {}", e);
                     }
                 },
                 Err(e) => {

@@ -26,9 +26,10 @@ pub async fn network_sender(
             result = queue.recv() => match result {
                 Some(packet) => {
                     if let Err(err) = network.send(&packet).await {
-                        state_tx.send(RuntimeState::Error(
-                            RuntimeError::IO(format!("failed to send network: {}", err))
-                        )).unwrap();
+                        let state = RuntimeState::Error(RuntimeError::IO(
+                            format!("failed to send network: {}", err)
+                        ));
+                        if state_tx.send(state).is_err() { break; }
                     }
                 }
                 None => break,
@@ -48,9 +49,13 @@ pub async fn network_receiver(
     let mut buffer = [0u8; MAX_PACKET_SIZE];
 
     loop {
-        if !is_connected && !state_rx.has_changed().unwrap() {
-            state_wait_timer.tick().await;
-            continue;
+        // If not yet connected, pause until state changes rather than spin.
+        if !is_connected {
+            match state_rx.has_changed() {
+                Ok(false) => { state_wait_timer.tick().await; continue; }
+                Err(_) => break, // watch sender dropped — runtime is shutting down
+                Ok(true) => {}
+            }
         }
 
         tokio::select! {
@@ -81,9 +86,10 @@ pub async fn network_receiver(
                     }
                 }
                 Err(err) => {
-                    state_tx.send(RuntimeState::Error(
-                        RuntimeError::IO(format!("failed to receive network: {}", err))
-                    )).unwrap();
+                    let state = RuntimeState::Error(RuntimeError::IO(
+                        format!("failed to receive network: {}", err)
+                    ));
+                    if state_tx.send(state).is_err() { break; }
                 }
             }
         }
