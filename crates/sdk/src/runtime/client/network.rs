@@ -5,9 +5,9 @@ use tokio::sync::{mpsc, watch::Sender};
 use tracing::{error, warn};
 
 use crate::gateway::network::Network;
+use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
 use crate::runtime::error::RuntimeError;
 use crate::runtime::state::RuntimeState;
-use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
 
 pub async fn network_sender(
     state_tx: Sender<RuntimeState>,
@@ -18,9 +18,8 @@ pub async fn network_sender(
     loop {
         tokio::select! {
             _ = state_rx.changed() => {
-                match state_rx.borrow().deref() {
-                    RuntimeState::Error(_) => break,
-                    _ => {}
+                if let RuntimeState::Error(_) = state_rx.borrow().deref() {
+                    break;
                 }
             },
             result = queue.recv() => match result {
@@ -52,7 +51,10 @@ pub async fn network_receiver(
         // If not yet connected, pause until state changes rather than spin.
         if !is_connected {
             match state_rx.has_changed() {
-                Ok(false) => { state_wait_timer.tick().await; continue; }
+                Ok(false) => {
+                    state_wait_timer.tick().await;
+                    continue;
+                }
                 Err(_) => break, // watch sender dropped — runtime is shutting down
                 Ok(true) => {}
             }

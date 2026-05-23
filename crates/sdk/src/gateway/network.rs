@@ -1,7 +1,7 @@
+use async_trait::async_trait;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use async_trait::async_trait;
 use tun_rs::AsyncDevice;
 
 #[async_trait]

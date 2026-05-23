@@ -1,13 +1,10 @@
+use pnet::datalink;
 use std::collections::HashSet;
 use std::process::{Command, Stdio};
-use pnet::datalink;
 
 pub fn find_available_ifname(base_name: &str) -> String {
     let interfaces = datalink::interfaces();
-    let existing_names: HashSet<String> = interfaces
-        .into_iter()
-        .map(|iface| iface.name)
-        .collect();
+    let existing_names: HashSet<String> = interfaces.into_iter().map(|iface| iface.name).collect();
 
     let mut index = 0;
     loop {

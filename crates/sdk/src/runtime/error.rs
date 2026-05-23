@@ -8,7 +8,9 @@ pub enum BuildError {
 impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BuildError::MissingRequiredField(field) => write!(f, "missing required field: {}", field),
+            BuildError::MissingRequiredField(field) => {
+                write!(f, "missing required field: {}", field)
+            }
         }
     }
 }

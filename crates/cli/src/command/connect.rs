@@ -1,5 +1,5 @@
 use crate::config::connection::{ConnectionConfig, InterfaceConfig, RuntimeConfig};
-use crate::network::{add_route, RouteState};
+use crate::network::{RouteState, add_route};
 use crate::success_err;
 use clap::Args;
 use holynet_sdk::gateway::network::TunNetwork;
@@ -76,11 +76,11 @@ impl ConnectCmd {
             config.interface = Some(InterfaceConfig::default());
         }
 
-        if let Some(ref p) = path {
-            if let Err(e) = config.save(p.as_ref()) {
-                success_err!("save config: {}", e);
-                process::exit(1);
-            }
+        if let Some(ref p) = path
+            && let Err(e) = config.save(p.as_ref())
+        {
+            success_err!("save config: {}", e);
+            process::exit(1);
         }
 
         let server_addr = match config.general.host.parse::<IpAddr>() {
@@ -178,19 +178,14 @@ impl ConnectCmd {
 }
 
 async fn tun_service(mut state_rx: watch::Receiver<RuntimeState>, tun: Arc<AsyncDevice>) {
-    loop {
-        match state_rx.changed().await {
-            Ok(_) => {
-                let state = state_rx.borrow().clone();
-                match state {
-                    RuntimeState::Connected((payload, _)) => {
-                        configure_tun(&tun, &payload).await;
-                    }
-                    RuntimeState::Error(_) => break,
-                    _ => {}
-                }
+    while state_rx.changed().await.is_ok() {
+        let state = state_rx.borrow().clone();
+        match state {
+            RuntimeState::Connected((payload, _)) => {
+                configure_tun(&tun, &payload).await;
             }
-            Err(_) => break,
+            RuntimeState::Error(_) => break,
+            _ => {}
         }
     }
 }
@@ -204,7 +199,10 @@ async fn configure_tun(tun: &AsyncDevice, payload: &HandshakeResponderPayload) {
             }
             let tun_name = match tun.name() {
                 Ok(n) => n,
-                Err(e) => { error!("get tun name: {}", e); return; }
+                Err(e) => {
+                    error!("get tun name: {}", e);
+                    return;
+                }
             };
             for prefix in ["0.0.0.0/1", "128.0.0.0/1"] {
                 if let Err(e) = add_route(

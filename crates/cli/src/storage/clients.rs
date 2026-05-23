@@ -42,7 +42,8 @@ impl Clients {
             db.iter()
                 .map(|result| match result {
                     Ok((_, value)) => {
-                        match bincode::serde::decode_from_slice(&value, bincode::config::standard()) {
+                        match bincode::serde::decode_from_slice(&value, bincode::config::standard())
+                        {
                             Ok((client, _)) => client,
                             Err(err) => panic!("deserialize client from db: {}", err),
                         }
@@ -70,9 +71,6 @@ impl Clients {
     pub async fn delete(&self, pk: &PublicKey) -> anyhow::Result<()> {
         let db = self.db.clone();
         let key = *pk.as_bytes();
-        task::spawn_blocking(move || {
-            db.remove(key.as_slice()).map_err(anyhow::Error::from)
-        })
-        .await?
+        task::spawn_blocking(move || db.remove(key.as_slice()).map_err(anyhow::Error::from)).await?
     }
 }

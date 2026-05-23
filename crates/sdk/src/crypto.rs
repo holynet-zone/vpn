@@ -1,6 +1,6 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::fmt;
 
 #[derive(Clone)]
@@ -25,7 +25,7 @@ impl SecretKey {
 
 impl fmt::Display for SecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", STANDARD_NO_PAD.encode(&self.0))
+        write!(f, "{}", STANDARD_NO_PAD.encode(self.0))
     }
 }
 
@@ -39,7 +39,8 @@ impl TryFrom<&[u8]> for SecretKey {
     type Error = &'static str;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        bytes.try_into()
+        bytes
+            .try_into()
             .map(Self)
             .map_err(|_| "secret key must be exactly 32 bytes")
     }
@@ -57,7 +58,7 @@ impl TryFrom<&str> for SecretKey {
 impl Serialize for SecretKey {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         if s.is_human_readable() {
-            s.serialize_str(&STANDARD_NO_PAD.encode(&self.0))
+            s.serialize_str(&STANDARD_NO_PAD.encode(self.0))
         } else {
             s.serialize_bytes(&self.0)
         }
@@ -74,15 +75,23 @@ impl<'de> Deserialize<'de> for SecretKey {
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<SecretKey, E> {
                 let bytes = STANDARD_NO_PAD.decode(v).map_err(de::Error::custom)?;
-                bytes.as_slice().try_into().map(SecretKey).map_err(|_| de::Error::invalid_length(bytes.len(), &self))
+                bytes
+                    .as_slice()
+                    .try_into()
+                    .map(SecretKey)
+                    .map_err(|_| de::Error::invalid_length(bytes.len(), &self))
             }
             fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<SecretKey, E> {
-                v.try_into().map(SecretKey).map_err(|_| de::Error::invalid_length(v.len(), &self))
+                v.try_into()
+                    .map(SecretKey)
+                    .map_err(|_| de::Error::invalid_length(v.len(), &self))
             }
             fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<SecretKey, A::Error> {
                 let mut buf = [0u8; 32];
                 for b in buf.iter_mut() {
-                    *b = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                    *b = seq
+                        .next_element()?
+                        .ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 }
                 Ok(SecretKey(buf))
             }
@@ -117,7 +126,7 @@ impl PublicKey {
 
 impl fmt::Display for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", STANDARD_NO_PAD.encode(&self.0))
+        write!(f, "{}", STANDARD_NO_PAD.encode(self.0))
     }
 }
 
@@ -125,7 +134,8 @@ impl TryFrom<&[u8]> for PublicKey {
     type Error = &'static str;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        bytes.try_into()
+        bytes
+            .try_into()
             .map(Self)
             .map_err(|_| "public key must be exactly 32 bytes")
     }
@@ -143,7 +153,7 @@ impl TryFrom<&str> for PublicKey {
 impl Serialize for PublicKey {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         if s.is_human_readable() {
-            s.serialize_str(&STANDARD_NO_PAD.encode(&self.0))
+            s.serialize_str(&STANDARD_NO_PAD.encode(self.0))
         } else {
             s.serialize_bytes(&self.0)
         }
@@ -160,15 +170,23 @@ impl<'de> Deserialize<'de> for PublicKey {
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<PublicKey, E> {
                 let bytes = STANDARD_NO_PAD.decode(v).map_err(de::Error::custom)?;
-                bytes.as_slice().try_into().map(PublicKey).map_err(|_| de::Error::invalid_length(bytes.len(), &self))
+                bytes
+                    .as_slice()
+                    .try_into()
+                    .map(PublicKey)
+                    .map_err(|_| de::Error::invalid_length(bytes.len(), &self))
             }
             fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<PublicKey, E> {
-                v.try_into().map(PublicKey).map_err(|_| de::Error::invalid_length(v.len(), &self))
+                v.try_into()
+                    .map(PublicKey)
+                    .map_err(|_| de::Error::invalid_length(v.len(), &self))
             }
             fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<PublicKey, A::Error> {
                 let mut buf = [0u8; 32];
                 for b in buf.iter_mut() {
-                    *b = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                    *b = seq
+                        .next_element()?
+                        .ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 }
                 Ok(PublicKey(buf))
             }

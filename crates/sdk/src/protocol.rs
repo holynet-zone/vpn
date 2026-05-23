@@ -1,5 +1,5 @@
-pub mod handshake;
 mod data;
+pub mod handshake;
 mod primitives;
 mod session;
 
@@ -137,7 +137,10 @@ mod tests {
     #[test]
     fn test_packet_data_client_roundtrip() {
         let encrypted = make_encrypted(vec![1, 2, 3]);
-        let packet = Packet::DataClient { sid: 0xDEAD_BEEF, encrypted };
+        let packet = Packet::DataClient {
+            sid: 0xDEAD_BEEF,
+            encrypted,
+        };
         let bytes = packet.to_bytes();
         let decoded = Packet::try_from(bytes.as_slice()).unwrap();
         match decoded {

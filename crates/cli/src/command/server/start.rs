@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::storage::{database, Clients};
+use crate::storage::{Clients, database};
 use crate::success_err;
 use crate::success_warn;
 use clap::Args;
@@ -25,9 +25,15 @@ pub struct StartCmd {
 
 impl StartCmd {
     pub async fn exec(self, mut config: Config) {
-        if let Some(host) = self.host { config.general.host = host; }
-        if let Some(port) = self.port { config.general.port = port; }
-        if let Some(iface) = self.iface { config.interface.name = iface; }
+        if let Some(host) = self.host {
+            config.general.host = host;
+        }
+        if let Some(port) = self.port {
+            config.general.port = port;
+        }
+        if let Some(iface) = self.iface {
+            config.interface.name = iface;
+        }
 
         if let Err(e) = config.save() {
             success_warn!("cant update configuration: {}", e);
@@ -54,30 +60,37 @@ impl StartCmd {
             .map(|cl| (cl.peer_pk, cl.psk))
             .collect();
 
-        let addr: SocketAddr = match format!("{}:{}", config.general.host, config.general.port).parse() {
-            Ok(a) => a,
-            Err(e) => {
-                success_err!("invalid server address: {}", e);
-                process::exit(1);
-            }
-        };
+        let addr: SocketAddr =
+            match format!("{}:{}", config.general.host, config.general.port).parse() {
+                Ok(a) => a,
+                Err(e) => {
+                    success_err!("invalid server address: {}", e);
+                    process::exit(1);
+                }
+            };
 
         let runtime = config.runtime.unwrap_or_default();
         let workers = if runtime.workers == 0 {
-            std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
         } else {
             runtime.workers
         };
 
-        let transports = match UdpTransport::new_pool(addr, runtime.so_rcvbuf, runtime.so_sndbuf, workers) {
-            Ok(t) => t,
-            Err(e) => {
-                success_err!("create transport: {}", e);
-                process::exit(1);
-            }
-        };
+        let transports =
+            match UdpTransport::new_pool(addr, runtime.so_rcvbuf, runtime.so_sndbuf, workers) {
+                Ok(t) => t,
+                Err(e) => {
+                    success_err!("create transport: {}", e);
+                    process::exit(1);
+                }
+            };
 
-        let session_timeout = runtime.session.as_ref().map(|s| Duration::from_secs(s.timeout as u64));
+        let session_timeout = runtime
+            .session
+            .as_ref()
+            .map(|s| Duration::from_secs(s.timeout as u64));
         let cleanup_interval = runtime
             .session
             .as_ref()
@@ -85,7 +98,15 @@ impl StartCmd {
             .unwrap_or(Duration::from_secs(60));
 
         let builder = ServerBuilder::new()
-            .transports(transports.into_iter().map(|t| std::sync::Arc::new(t) as std::sync::Arc<dyn holynet_sdk::gateway::transport::Transport>).collect())
+            .transports(
+                transports
+                    .into_iter()
+                    .map(|t| {
+                        std::sync::Arc::new(t)
+                            as std::sync::Arc<dyn holynet_sdk::gateway::transport::Transport>
+                    })
+                    .collect(),
+            )
             .secret_key(config.general.secret_key)
             .known_clients(known_clients)
             .tun_name(config.interface.name)

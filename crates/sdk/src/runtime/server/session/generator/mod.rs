@@ -1,5 +1,5 @@
-mod sid;
 mod ip;
+mod sid;
 
+pub use ip::{HolyIp, IpAddressGenerator, increment_ip};
 pub use sid::SessionIdGenerator;
-pub use ip::{increment_ip, IpAddressGenerator, HolyIp};

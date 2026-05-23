@@ -1,6 +1,6 @@
-use crate::config::connection::{ConnectionConfig, CredentialsConfig, GeneralConfig};
 use crate::config::Config;
-use crate::storage::{database, Client, Clients};
+use crate::config::connection::{ConnectionConfig, CredentialsConfig, GeneralConfig};
+use crate::storage::{Client, Clients, database};
 use crate::style::{format_opaque_bytes, generate_qrcode};
 use crate::{success_err, success_ok};
 use clap::Args;
@@ -50,14 +50,16 @@ impl AddCmd {
         };
 
         let sk = match self.sk {
-            Some(s) => SecretKey::try_from(s.as_str()).map_err(|e| anyhow::anyhow!("parse private key: {}", e))?,
+            Some(s) => SecretKey::try_from(s.as_str())
+                .map_err(|e| anyhow::anyhow!("parse private key: {}", e))?,
             None => SecretKey::generate_x25519(),
         };
 
         let pk = PublicKey::from_secret(&sk);
 
         let psk = match self.psk {
-            Some(s) => SecretKey::try_from(s.as_str()).map_err(|e| anyhow::anyhow!("parse pre-shared key: {}", e))?,
+            Some(s) => SecretKey::try_from(s.as_str())
+                .map_err(|e| anyhow::anyhow!("parse pre-shared key: {}", e))?,
             None => SecretKey::generate_x25519(),
         };
 
@@ -68,11 +70,13 @@ impl AddCmd {
         println!();
 
         let clients = Clients::new(database(&config.general.storage)?)?;
-        clients.save(Client {
-            psk: psk.clone(),
-            peer_pk: pk.clone(),
-            created_at: chrono::Utc::now(),
-        }).await;
+        clients
+            .save(Client {
+                psk: psk.clone(),
+                peer_pk: pk.clone(),
+                created_at: chrono::Utc::now(),
+            })
+            .await;
 
         let connection_config = ConnectionConfig {
             general: GeneralConfig {
@@ -94,7 +98,9 @@ impl AddCmd {
             chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
         ));
 
-        connection_config.save(config_path.as_path()).map_err(|e| anyhow::anyhow!("save connection config: {}", e))?;
+        connection_config
+            .save(config_path.as_path())
+            .map_err(|e| anyhow::anyhow!("save connection config: {}", e))?;
 
         match generate_qrcode(connection_config.to_base64()?.as_bytes()) {
             Ok(qr) => println!("{}\n", qr),

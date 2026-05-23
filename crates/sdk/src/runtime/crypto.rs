@@ -36,7 +36,7 @@ thread_local! {
     /// no live `Bytes` object is still referencing it. In steady state only
     /// one buffer exists per thread. A new buffer is allocated only when the
     /// previous encrypted packet hasn't been consumed yet.
-    static CIPHER_POOL: RefCell<Vec<Arc<[u8]>>> = RefCell::new(Vec::new());
+    static CIPHER_POOL: RefCell<Vec<Arc<[u8]>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Encrypt `body` via bincode/serde then Noise `StatelessTransportState`.
@@ -52,12 +52,9 @@ pub(crate) fn noise_encrypt<T: serde::Serialize>(
     state: &StatelessTransportState,
 ) -> anyhow::Result<EncryptedData> {
     PLAIN_BUF.with_borrow_mut(|plain| {
-        let encoded_len = bincode::serde::encode_into_slice(
-            body,
-            plain,
-            bincode::config::standard(),
-        )
-        .map_err(|e| anyhow::anyhow!("bincode encode: {e}"))?;
+        let encoded_len =
+            bincode::serde::encode_into_slice(body, plain, bincode::config::standard())
+                .map_err(|e| anyhow::anyhow!("bincode encode: {e}"))?;
 
         CIPHER_POOL.with_borrow_mut(|pool| {
             // Find a buffer solely owned by the pool (strong_count == 1 means
@@ -90,11 +87,10 @@ pub(crate) fn noise_encrypt<T: serde::Serialize>(
 /// Build a matched (initiator, responder) `StatelessTransportState` pair for
 /// tests. Uses Noise IKpsk2 with ChaCha20Poly1305 and freshly generated keys.
 #[cfg(test)]
-pub(crate) fn make_noise_pair_for_test(
-) -> (StatelessTransportState, StatelessTransportState) {
-    use snow::Builder;
+pub(crate) fn make_noise_pair_for_test() -> (StatelessTransportState, StatelessTransportState) {
     use crate::crypto::{PublicKey, SecretKey};
     use crate::protocol::handshake::NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S;
+    use snow::Builder;
 
     let server_sk = SecretKey::generate_x25519();
     let server_pk = PublicKey::from_secret(&server_sk);
@@ -104,15 +100,23 @@ pub(crate) fn make_noise_pair_for_test(
     let params = NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone();
 
     let mut init = Builder::new(params.clone())
-        .local_private_key(client_sk.as_slice()).unwrap()
-        .remote_public_key(server_pk.as_slice()).unwrap()
-        .psk(2, &psk).unwrap()
-        .build_initiator().unwrap();
+        .local_private_key(client_sk.as_slice())
+        .unwrap()
+        .remote_public_key(server_pk.as_slice())
+        .unwrap()
+        .psk(2, &psk)
+        .unwrap()
+        .build_initiator()
+        .unwrap();
     let mut resp = Builder::new(params)
-        .local_private_key(server_sk.as_slice()).unwrap()
-        .remote_public_key(client_pk.as_slice()).unwrap()
-        .psk(2, &psk).unwrap()
-        .build_responder().unwrap();
+        .local_private_key(server_sk.as_slice())
+        .unwrap()
+        .remote_public_key(client_pk.as_slice())
+        .unwrap()
+        .psk(2, &psk)
+        .unwrap()
+        .build_responder()
+        .unwrap();
 
     let mut buf = [0u8; 65536];
     let n = init.write_message(&[], &mut buf).unwrap();

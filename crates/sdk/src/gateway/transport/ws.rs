@@ -8,10 +8,10 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{Bytes, Message};
-use tokio_tungstenite::{accept_async, connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, accept_async, connect_async};
 use tracing::{debug, info};
 
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
@@ -141,7 +141,7 @@ impl TransportSender for WsTransport {
                 .value_mut()
                 .send(Message::Binary(Bytes::copy_from_slice(data)))
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
             Ok(data.len())
         } else {
             Err(io::Error::new(
@@ -253,11 +253,9 @@ impl ClientTransport for WsClientTransport {
         info!("connecting to ws://{}", self.addr);
         let request = format!("ws://{}", self.addr)
             .into_client_request()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
-        let (ws_stream, _) = connect_async(request)
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let (ws_stream, _) = connect_async(request).await.map_err(io::Error::other)?;
 
         let (write, read) = ws_stream.split();
         *self.write.lock().await = Some(write);

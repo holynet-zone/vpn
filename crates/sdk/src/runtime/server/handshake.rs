@@ -7,16 +7,16 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
+use super::session::Sessions;
 use crate::crypto::{PublicKey, SecretKey};
+use crate::protocol::handshake::{
+    NOISE_IK_PSK2_25519_AESGCM_BLAKE2S, NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S, params_from_alg,
+};
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
     Packet,
 };
-use crate::protocol::handshake::{
-    params_from_alg, NOISE_IK_PSK2_25519_AESGCM_BLAKE2S, NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
-};
 use crate::runtime::cred::ServerCredential;
-use super::session::Sessions;
 
 fn decode_handshake_params(
     handshake: &EncryptedHandshake,
@@ -40,7 +40,10 @@ fn decode_handshake_params(
         Err(err) => return Err(anyhow::Error::from(err)),
     };
 
-    match responder.get_remote_static().map(|bytes: &[u8]| PublicKey::try_from(bytes)) {
+    match responder
+        .get_remote_static()
+        .map(|bytes: &[u8]| PublicKey::try_from(bytes))
+    {
         Some(Ok(key)) => Ok((key, alg)),
         Some(Err(e)) => Err(anyhow::anyhow!("invalid remote static key: {}", e)),
         None => Err(anyhow::anyhow!("invalid handshake: missing remote static")),
@@ -82,7 +85,10 @@ async fn complete(
             }
         },
         None => {
-            warn!("[{}] failed to create session: no session id available", addr);
+            warn!(
+                "[{}] failed to create session: no session id available",
+                addr
+            );
             (
                 HandshakeResponderBody::Disconnect(HandshakeError::ServerOverloaded),
                 None,
@@ -96,7 +102,13 @@ async fn complete(
     )?;
 
     if let Some((sid, holy_ip)) = keys {
-        sessions.add(sid, holy_ip, *addr, alg, responder.into_stateless_transport_mode()?);
+        sessions.add(
+            sid,
+            holy_ip,
+            *addr,
+            alg,
+            responder.into_stateless_transport_mode()?,
+        );
     }
 
     Ok(buffer[..len].to_vec().into())

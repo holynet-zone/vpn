@@ -4,9 +4,9 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
+use super::session::{HolyIp, Sessions};
 use crate::protocol::{DataClientBody, DataServerBody, EncryptedData, Packet, SessionId};
 use crate::runtime::crypto::{noise_decrypt, noise_encrypt};
-use super::session::{HolyIp, Sessions};
 
 pub(super) async fn data_transport_executor(
     mut stop: watch::Receiver<bool>,

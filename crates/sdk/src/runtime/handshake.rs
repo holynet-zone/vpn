@@ -1,24 +1,21 @@
+use snow::{Builder, HandshakeState, StatelessTransportState};
 use std::sync::Arc;
 use std::time::Duration;
-use snow::{Builder, HandshakeState, StatelessTransportState};
 use tokio::select;
 use tracing::warn;
 
 use crate::gateway::transport::ClientTransport;
+use crate::protocol::handshake::{
+    NOISE_IK_PSK2_25519_AESGCM_BLAKE2S, NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
+};
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
     Packet,
 };
-use crate::protocol::handshake::{
-    NOISE_IK_PSK2_25519_AESGCM_BLAKE2S, NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
-};
 use crate::runtime::cred::Cred;
 use crate::runtime::error::RuntimeError;
 
-fn initial(
-    alg: &Alg,
-    cred: &Cred,
-) -> Result<(EncryptedHandshake, HandshakeState), RuntimeError> {
+fn initial(alg: &Alg, cred: &Cred) -> Result<(EncryptedHandshake, HandshakeState), RuntimeError> {
     let params = match alg {
         Alg::ChaCha20Poly1305 => NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone(),
         Alg::Aes256 => NOISE_IK_PSK2_25519_AESGCM_BLAKE2S.clone(),
@@ -87,9 +84,10 @@ pub async fn handshake_step(
     match body {
         HandshakeResponderBody::Complete(payload) => Ok((payload, transport_state)),
         HandshakeResponderBody::Disconnect(err) => match err {
-            HandshakeError::MaxConnectedDevices(max) => Err(RuntimeError::Handshake(
-                format!("max connected devices: {}", max),
-            )),
+            HandshakeError::MaxConnectedDevices(max) => Err(RuntimeError::Handshake(format!(
+                "max connected devices: {}",
+                max
+            ))),
             HandshakeError::ServerOverloaded => {
                 Err(RuntimeError::Handshake("server overloaded".into()))
             }

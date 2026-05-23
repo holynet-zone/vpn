@@ -1,6 +1,6 @@
+use crate::protocol::SessionId;
 use dashmap::DashSet;
 use rand::RngCore;
-use crate::protocol::SessionId;
 
 const MAX_TRIES: usize = 32;
 

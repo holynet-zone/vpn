@@ -1,8 +1,10 @@
-use bincode::{error::{DecodeError, EncodeError}, BorrowDecode, Decode, Encode};
-use std::ops::Deref;
 use bincode::de::BorrowDecoder;
+use bincode::{
+    BorrowDecode, Decode, Encode,
+    error::{DecodeError, EncodeError},
+};
 use serde::{Deserialize, Serialize};
-
+use std::ops::Deref;
 
 #[derive(Debug, PartialEq)]
 pub struct VecU16<T>(pub Vec<T>);
@@ -36,7 +38,9 @@ impl<T: Encode> Encode for VecU16<T> {
 }
 
 impl<Context, T: Decode<Context>> Decode<Context> for VecU16<T> {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
+    fn decode<D: bincode::de::Decoder<Context = Context>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
         let len = u16::decode(decoder)? as usize;
         let mut vec = Vec::with_capacity(len);
         for _ in 0..len {
@@ -48,11 +52,11 @@ impl<Context, T: Decode<Context>> Decode<Context> for VecU16<T> {
 
 impl<'de, Context, T> BorrowDecode<'de, Context> for VecU16<T>
 where
-    T: BorrowDecode<'de, Context>
+    T: BorrowDecode<'de, Context>,
 {
-    fn borrow_decode<D>(decoder: &mut D) -> Result<Self, DecodeError> 
+    fn borrow_decode<D>(decoder: &mut D) -> Result<Self, DecodeError>
     where
-        D: bincode::de::Decoder<Context = Context> + BorrowDecoder<'de>
+        D: bincode::de::Decoder<Context = Context> + BorrowDecoder<'de>,
     {
         let len = u16::decode(decoder)? as usize;
         let mut vec = Vec::with_capacity(len);
@@ -85,14 +89,11 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-
         let bytes = <&[u8]>::deserialize(deserializer)?;
 
-        let (vec, _) = bincode::decode_from_slice(
-            bytes,
-            bincode::config::standard()
-        ).map_err(serde::de::Error::custom)?;
-        
+        let (vec, _) = bincode::decode_from_slice(bytes, bincode::config::standard())
+            .map_err(serde::de::Error::custom)?;
+
         Ok(VecU16(vec))
     }
 }

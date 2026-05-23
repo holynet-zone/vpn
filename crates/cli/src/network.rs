@@ -25,13 +25,21 @@ impl RouteState {
     }
 
     pub fn build(mut self) -> anyhow::Result<RouteState> {
-        let (default_gateway, default_dev_name) = default_device()
-            .map_err(|e| format_err!("failed to get default device: {}", e))?;
+        let (default_gateway, default_dev_name) =
+            default_device().map_err(|e| format_err!("failed to get default device: {}", e))?;
         self.default_gateway = Some(default_gateway);
-        debug!("default gateway: {} from dev {}", default_gateway, default_dev_name);
+        debug!(
+            "default gateway: {} from dev {}",
+            default_gateway, default_dev_name
+        );
 
         add_route(&IpNetwork::from_str("0.0.0.0/1")?, None, &self.dev, Some(1))?;
-        add_route(&IpNetwork::from_str("128.0.0.0/1")?, None, &self.dev, Some(1))?;
+        add_route(
+            &IpNetwork::from_str("128.0.0.0/1")?,
+            None,
+            &self.dev,
+            Some(1),
+        )?;
 
         for addr in self.exclude.iter() {
             add_route(addr, Some(default_gateway), &default_dev_name, None)?;
@@ -58,7 +66,9 @@ pub fn delete_route(route: &IpNetwork, via: &IpAddr) -> anyhow::Result<()> {
     };
 
     if cfg!(target_os = "linux") {
-        let check = Command::new("ip").args(["route", "show", &formatted]).output()?;
+        let check = Command::new("ip")
+            .args(["route", "show", &formatted])
+            .output()?;
         if check.stdout.is_empty() {
             warn!("route already deleted");
             return Ok(());
@@ -82,9 +92,13 @@ pub fn add_route(
     metric: Option<usize>,
 ) -> anyhow::Result<()> {
     let mut log = format!("adding route: {} ", route);
-    if let Some(v) = via { write!(log, "via {} ", v)?; }
+    if let Some(v) = via {
+        write!(log, "via {} ", v)?;
+    }
     write!(log, "dev {} ", dev)?;
-    if let Some(m) = metric { write!(log, "metric {}", m)?; }
+    if let Some(m) = metric {
+        write!(log, "metric {}", m)?;
+    }
     info!("{}", log);
 
     let (formatted, _) = match route.size() {
@@ -93,16 +107,22 @@ pub fn add_route(
     };
 
     if cfg!(target_os = "linux") {
-        let check = Command::new("ip").args(["route", "show", &formatted]).output()?;
+        let check = Command::new("ip")
+            .args(["route", "show", &formatted])
+            .output()?;
         if !check.stdout.is_empty() {
             warn!("route already exists");
             return Ok(());
         }
         let mut cmd = Command::new("ip");
         cmd.args(["route", "add", &formatted]);
-        if let Some(v) = via { cmd.args(["via", &v.to_string()]); }
+        if let Some(v) = via {
+            cmd.args(["via", &v.to_string()]);
+        }
         cmd.args(["dev", dev]);
-        if let Some(m) = metric { cmd.args(["metric", &m.to_string()]); }
+        if let Some(m) = metric {
+            cmd.args(["metric", &m.to_string()]);
+        }
         let status = cmd.status()?;
         if !status.success() {
             return Err(anyhow::anyhow!("failed to add route: {}", status));

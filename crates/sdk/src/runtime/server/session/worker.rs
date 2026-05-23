@@ -1,6 +1,6 @@
+use super::Sessions;
 use std::time::Duration;
 use tokio::sync::watch;
-use super::Sessions;
 
 pub async fn run(
     mut stop: watch::Receiver<bool>,

@@ -1,33 +1,28 @@
 mod data;
 mod handshake;
+mod network;
 pub mod session;
 mod transport;
-mod network;
 
-use std::{
-    net::IpAddr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tracing::info;
 
-
-use crate::crypto::{PublicKey, SecretKey};
-use crate::gateway::transport::Transport;
-use crate::network::set_ipv4_forwarding;
-use crate::runtime::error::{BuildError, RuntimeError};
-use crate::tun;
-use self::session::{Sessions, HolyIp};
+use self::session::{HolyIp, Sessions};
 use self::{
     data::{data_transport_executor, data_tun_executor},
     handshake::handshake_executor,
     network::{tun_listener, tun_sender},
     transport::{transport_listener, transport_sender},
 };
+use crate::crypto::{PublicKey, SecretKey};
+use crate::gateway::transport::Transport;
+use crate::network::set_ipv4_forwarding;
+use crate::runtime::error::{BuildError, RuntimeError};
+use crate::tun;
 
 pub struct ServerBuilder {
     transports: Vec<Arc<dyn Transport>>,
@@ -47,6 +42,12 @@ pub struct ServerBuilder {
     handshake_buf: usize,
     data_transport_buf: usize,
     data_tun_buf: usize,
+}
+
+impl Default for ServerBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ServerBuilder {
@@ -145,15 +146,23 @@ impl ServerBuilder {
     pub fn build(self) -> Result<Server, BuildError> {
         Ok(Server {
             transports: if self.transports.is_empty() {
-                return Err(BuildError::MissingRequiredField("at least one transport is required"));
+                return Err(BuildError::MissingRequiredField(
+                    "at least one transport is required",
+                ));
             } else {
                 self.transports
             },
-            sk: self.sk.ok_or(BuildError::MissingRequiredField("secret_key"))?,
+            sk: self
+                .sk
+                .ok_or(BuildError::MissingRequiredField("secret_key"))?,
             known_clients: self.known_clients,
-            tun_name: self.tun_name.ok_or(BuildError::MissingRequiredField("tun_name"))?,
+            tun_name: self
+                .tun_name
+                .ok_or(BuildError::MissingRequiredField("tun_name"))?,
             tun_mtu: self.tun_mtu,
-            tun_ip: self.tun_ip.ok_or(BuildError::MissingRequiredField("tun_ip"))?,
+            tun_ip: self
+                .tun_ip
+                .ok_or(BuildError::MissingRequiredField("tun_ip"))?,
             tun_prefix: self.tun_prefix,
             session_timeout: self.session_timeout,
             session_cleanup_interval: self.session_cleanup_interval,
@@ -210,16 +219,15 @@ impl Server {
         let mut set: JoinSet<()> = JoinSet::new();
 
         for transport in self.transports {
-            let tun = tun.try_clone()
+            let tun = tun
+                .try_clone()
                 .map_err(|e| RuntimeError::IO(format!("clone tun device: {e}")))?;
             let tun = Arc::new(tun);
 
             let (out_transport_tx, out_transport_rx) =
                 tokio::sync::mpsc::channel(self.out_transport_buf);
-            let (out_tun_tx, out_tun_rx) =
-                tokio::sync::mpsc::channel(self.out_tun_buf);
-            let (handshake_tx, handshake_rx) =
-                tokio::sync::mpsc::channel(self.handshake_buf);
+            let (out_tun_tx, out_tun_rx) = tokio::sync::mpsc::channel(self.out_tun_buf);
+            let (handshake_tx, handshake_rx) = tokio::sync::mpsc::channel(self.handshake_buf);
             let (data_transport_tx, data_transport_rx) =
                 tokio::sync::mpsc::channel(self.data_transport_buf);
             let (data_tun_tx, data_tun_rx) =
@@ -238,16 +246,8 @@ impl Server {
                 transport.clone(),
                 out_transport_rx,
             ));
-            set.spawn(tun_listener(
-                stop_rx.clone(),
-                tun.clone(),
-                data_tun_tx,
-            ));
-            set.spawn(tun_sender(
-                stop_rx.clone(),
-                tun.clone(),
-                out_tun_rx,
-            ));
+            set.spawn(tun_listener(stop_rx.clone(), tun.clone(), data_tun_tx));
+            set.spawn(tun_sender(stop_rx.clone(), tun.clone(), out_tun_rx));
             set.spawn(handshake_executor(
                 stop_rx.clone(),
                 handshake_rx,
@@ -292,6 +292,8 @@ impl Server {
 
         set_ipv4_forwarding(false)?;
 
-        Err(RuntimeError::Unexpected("all workers exited unexpectedly".into()))
+        Err(RuntimeError::Unexpected(
+            "all workers exited unexpectedly".into(),
+        ))
     }
 }

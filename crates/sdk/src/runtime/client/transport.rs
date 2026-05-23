@@ -1,40 +1,37 @@
-use std::{
-    ops::Deref,
-    sync::Arc,
-};
+use std::{ops::Deref, sync::Arc};
 
-use tokio::{
-    time::interval,
-    sync::{
-        watch::Sender,
-        mpsc
-    }
-};
-use tracing::{debug, error, warn};
 use crate::{
     gateway::transport::{TransportReceiver, TransportSender},
-    protocol::{Packet, EncryptedData},
+    protocol::{EncryptedData, Packet},
     runtime::{
+        client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE},
         state::RuntimeState,
-        client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE}
-    }
+    },
 };
+use tokio::{
+    sync::{mpsc, watch::Sender},
+    time::interval,
+};
+use tracing::{debug, error, warn};
 
 pub async fn transport_sender(
     state: Sender<RuntimeState>,
     transport: Arc<dyn TransportSender>,
-    mut queue: mpsc::Receiver<Packet>
+    mut queue: mpsc::Receiver<Packet>,
 ) {
     let mut state_wait_timer = interval(AWAIT_STATE_DELAY);
 
     let mut state_rx = state.subscribe();
     let mut is_connected = false;
-    
+
     loop {
         // If not yet connected, pause until state changes rather than spin.
         if !is_connected {
             match state_rx.has_changed() {
-                Ok(false) => { state_wait_timer.tick().await; continue; }
+                Ok(false) => {
+                    state_wait_timer.tick().await;
+                    continue;
+                }
                 Err(_) => break, // watch sender dropped — runtime is shutting down
                 Ok(true) => {}
             }
@@ -67,7 +64,7 @@ pub async fn transport_sender(
 pub async fn transport_receiver(
     state: Sender<RuntimeState>,
     transport: Arc<dyn TransportReceiver>,
-    data_receiver: mpsc::Sender<EncryptedData>
+    data_receiver: mpsc::Sender<EncryptedData>,
 ) {
     let mut state_wait_timer = interval(AWAIT_STATE_DELAY);
 
@@ -78,7 +75,10 @@ pub async fn transport_receiver(
         // If not yet connected, pause until state changes rather than spin.
         if !is_connected {
             match state_rx.has_changed() {
-                Ok(false) => { state_wait_timer.tick().await; continue; }
+                Ok(false) => {
+                    state_wait_timer.tick().await;
+                    continue;
+                }
                 Err(_) => break, // watch sender dropped — runtime is shutting down
                 Ok(true) => {}
             }

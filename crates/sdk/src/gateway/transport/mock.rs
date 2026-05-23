@@ -1,5 +1,5 @@
-use crate::runtime::error::RuntimeError;
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
+use crate::runtime::error::RuntimeError;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -100,9 +100,11 @@ pub struct MockTransportSender {
 impl MockTransportSender {
     pub async fn send(&self, data: Vec<u8>) -> Result<(), RuntimeError> {
         let inner = self.inner.lock().await;
-        inner.tx.send(data).await.map_err(|e| {
-            RuntimeError::IO(format!("Failed to send data: {}", e))
-        })?;
+        inner
+            .tx
+            .send(data)
+            .await
+            .map_err(|e| RuntimeError::IO(format!("Failed to send data: {}", e)))?;
         Ok(())
     }
 }
@@ -139,7 +141,7 @@ impl TransportReceiver for MockTransport {
             }
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::ConnectionAborted,
-                "Channel closed"
+                "Channel closed",
             )),
         }
     }
@@ -155,7 +157,7 @@ impl TransportReceiver for MockTransport {
             }
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::ConnectionAborted,
-                "Channel closed"
+                "Channel closed",
             )),
         }
     }
@@ -190,7 +192,10 @@ mod tests {
 
         // Тест отправки от transport1 к transport2
         let test_data = b"Hello from transport1";
-        transport1.send_to(test_data, &transport2.local_addr()).await.unwrap();
+        transport1
+            .send_to(test_data, &transport2.local_addr())
+            .await
+            .unwrap();
 
         let mut buffer = [0u8; 1024];
         let (size, addr) = transport2.recv_from(&mut buffer).await.unwrap();
@@ -200,7 +205,10 @@ mod tests {
 
         // Тест отправки от transport2 к transport1
         let test_data2 = b"Hello from transport2";
-        transport2.send_to(test_data2, &transport1.local_addr()).await.unwrap();
+        transport2
+            .send_to(test_data2, &transport1.local_addr())
+            .await
+            .unwrap();
 
         let (size2, addr2) = transport1.recv_from(&mut buffer).await.unwrap();
 

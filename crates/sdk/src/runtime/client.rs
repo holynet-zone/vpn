@@ -7,14 +7,14 @@ use crate::{
     gateway::{network::Network, transport::ClientTransport},
     protocol::{Alg, EncryptedData, Packet},
     runtime::{
-        cred::Cred,
-        error::{BuildError, RuntimeError},
-        state::RuntimeState,
         client::{
             data::{data_tun_executor, data_udp_executor, keepalive_sender},
             network::{network_receiver, network_sender},
             transport::{transport_receiver, transport_sender},
         },
+        cred::Cred,
+        error::{BuildError, RuntimeError},
+        state::RuntimeState,
     },
 };
 use std::{sync::Arc, time::Duration};
@@ -37,6 +37,12 @@ pub struct ClientBuilder {
     out_network_buf: usize,
     data_transport_buf: usize,
     data_network_buf: usize,
+}
+
+impl Default for ClientBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ClientBuilder {
@@ -161,12 +167,10 @@ impl Client {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
         let (transport_sender_tx, transport_sender_rx) =
             mpsc::channel::<Packet>(self.out_transport_buf);
-        let (network_sender_tx, network_sender_rx) =
-            mpsc::channel::<Vec<u8>>(self.out_network_buf);
+        let (network_sender_tx, network_sender_rx) = mpsc::channel::<Vec<u8>>(self.out_network_buf);
         let (data_transport_tx, data_transport_rx) =
             mpsc::channel::<EncryptedData>(self.data_transport_buf);
-        let (data_network_tx, data_network_rx) =
-            mpsc::channel::<Vec<u8>>(self.data_network_buf);
+        let (data_network_tx, data_network_rx) = mpsc::channel::<Vec<u8>>(self.data_network_buf);
 
         let mut set: JoinSet<()> = JoinSet::new();
 

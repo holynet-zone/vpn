@@ -18,12 +18,8 @@ pub fn parse_destination(packet: &[u8]) -> anyhow::Result<IpAddr> {
                 etherparse::InternetSlice::Ipv4(ipv4) => {
                     Ok(ipv4.header().destination_addr().into())
                 }
-                etherparse::InternetSlice::Ipv6(_) => {
-                    Err(anyhow::anyhow!("IPv6 is not supported"))
-                }
-                etherparse::InternetSlice::Arp(_) => {
-                    Err(anyhow::anyhow!("ARP is not supported"))
-                }
+                etherparse::InternetSlice::Ipv6(_) => Err(anyhow::anyhow!("IPv6 is not supported")),
+                etherparse::InternetSlice::Arp(_) => Err(anyhow::anyhow!("ARP is not supported")),
             },
             None => Err(anyhow::anyhow!("missing network layer")),
         },

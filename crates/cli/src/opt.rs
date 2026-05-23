@@ -5,7 +5,7 @@ use clap::Parser;
 use std::io::IsTerminal;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -31,7 +31,11 @@ impl Opt {
 
         let (non_blocking, guard) = tracing_appender::non_blocking(appender);
 
-        let filter = if self.debug { "holynet=debug,holynet_sdk=debug" } else { "holynet=info,holynet_sdk=info" };
+        let filter = if self.debug {
+            "holynet=debug,holynet_sdk=debug"
+        } else {
+            "holynet=info,holynet_sdk=info"
+        };
 
         let file_layer = fmt::layer()
             .with_writer(non_blocking)

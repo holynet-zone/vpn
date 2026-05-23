@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::storage::{database, Clients};
+use crate::storage::{Clients, database};
 use crate::success_ok;
 use anyhow::anyhow;
 use clap::Args;

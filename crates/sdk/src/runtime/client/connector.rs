@@ -29,41 +29,33 @@ pub(crate) async fn executor(
                 let current = state_rx.borrow().clone();
                 match current {
                     RuntimeState::Connecting => match transport.connect().await {
-                        Ok(_) => match handshake_step(
-                            transport.clone(),
-                            &cred,
-                            &alg,
-                            timeout,
-                        )
-                        .await
-                        {
-                            Ok((payload, transport_state)) => {
-                                is_reconnect = true;
-                                state
-                                    .send(RuntimeState::Connected((
-                                        payload,
-                                        Arc::new(transport_state),
-                                    )))
-                                    .expect("broken runtime state pipe");
-                                continue;
-                            }
-                            Err(err) => match is_reconnect {
-                                false => {
+                        Ok(_) => {
+                            match handshake_step(transport.clone(), &cred, &alg, timeout).await {
+                                Ok((payload, transport_state)) => {
+                                    is_reconnect = true;
                                     state
-                                        .send(RuntimeState::Error(err))
+                                        .send(RuntimeState::Connected((
+                                            payload,
+                                            Arc::new(transport_state),
+                                        )))
                                         .expect("broken runtime state pipe");
-                                    return;
+                                    continue;
                                 }
-                                true => {
-                                    error!(
-                                        "{}, trying again in {:?}",
-                                        err, reconnect_delay
-                                    );
-                                    state_rx.mark_changed();
-                                    ticker.tick().await;
-                                }
-                            },
-                        },
+                                Err(err) => match is_reconnect {
+                                    false => {
+                                        state
+                                            .send(RuntimeState::Error(err))
+                                            .expect("broken runtime state pipe");
+                                        return;
+                                    }
+                                    true => {
+                                        error!("{}, trying again in {:?}", err, reconnect_delay);
+                                        state_rx.mark_changed();
+                                        ticker.tick().await;
+                                    }
+                                },
+                            }
+                        }
                         Err(err) => match is_reconnect {
                             false => {
                                 state

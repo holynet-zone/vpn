@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::storage::{database, Clients};
+use crate::storage::{Clients, database};
 use crate::style::format_opaque_bytes;
 use crate::success_ok;
 use clap::Args;
@@ -21,11 +21,16 @@ pub struct ListCmd;
 impl ListCmd {
     pub async fn exec(self, config: Config) -> anyhow::Result<()> {
         let clients = Clients::new(database(&config.general.storage)?)?;
-        let mut users: Vec<_> = clients.get_all().await.into_iter().map(|client| UserRow {
-            pk: client.peer_pk,
-            psk: client.psk,
-            created_at: client.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-        }).collect();
+        let mut users: Vec<_> = clients
+            .get_all()
+            .await
+            .into_iter()
+            .map(|client| UserRow {
+                pk: client.peer_pk,
+                psk: client.psk,
+                created_at: client.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+            })
+            .collect();
         users.sort_by_key(|u| u.created_at.clone());
 
         let selected = Select::new("Select user", users).prompt()?;

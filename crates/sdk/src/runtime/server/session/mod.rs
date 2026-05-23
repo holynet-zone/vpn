@@ -1,14 +1,14 @@
 mod generator;
 pub mod worker;
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
+use std::time::Duration;
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Instant,
 };
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
 
 use dashmap::DashMap;
 use snow::StatelessTransportState;
@@ -17,13 +17,13 @@ use tracing::debug;
 use crate::protocol::{Alg, SessionId};
 use crate::time::sec_since_start;
 
-use generator::{increment_ip, IpAddressGenerator, SessionIdGenerator};
 pub use generator::HolyIp;
+use generator::{IpAddressGenerator, SessionIdGenerator, increment_ip};
 
 pub struct Session {
     pub id: SessionId,
     // Socket addr stored lock-free
-    ipv4_data: AtomicU64,           // u32 (IP) | u16 (port)
+    ipv4_data: AtomicU64, // u32 (IP) | u16 (port)
     ipv6_data: AtomicPtr<(u128, u16)>,
     is_ipv4: AtomicBool,
     //
@@ -104,13 +104,21 @@ impl Sessions {
             SocketAddr::V4(addr_v4) => {
                 let ip_u32 = u32::from_be_bytes(addr_v4.ip().octets());
                 let encoded = ((ip_u32 as u64) << 32) | addr_v4.port() as u64;
-                (AtomicU64::new(encoded), AtomicPtr::default(), AtomicBool::new(true))
+                (
+                    AtomicU64::new(encoded),
+                    AtomicPtr::default(),
+                    AtomicBool::new(true),
+                )
             }
             SocketAddr::V6(addr_v6) => {
                 let ip_u128 = u128::from_be_bytes(addr_v6.ip().octets());
                 let boxed = Box::new((ip_u128, addr_v6.port()));
                 let ptr = Box::into_raw(boxed);
-                (AtomicU64::new(0), AtomicPtr::new(ptr), AtomicBool::new(false))
+                (
+                    AtomicU64::new(0),
+                    AtomicPtr::new(ptr),
+                    AtomicBool::new(false),
+                )
             }
         };
 
@@ -164,7 +172,10 @@ impl Sessions {
             holy_ip_gen.release(holy_ip);
         }
 
-        debug!("[cleanup_sessions] cleaned up {} sessions", session_ids_to_release.len());
+        debug!(
+            "[cleanup_sessions] cleaned up {} sessions",
+            session_ids_to_release.len()
+        );
     }
 
     pub fn release_by_sid(&self, sid: SessionId) {
@@ -198,7 +209,9 @@ impl Sessions {
 
     pub fn touch(&self, sid: SessionId) {
         if let Some(session) = self.map.get(&sid) {
-            session.last_seen.store(sec_since_start(), Ordering::Relaxed);
+            session
+                .last_seen
+                .store(sec_since_start(), Ordering::Relaxed);
         }
     }
 
@@ -216,7 +229,9 @@ impl Sessions {
                     let encoded = ((ip_u32 as u64) << 32) | addr_v4.port() as u64;
                     session.ipv4_data.store(encoded, Ordering::Relaxed);
                     // Release: ensures ipv4_data write is visible before is_ipv4 flips
-                    let old_ptr = session.ipv6_data.swap(std::ptr::null_mut(), Ordering::AcqRel);
+                    let old_ptr = session
+                        .ipv6_data
+                        .swap(std::ptr::null_mut(), Ordering::AcqRel);
                     session.is_ipv4.store(true, Ordering::Release);
                     if !old_ptr.is_null() {
                         unsafe { drop(Box::from_raw(old_ptr)) }
@@ -254,7 +269,11 @@ mod tests {
         Sessions::new(&"10.0.0.0".parse().unwrap(), 8)
     }
 
-    fn add_one(sessions: &Sessions, addr: SocketAddr, state: StatelessTransportState) -> (SessionId, HolyIp) {
+    fn add_one(
+        sessions: &Sessions,
+        addr: SocketAddr,
+        state: StatelessTransportState,
+    ) -> (SessionId, HolyIp) {
         let sid = sessions.next_session_id().unwrap();
         let ip = sessions.next_holy_ip().unwrap();
         sessions.add(sid, ip, addr, Alg::ChaCha20Poly1305, state);
@@ -319,9 +338,17 @@ mod tests {
         let (sid2, ip2) = add_one(&sessions, "127.0.0.1:2002".parse().unwrap(), s2);
 
         // Mark sid1 as ancient (last_seen = process epoch).
-        sessions.get_by_sid(&sid1).unwrap().last_seen.store(0, Ordering::Relaxed);
+        sessions
+            .get_by_sid(&sid1)
+            .unwrap()
+            .last_seen
+            .store(0, Ordering::Relaxed);
         // Mark sid2 as unreachably fresh — cannot expire regardless of `now`.
-        sessions.get_by_sid(&sid2).unwrap().last_seen.store(u64::MAX, Ordering::Relaxed);
+        sessions
+            .get_by_sid(&sid2)
+            .unwrap()
+            .last_seen
+            .store(u64::MAX, Ordering::Relaxed);
 
         // Wait until sec_since_start() > 0 so the expiry condition fires for sid1.
         while sec_since_start() == 0 {
@@ -333,9 +360,18 @@ mod tests {
         // sid2: now.saturating_sub(u64::MAX) = 0 > 0 ✗ (kept)
         sessions.cleanup_sessions(Duration::ZERO);
 
-        assert!(!sessions.is_sid_allocated(sid1), "expired session must be removed");
-        assert!(!sessions.is_holy_ip_allocated(&ip1), "expired ip must be released");
-        assert!(sessions.is_sid_allocated(sid2), "fresh session must be kept");
+        assert!(
+            !sessions.is_sid_allocated(sid1),
+            "expired session must be removed"
+        );
+        assert!(
+            !sessions.is_holy_ip_allocated(&ip1),
+            "expired ip must be released"
+        );
+        assert!(
+            sessions.is_sid_allocated(sid2),
+            "fresh session must be kept"
+        );
         assert!(sessions.is_holy_ip_allocated(&ip2), "fresh ip must be kept");
     }
 
@@ -428,9 +464,17 @@ mod tests {
         let (sid, _) = add_one(&sessions, "127.0.0.1:9999".parse().unwrap(), state);
 
         // Force last_seen to 0 then touch — must become non-zero (current time).
-        sessions.get_by_sid(&sid).unwrap().last_seen.store(0, Ordering::Relaxed);
+        sessions
+            .get_by_sid(&sid)
+            .unwrap()
+            .last_seen
+            .store(0, Ordering::Relaxed);
         sessions.touch(sid);
-        let seen = sessions.get_by_sid(&sid).unwrap().last_seen.load(Ordering::Relaxed);
+        let seen = sessions
+            .get_by_sid(&sid)
+            .unwrap()
+            .last_seen
+            .load(Ordering::Relaxed);
         assert!(seen >= sec_since_start(), "touch must set last_seen to now");
     }
 }

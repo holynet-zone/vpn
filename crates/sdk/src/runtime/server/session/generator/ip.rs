@@ -57,7 +57,11 @@ impl IpAddressGenerator {
                     }
                 }
                 let new_ip = IpAddr::V4(Ipv4Addr::from(octets));
-                if new_ip > self.end { self.start } else { new_ip }
+                if new_ip > self.end {
+                    self.start
+                } else {
+                    new_ip
+                }
             }
             IpAddr::V6(ipv6) => {
                 let mut segments = ipv6.segments();
@@ -70,7 +74,11 @@ impl IpAddressGenerator {
                     }
                 }
                 let new_ip = IpAddr::V6(Ipv6Addr::from(segments));
-                if new_ip > self.end { self.start } else { new_ip }
+                if new_ip > self.end {
+                    self.start
+                } else {
+                    new_ip
+                }
             }
         }
     }
@@ -125,8 +133,7 @@ mod tests {
 
     #[test]
     fn test_ipv4_address_generator() {
-        let mut generator =
-            IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 24);
+        let mut generator = IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 24);
         let mut addresses = Vec::new();
         for _ in 0..256 {
             addresses.push(generator.next().unwrap());
