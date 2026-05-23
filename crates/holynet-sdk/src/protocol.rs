@@ -1,20 +1,13 @@
-mod handshake;
+pub mod handshake;
 mod data;
 mod primitives;
 mod session;
 
 use bincode::{Decode, Encode};
-pub use data::{
-    DataServerBody,
-    DataClientBody,
-};
-pub use handshake::{
-    HandshakeResponderBody,
-    HandshakeResponderPayload,
-    HandshakeError
-};
+pub use data::{DataClientBody, DataServerBody};
+pub use handshake::{HandshakeError, HandshakeResponderBody, HandshakeResponderPayload};
 use primitives::VecU16;
-pub use session::{SessionId, Alg};
+pub use session::{Alg, SessionId};
 
 pub type EncryptedHandshake = VecU16<u8>;
 pub type EncryptedData = VecU16<u8>;
@@ -25,32 +18,25 @@ pub enum Packet {
     HandshakeResponder(EncryptedHandshake),
     DataClient {
         sid: SessionId,
-        encrypted: EncryptedData
+        encrypted: EncryptedData,
     },
-    DataServer(EncryptedData)
+    DataServer(EncryptedData),
 }
-
 
 impl TryFrom<&[u8]> for Packet {
     type Error = &'static str;
 
     fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
-        match bincode::decode_from_slice(
-            data,
-            bincode::config::standard() // todo: can we reuse config?
-        ) {
+        match bincode::decode_from_slice(data, bincode::config::standard()) {
             Ok((obj, _)) => Ok(obj),
-            Err(_) => Err("error decoding packet")
+            Err(_) => Err("error decoding packet"),
         }
     }
 }
 
 impl Packet {
-    /// todo: handle error
     pub fn to_bytes(&self) -> Vec<u8> {
-        bincode::encode_to_vec(
-            self,
-            bincode::config::standard()
-        ).expect("unexpected error encoding packet")
+        bincode::encode_to_vec(self, bincode::config::standard())
+            .expect("unexpected error encoding packet")
     }
 }

@@ -3,35 +3,27 @@ mod data;
 mod network;
 mod transport;
 
-
 use crate::{
-    gateway::{
-        network::Network,
-        transport::Transport
-    },
+    gateway::{network::Network, transport::Transport},
+    protocol::{Alg, EncryptedData, Packet},
     runtime::{
-        state::RuntimeState,
-        error::{RuntimeError, BuildError},
         cred::Cred,
+        error::{BuildError, RuntimeError},
+        state::RuntimeState,
         client::{
             data::{data_tun_executor, data_udp_executor, keepalive_sender},
-            transport::{transport_receiver, transport_sender},
             network::{network_receiver, network_sender},
-        }
+            transport::{transport_receiver, transport_sender},
+        },
     },
 };
-use crate::protocol::{Alg, EncryptedData, Packet};
-use std::time::Duration;
-use std::{
-    net::SocketAddr,
-    sync::Arc
-};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
-const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
-const MAX_PACKET_SIZE: usize = 65536;
+pub(super) const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
+pub(super) const MAX_PACKET_SIZE: usize = 65536;
 
 pub struct ClientBuilder {
     transport: Option<Box<dyn Transport>>,
@@ -42,7 +34,6 @@ pub struct ClientBuilder {
     handshake_timeout: Duration,
     reconnect_delay: Duration,
     cred: Option<Cred>,
-    // Buffer sizes
     out_transport_buf: usize,
     out_network_buf: usize,
     data_transport_buf: usize,
@@ -60,10 +51,10 @@ impl ClientBuilder {
             handshake_timeout: Duration::from_secs(5),
             reconnect_delay: Duration::from_secs(3),
             cred: None,
-            out_transport_buf: usize::MAX,
-            out_network_buf: usize::MAX,
-            data_transport_buf: usize::MAX,
-            data_network_buf: usize::MAX,
+            out_transport_buf: 1000,
+            out_network_buf: 1000,
+            data_transport_buf: 1000,
+            data_network_buf: 1000,
         }
     }
 
@@ -72,77 +63,38 @@ impl ClientBuilder {
         self
     }
 
-    pub fn network<N: Into<dyn Network> + 'static>(mut self, value: N) -> Self {
-        self.network = Some(Box::new(value.into()));
+    pub fn network<N: Network + 'static>(mut self, value: N) -> Self {
+        self.network = Some(Box::new(value));
         self
     }
 
-    /// Set server address
     pub fn addr(mut self, value: SocketAddr) -> Self {
         self.addr = Some(value);
         self
     }
 
-    /// Set encryption algorithm
-    /// If not set, the default algorithm will be used
-    ///
-    /// # Arguments
-    /// * `value` - Encryption algorithm
-    ///
-    /// # Default
-    /// The default algorithm is calculated based on the processor's capabilities
-    ///
+    /// Set encryption algorithm. Defaults to best algorithm for current CPU.
     pub fn alg(mut self, value: Alg) -> Self {
         self.alg = Some(value);
         self
     }
 
-    /// Set keepalive interval
-    /// If not set, keepalive is disabled
-    ///
-    /// This is useful if the client is behind nat!
-    ///
-    /// # Note
-    /// If the interval is too short, it may cause unnecessary network traffic.
-    /// If the interval is too long, it may cause the connection to be dropped by nat
-    ///
-    /// # Default
-    /// The default value is 15 seconds
-    ///
-    /// # Arguments
-    /// * `value` - Keepalive interval
-    pub fn keepalive(mut self, value: Duration) -> Self {
-        self.keepalive = Some(value);
+    /// Set keepalive interval. Useful when behind NAT. `None` disables it.
+    pub fn keepalive(mut self, value: Option<Duration>) -> Self {
+        self.keepalive = value;
         self
     }
 
-    /// Set handshake timeout
-    ///
-    /// # Arguments
-    /// * `value` - Handshake timeout duration
-    /// # Default
-    /// The default value is 5 seconds
     pub fn handshake_timeout(mut self, value: Duration) -> Self {
         self.handshake_timeout = value;
         self
     }
-    
-    /// Set reconnect delay
-    /// If not set, the default value is 3 seconds
-    /// 
-    /// # Arguments
-    /// * `value` - Reconnect delay duration
-    /// # Default
-    /// The default value is 3 seconds
+
     pub fn reconnect_delay(mut self, value: Duration) -> Self {
         self.reconnect_delay = value;
         self
     }
 
-    /// Set credentials
-    ///
-    /// # Arguments
-    /// * `cred` - Creds for authentication
     pub fn cred(mut self, cred: Cred) -> Self {
         self.cred = Some(cred);
         self
@@ -152,14 +104,17 @@ impl ClientBuilder {
         self.out_transport_buf = value;
         self
     }
+
     pub fn out_network_buf(mut self, value: usize) -> Self {
         self.out_network_buf = value;
         self
     }
+
     pub fn data_transport_buf(mut self, value: usize) -> Self {
         self.data_transport_buf = value;
         self
     }
+
     pub fn data_network_buf(mut self, value: usize) -> Self {
         self.data_network_buf = value;
         self
@@ -167,24 +122,29 @@ impl ClientBuilder {
 
     pub fn build(self) -> Result<Client, BuildError> {
         let (state, _) = watch::channel(RuntimeState::Connecting);
-
         Ok(Client {
-            transport: Arc::from(self.transport.ok_or(BuildError::MissingRequiredField("missing transport"))?),
-            network: Arc::from(self.network.ok_or(BuildError::MissingRequiredField("missing network"))?),
-            addr: self.addr.ok_or(BuildError::MissingRequiredField)?,
+            transport: Arc::from(
+                self.transport
+                    .ok_or(BuildError::MissingRequiredField("transport"))?,
+            ),
+            network: Arc::from(
+                self.network
+                    .ok_or(BuildError::MissingRequiredField("network"))?,
+            ),
+            addr: self.addr.ok_or(BuildError::MissingRequiredField("addr"))?,
             alg: self.alg.unwrap_or_default(),
             keepalive: self.keepalive,
             handshake_timeout: self.handshake_timeout,
-            cred: self.cred.ok_or(BuildError::MissingRequiredField("missing credentials"))?,
+            reconnect_delay: self.reconnect_delay,
+            cred: self.cred.ok_or(BuildError::MissingRequiredField("cred"))?,
             out_transport_buf: self.out_transport_buf,
             out_network_buf: self.out_network_buf,
             data_transport_buf: self.data_transport_buf,
             data_network_buf: self.data_network_buf,
-            state
+            state,
         })
     }
 }
-
 
 pub struct Client {
     transport: Arc<dyn Transport>,
@@ -193,87 +153,89 @@ pub struct Client {
     alg: Alg,
     keepalive: Option<Duration>,
     handshake_timeout: Duration,
+    reconnect_delay: Duration,
     cred: Cred,
-    // Buffer sizes
     out_transport_buf: usize,
     out_network_buf: usize,
     data_transport_buf: usize,
     data_network_buf: usize,
-    // Internal state
-    state: watch::Sender<RuntimeState>
+    state: watch::Sender<RuntimeState>,
 }
 
 impl Client {
-    pub async fn run(&mut self) -> Result<!, RuntimeError> {
-        let (transport_sender_tx, transport_sender_rx) = mpsc::channel::<Packet>(self.out_transport_buf);
-        let (network_sender_tx, network_sender_rx) = mpsc::channel::<Vec<u8>>(self.out_network_buf);
-        let (data_transport_tx, data_transport_rx) = mpsc::channel::<EncryptedData>(self.data_transport_buf);
-        let (data_network_tx, data_network_rx) = mpsc::channel::<Vec<u8>>(self.data_network_buf);
+    pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
+        let (transport_sender_tx, transport_sender_rx) =
+            mpsc::channel::<Packet>(self.out_transport_buf);
+        let (network_sender_tx, network_sender_rx) =
+            mpsc::channel::<Vec<u8>>(self.out_network_buf);
+        let (data_transport_tx, data_transport_rx) =
+            mpsc::channel::<EncryptedData>(self.data_transport_buf);
+        let (data_network_tx, data_network_rx) =
+            mpsc::channel::<Vec<u8>>(self.data_network_buf);
 
+        let mut set: JoinSet<()> = JoinSet::new();
 
-        let mut set = JoinSet::new();
-
-        // Handle incoming transport packets
-        set.spawn(transport_listener(self.state.clone(), self.transport.clone(), data_transport_tx));
-        // Handle outgoing transport packets
-        set.spawn(transport_sender(self.state.clone(), self.transport.clone(), transport_sender_rx));
-        // Handle incoming net packets
-        set.spawn(tun_listener(
+        set.spawn(transport_receiver(
+            self.state.clone(),
+            self.transport.clone(),
+            data_transport_tx,
+        ));
+        set.spawn(transport_sender(
+            self.state.clone(),
+            self.transport.clone(),
+            transport_sender_rx,
+        ));
+        set.spawn(network_receiver(
             self.state.clone(),
             self.network.clone(),
-            data_network_tx.clone()
+            data_network_tx,
         ));
-        // Handle outgoing net packets
-        set.spawn(tun_sender(
+        set.spawn(network_sender(
             self.state.clone(),
             self.network.clone(),
-            network_sender_rx
+            network_sender_rx,
         ));
-
-        // Executors
         set.spawn(data_tun_executor(
             self.state.clone(),
             data_network_rx,
             transport_sender_tx.clone(),
         ));
-
         set.spawn(data_udp_executor(
             self.state.clone(),
             data_transport_rx,
-            network_sender_tx
+            network_sender_tx,
         ));
 
-
-        match self.keepalive {
-            Some(duration) => {
-                debug!("starting keepalive with interval {:?}", duration);
-                set.spawn(keepalive_sender(
-                    self.state.clone(),
-                    transport_sender_tx,
-                    duration,
-                ));
-            },
-            None => debug!("keepalive is disabled")
+        if let Some(duration) = self.keepalive {
+            debug!("starting keepalive with interval {:?}", duration);
+            set.spawn(keepalive_sender(
+                self.state.clone(),
+                transport_sender_tx.clone(),
+                duration,
+            ));
+        } else {
+            debug!("keepalive disabled");
         }
 
-        // connector
         set.spawn(connector::executor(
-            self.transport,
             self.state.clone(),
+            self.transport.clone(),
             self.cred,
             self.alg,
-            self.handshake_timeout
+            self.reconnect_delay,
+            self.handshake_timeout,
         ));
 
-        while let Some(res) = set.join_all().await {
-            match res {
-                Ok(val) => debug!("task exited: {val:?}"),
-                Err(e) => debug!("task exited with error: {e}"),
+        while let Some(res) = set.join_next().await {
+            if let Err(e) = res {
+                warn!("task panicked: {}", e);
             }
         }
-        Err(match self.state {
+
+        let state = self.state.borrow().clone();
+        Err(match state {
             RuntimeState::Error(err) => err,
-            _ => RuntimeError::Unexpected("all tasks exited unexpectedly".into())
+            _ => RuntimeError::Unexpected("all tasks exited unexpectedly".into()),
         })
     }
 }

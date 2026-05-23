@@ -1,12 +1,15 @@
+use crate::crypto::{PublicKey, SecretKey};
 
+pub struct Cred {
+    pub sk: SecretKey,
+    pub psk: SecretKey,
+    /// Server public key
+    pub spk: PublicKey,
+}
 
-
-
-pub(crate) struct Cred {
-    // Secret Key
-    pub sk: [u8; 32],
-    // Pre-Shared Key 
-    pub psk: [u8; 32],
-    // Server Public Key
-    pub spk: [u8; 32],
+pub struct ServerCredential {
+    pub sk: SecretKey,
+    pub psk: SecretKey,
+    /// Client's public key
+    pub peer_pk: PublicKey,
 }

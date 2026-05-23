@@ -1,4 +1,4 @@
-use crate::error::RuntimeError;
+use crate::runtime::error::RuntimeError;
 use crate::gateway::transport::{Transport, TransportReceiver, TransportSender};
 use async_trait::async_trait;
 use std::any::Any;

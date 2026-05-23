@@ -1,29 +1,42 @@
+use std::str::FromStr;
+use std::sync::LazyLock;
+use snow::params::NoiseParams;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use super::session::SessionId;
+use super::Alg;
+
+pub static NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S: LazyLock<NoiseParams> =
+    LazyLock::new(|| NoiseParams::from_str("Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s").unwrap());
+
+pub static NOISE_IK_PSK2_25519_AESGCM_BLAKE2S: LazyLock<NoiseParams> =
+    LazyLock::new(|| NoiseParams::from_str("Noise_IKpsk2_25519_AESGCM_BLAKE2s").unwrap());
+
+pub fn params_from_alg(alg: &Alg) -> &'static NoiseParams {
+    match alg {
+        Alg::ChaCha20Poly1305 => &NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
+        Alg::Aes256 => &NOISE_IK_PSK2_25519_AESGCM_BLAKE2S,
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub enum HandshakeResponderBody {
     Complete(HandshakeResponderPayload),
-    Disconnect(HandshakeError)
+    Disconnect(HandshakeError),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HandshakeResponderPayload {
     pub sid: SessionId,
-    pub ipaddr: IpAddr
-    // pub dns: Vec<IpAddr>,
+    pub ipaddr: IpAddr,
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub enum HandshakeError {
-    /// The server administrator can limit the number of devices from which one can connect using
-    /// one cred. By default, this is 10 devices - it is set at the stage of creating a storage
+    /// Server limit on connected devices per credential
     MaxConnectedDevices(u32),
-    /// If the number of available IP addresses or session identifiers has expired, 
-    /// the server cannot successfully establish a new connection
+    /// No available IP addresses or session identifiers
     ServerOverloaded,
-    // If the structure of the request was violated
-    Unexpected(String)
+    /// Malformed request
+    Unexpected(String),
 }

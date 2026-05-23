@@ -1,4 +1,4 @@
-use crate::error::RuntimeError;
+use crate::runtime::error::RuntimeError;
 use crate::gateway::transport::{Transport, TransportReceiver, TransportSender};
 use async_trait::async_trait;
 use socket2::{Domain, Protocol, Socket, Type};
@@ -36,7 +36,7 @@ impl UdpTransport {
         socket.set_reuse_address(true)?;
         socket.set_recv_buffer_size(so_rcvbuf)?;
         socket.set_send_buffer_size(so_sndbuf)?;
-        socket.set_tos(0b101110 << 2)?;
+        socket.set_tos_v4(0b101110 << 2)?;
         socket.bind(&addr.into())?;
 
         info!(

@@ -1,5 +1,6 @@
 pub mod client;
 pub mod server;
-mod state;
-mod cred;
-mod error;
+pub mod error;
+pub mod cred;
+pub(crate) mod handshake;
+pub(crate) mod state;

@@ -4,14 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["client", "server", "udp-reuse-port"]
-client = []
-server = []
+default = ["udp-reuse-port"]
 
 # transport features
 udp = ["socket2"]
 udp-reuse-port = ["udp"]
-ws = ["socket2", "tokio-tungstenite", "futures", "dashmap"]
+ws = ["socket2", "tokio-tungstenite"]
 ws-reuse-port = ["ws"]
 
 
@@ -19,16 +17,29 @@ ws-reuse-port = ["ws"]
 snow = "0.10"
 
 # > IO
-tokio = { version = "1.47", features = ["rt", "macros", "sync", "time", "socket2"] }
+tokio = { version = "1.47", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
+tun-rs = { version = "2.0.9", features = ["async_tokio"] }
 tracing = "0.1"
 async-trait = "0.1"
+
 # transport
 socket2 = { version = "0.6", optional = true }
 tokio-tungstenite = { version = "0.28", optional = true }
-futures = { version = "0.3", optional = true }
-dashmap = { version = "7.0.0-rc2", optional = true }
+# > sessions / concurrency
+dashmap = "7.0.0-rc2"
+rand = "0.9"
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# > network
+pnet = "0.35"
+etherparse = "0.18"
+
+# > crypto
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 
 # > Other
 serde = { version = "1.0", features = ["derive"] }
-bincode = "2.0"
+bincode = { version = "2.0", features = ["serde"] }
 base64 = "0.22"
+anyhow = "1.0"
+futures = "0.3"

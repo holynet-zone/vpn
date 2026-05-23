@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use snow::StatelessTransportState;
 use crate::protocol::HandshakeResponderPayload;
-use crate::error::RuntimeError;
+use crate::runtime::error::RuntimeError;
 
 #[derive(Debug, Clone)]
 pub enum RuntimeState {
