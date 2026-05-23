@@ -47,7 +47,7 @@ pub async fn transport_listener(
                         warn!("empty packet from {}, dropping", client_addr);
                         continue;
                     }
-                    if n > 65536 {
+                    if n >= buffer.len() {
                         warn!("oversized packet from {} ({} bytes), dropping", client_addr, n);
                         continue;
                     }

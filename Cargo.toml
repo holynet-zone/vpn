@@ -11,7 +11,7 @@ edition = "2024"
 
 [workspace.dependencies]
 # io
-tokio = { version = "1.44", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
+tokio = { version = "1.47", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
 tun-rs = { version = "2.0.9", features = ["async_tokio"] }
 ctrlc = "3.4"
 anstyle = "1.0"

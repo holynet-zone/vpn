@@ -37,13 +37,13 @@ pub struct Session {
 
 impl Session {
     pub fn sock_addr(&self) -> SocketAddr {
-        if self.is_ipv4.load(Ordering::Relaxed) {
+        if self.is_ipv4.load(Ordering::Acquire) {
             let encoded = self.ipv4_data.load(Ordering::Relaxed);
             let ip = ((encoded >> 32) & 0xFFFF_FFFF) as u32;
             let port = (encoded & 0xFFFF) as u16;
             SocketAddr::new(IpAddr::from(ip.to_be_bytes()), port)
         } else {
-            let ptr = self.ipv6_data.load(Ordering::Relaxed);
+            let ptr = self.ipv6_data.load(Ordering::Acquire);
             if ptr.is_null() {
                 SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
             } else {
@@ -202,8 +202,9 @@ impl Sessions {
                     let ip_u32 = u32::from_be_bytes(addr_v4.ip().octets());
                     let encoded = ((ip_u32 as u64) << 32) | addr_v4.port() as u64;
                     session.ipv4_data.store(encoded, Ordering::Relaxed);
-                    session.is_ipv4.store(true, Ordering::Relaxed);
-                    let old_ptr = session.ipv6_data.swap(std::ptr::null_mut(), Ordering::Relaxed);
+                    // Release: ensures ipv4_data write is visible before is_ipv4 flips
+                    let old_ptr = session.ipv6_data.swap(std::ptr::null_mut(), Ordering::AcqRel);
+                    session.is_ipv4.store(true, Ordering::Release);
                     if !old_ptr.is_null() {
                         unsafe { drop(Box::from_raw(old_ptr)) }
                     }
@@ -211,11 +212,12 @@ impl Sessions {
                 SocketAddr::V6(addr_v6) => {
                     let ip_u128 = u128::from_be_bytes(addr_v6.ip().octets());
                     let new_ptr = Box::into_raw(Box::new((ip_u128, addr_v6.port())));
-                    let old_ptr = session.ipv6_data.swap(new_ptr, Ordering::Relaxed);
+                    // Release: ensures pointer is written before is_ipv4 flips
+                    let old_ptr = session.ipv6_data.swap(new_ptr, Ordering::AcqRel);
+                    session.is_ipv4.store(false, Ordering::Release);
                     if !old_ptr.is_null() {
                         unsafe { drop(Box::from_raw(old_ptr)) }
                     }
-                    session.is_ipv4.store(false, Ordering::Relaxed);
                 }
             }
         }

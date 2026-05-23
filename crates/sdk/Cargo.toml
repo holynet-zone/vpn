@@ -17,7 +17,7 @@ ws-reuse-port = ["ws"]
 snow = "0.10"
 
 # > IO
-tokio = { version = "1.47", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
+tokio = { workspace = true }
 tun-rs = { version = "2.0.9", features = ["async_tokio"] }
 tracing = "0.1"
 async-trait = "0.1"
@@ -26,7 +26,7 @@ async-trait = "0.1"
 socket2 = { version = "0.6", optional = true }
 tokio-tungstenite = { version = "0.28", optional = true }
 # > sessions / concurrency
-dashmap = "7.0.0-rc2"
+dashmap = "6"
 rand = "0.9"
 rand_core = { version = "0.6", features = ["getrandom"] }
 
