@@ -1,0 +1,165 @@
+use inquire::ui::{Attributes, Color, IndexPrefix, RenderConfig, StyleSheet, Styled};
+use qrcode::render::unicode;
+use qrcode::{EcLevel, QrCode, Version};
+
+pub fn styles() -> clap::builder::Styles {
+    clap::builder::Styles::styled()
+        .usage(
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
+        )
+        .header(
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
+        )
+        .literal(
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan))),
+        )
+        .invalid(
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
+        )
+        .error(
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
+        )
+        .valid(
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
+        )
+        .placeholder(
+            anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan))),
+        )
+}
+
+pub fn render_config() -> RenderConfig<'static> {
+    let mut render_config = RenderConfig {
+        answered_prompt_prefix: Styled::new("✔").with_fg(Color::LightGreen),
+        prompt_prefix: Styled::new(">").with_fg(Color::LightRed),
+        highlighted_option_prefix: Styled::new("➠").with_fg(Color::DarkGreen),
+        selected_checkbox: Styled::new("☑").with_fg(Color::LightGreen),
+        scroll_up_prefix: Styled::new("⮝"),
+        scroll_down_prefix: Styled::new("⮟"),
+        unselected_checkbox: Styled::new("☐"),
+        selected_option: Some(
+            StyleSheet::new()
+                .with_fg(Color::DarkGreen)
+                .with_attr(Attributes::BOLD),
+        ),
+        option_index_prefix: IndexPrefix::SpacePadded,
+        answer: StyleSheet::new()
+            .with_attr(Attributes::ITALIC)
+            .with_fg(Color::DarkGreen),
+        help_message: StyleSheet::new()
+            .with_fg(Color::DarkCyan)
+            .with_attr(Attributes::BOLD),
+        ..Default::default()
+    };
+
+    render_config.error_message.message = StyleSheet::new().with_fg(Color::DarkRed);
+    render_config.error_message = render_config
+        .error_message
+        .with_prefix(Styled::new("❌ ").with_fg(Color::DarkRed));
+
+    render_config
+}
+
+pub fn format_opaque_bytes(bytes: &[u8]) -> String {
+    if bytes.len() < 8 {
+        return String::new();
+    }
+    let max_bytes = 32;
+    let rem = if bytes.len() > max_bytes {
+        &bytes[0..max_bytes]
+    } else {
+        bytes
+    };
+    let hex_str: String = rem.iter().map(|b| format!("{:02x}", b)).collect();
+    let block_chars = [
+        '\u{2595}', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}',
+        '\u{2587}', '\u{2588}', '\u{2589}', '\u{259A}', '\u{259B}', '\u{259C}', '\u{259D}',
+        '\u{259E}', '\u{259F}',
+    ];
+    hex_str
+        .chars()
+        .filter_map(|c| match c {
+            '0'..='9' | 'a'..='f' => {
+                Some(block_chars[c.to_digit(16).unwrap() as usize].to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn generate_qrcode(data: &[u8]) -> anyhow::Result<String> {
+    let code = QrCode::with_version(data, Version::Normal(8), EcLevel::L)?;
+    let string = code
+        .render::<unicode::Dense1x2>()
+        .dark_color(unicode::Dense1x2::Dark)
+        .light_color(unicode::Dense1x2::Light)
+        .module_dimensions(1, 1)
+        .build();
+    Ok(string)
+}
+
+#[macro_export]
+macro_rules! success_ok {
+    ($message:expr) => {
+        $crate::success_ok!("OK", $message)
+    };
+    ($level:expr, $message:expr) => {
+        println!(
+            "{}{:>12}{} {}",
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
+            $level,
+            anstyle::Reset.render(),
+            $message
+        )
+    };
+    ($level:expr, $message:expr, $($arg:tt)*) => {
+        $crate::success_ok!($level, format!($message, $($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! success_err {
+    ($message:expr) => {
+        eprintln!(
+            "{}error:{} {}",
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
+            anstyle::Reset.render(),
+            $message
+        )
+    };
+    ($message:expr, $($arg:tt)*) => {
+        $crate::success_err!(format!($message, $($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! success_warn {
+    ($message:expr) => {
+        eprintln!(
+            "{}warning:{} {}",
+            anstyle::Style::new()
+                .bold()
+                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow))),
+            anstyle::Reset.render(),
+            $message
+        )
+    };
+    ($message:expr, $($arg:tt)*) => {
+        $crate::success_warn!(format!($message, $($arg)*))
+    };
+}
