@@ -18,8 +18,8 @@ snow = "0.10"
 
 # > IO
 tokio = { workspace = true }
-tun-rs = { version = "2.0.9", features = ["async_tokio"] }
-tracing = "0.1"
+tun-rs = { workspace = true }
+tracing = { workspace = true }
 async-trait = "0.1"
 
 # transport
@@ -38,8 +38,8 @@ etherparse = "0.18"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 
 # > Other
-serde = { version = "1.0", features = ["derive"] }
-bincode = { version = "2.0", features = ["serde"] }
-base64 = "0.22"
-anyhow = "1.0"
+serde = { workspace = true }
+bincode = { workspace = true }
+base64 = { workspace = true }
+anyhow = { workspace = true }
 futures = "0.3"
