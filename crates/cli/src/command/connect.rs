@@ -137,7 +137,6 @@ impl ConnectCmd {
         let client = match ClientBuilder::new()
             .transport(transport)
             .network(network)
-            .addr(server_addr)
             .alg(config.general.alg)
             .keepalive(runtime.keepalive.map(Duration::from_secs))
             .handshake_timeout(Duration::from_millis(runtime.handshake_timeout))

@@ -17,7 +17,7 @@ use crate::{
         },
     },
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tracing::{debug, warn};
@@ -28,7 +28,6 @@ pub(super) const MAX_PACKET_SIZE: usize = 65536;
 pub struct ClientBuilder {
     transport: Option<Box<dyn ClientTransport>>,
     network: Option<Box<dyn Network>>,
-    addr: Option<SocketAddr>,
     alg: Option<Alg>,
     keepalive: Option<Duration>,
     handshake_timeout: Duration,
@@ -45,7 +44,6 @@ impl ClientBuilder {
         Self {
             transport: None,
             network: None,
-            addr: None,
             alg: None,
             keepalive: Some(Duration::from_secs(15)),
             handshake_timeout: Duration::from_secs(5),
@@ -65,11 +63,6 @@ impl ClientBuilder {
 
     pub fn network<N: Network + 'static>(mut self, value: N) -> Self {
         self.network = Some(Box::new(value));
-        self
-    }
-
-    pub fn addr(mut self, value: SocketAddr) -> Self {
-        self.addr = Some(value);
         self
     }
 
@@ -131,7 +124,6 @@ impl ClientBuilder {
                 self.network
                     .ok_or(BuildError::MissingRequiredField("network"))?,
             ),
-            addr: self.addr.ok_or(BuildError::MissingRequiredField("addr"))?,
             alg: self.alg.unwrap_or_default(),
             keepalive: self.keepalive,
             handshake_timeout: self.handshake_timeout,
@@ -149,7 +141,6 @@ impl ClientBuilder {
 pub struct Client {
     transport: Arc<dyn ClientTransport>,
     network: Arc<dyn Network>,
-    addr: SocketAddr,
     alg: Alg,
     keepalive: Option<Duration>,
     handshake_timeout: Duration,

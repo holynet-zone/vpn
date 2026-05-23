@@ -69,7 +69,7 @@ impl MockTransport {
         let peer_inner = Arc::clone(&peer.inner);
         let mut inner_guard = futures::executor::block_on(self.inner.lock());
 
-        let peer_guard = futures::executor::block_on(peer_inner.lock());
+        let _peer_guard = futures::executor::block_on(peer_inner.lock());
         inner_guard.peer_addr = peer.local_addr;
 
         // Note: В реальности нужно аккуратно обменяться каналами
@@ -109,7 +109,7 @@ impl MockTransportSender {
 
 #[async_trait]
 impl TransportSender for MockTransport {
-    async fn send_to(&self, data: &[u8], addr: &SocketAddr) -> std::io::Result<usize> {
+    async fn send_to(&self, data: &[u8], _addr: &SocketAddr) -> std::io::Result<usize> {
         let inner = self.inner.lock().await;
         inner.tx.send(data.to_vec()).await.map_err(|e| {
             std::io::Error::new(std::io::ErrorKind::Other, format!("Send error: {}", e))

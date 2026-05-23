@@ -3,6 +3,7 @@ pub mod udp;
 
 #[cfg(feature = "ws")]
 pub mod ws;
+#[cfg(test)]
 mod mock;
 
 use std::io;
