@@ -11,11 +11,12 @@ use crate::{
     },
     runtime::{
         state::RuntimeState,
-        error::RuntimeError,
-        worker::{
+        error::{RuntimeError, BuildError},
+        cred::Cred,
+        client::{
             data::{data_tun_executor, data_udp_executor, keepalive_sender},
-            transport::{transport_listener, transport_sender},
-            tun::{tun_listener, tun_sender},
+            transport::{transport_receiver, transport_sender},
+            network::{network_receiver, network_sender},
         }
     },
 };
@@ -28,13 +29,6 @@ use std::{
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
-use crate::error::{BuildError, RuntimeError};
-use crate::keys::handshake::{PublicKey, SecretKey};
-use crate::runtime::client::data::{data_tun_executor, data_udp_executor, keepalive_sender};
-use crate::runtime::client::transport::{transport_listener, transport_sender};
-use crate::runtime::client::network::{tun_listener, tun_sender};
-use crate::runtime::cred::Cred;
-
 
 const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
 const MAX_PACKET_SIZE: usize = 65536;
@@ -148,11 +142,9 @@ impl ClientBuilder {
     /// Set credentials
     ///
     /// # Arguments
-    /// * `sk` - Client's secret key
-    /// * `psk` - Pre-shared key
-    /// * `spk` - Server's public key
-    pub fn cred(mut self, sk: [u8; 32], psk: [u8; 32], spk: [u8; 32]) -> Self {
-        self.cred = Some(Cred { sk, psk, spk });
+    /// * `cred` - Creds for authentication
+    pub fn cred(mut self, cred: Cred) -> Self {
+        self.cred = Some(cred);
         self
     }
 
@@ -196,7 +188,7 @@ impl ClientBuilder {
 
 pub struct Client {
     transport: Arc<dyn Transport>,
-    network: Arc<dyn Network>, // TODO : support multiple network types
+    network: Arc<dyn Network>,
     addr: SocketAddr,
     alg: Alg,
     keepalive: Option<Duration>,

@@ -7,7 +7,6 @@ pub enum BuildError {
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
     IO(String),
-    Handshake(String),
     Unexpected(String),
     StopSignal
 }
