@@ -12,30 +12,17 @@ Holynet VPN is a high-performance VPN protocol built with Rust, designed for fas
 
 ## Usage
 ```
-Usage: server [OPTIONS] <COMMAND>
+Holynet VPN command-line interface.
+
+Usage: holynet [OPTIONS] <COMMAND>
 
 Commands:
-  start    Start VPN server
-  users    Users management
-  monitor  Monitor VPN server
-  logs     Shows VPN server logs
+  connect  Connect to a VPN server
+  server   Server management
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-  -d, --debug          Turn debugging information on
-  -c, --config <FILE>  
-  -h, --help           Print help
-  -V, --version        Print version
-```
-```
-Usage: client-cli [OPTIONS] <COMMAND>
-
-Commands:
-  connect  connect to a server
-  help     Print this message or the help of the given subcommand(s)
-
-Options:
-  -d, --debug    Turn debugging information on
+  -d, --debug    Enable debug logging
   -h, --help     Print help
   -V, --version  Print version
 ```
