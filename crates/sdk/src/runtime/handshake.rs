@@ -4,7 +4,7 @@ use snow::{Builder, HandshakeState, StatelessTransportState};
 use tokio::select;
 use tracing::warn;
 
-use crate::gateway::transport::Transport;
+use crate::gateway::transport::ClientTransport;
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
     Packet,
@@ -50,7 +50,7 @@ fn complete(
 }
 
 pub async fn handshake_step(
-    transport: Arc<dyn Transport>,
+    transport: Arc<dyn ClientTransport>,
     cred: &Cred,
     alg: &Alg,
     timeout: Duration,

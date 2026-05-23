@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tracing::{debug, error};
 
-use crate::gateway::transport::Transport;
+use crate::gateway::transport::ClientTransport;
 use crate::protocol::Alg;
 use crate::runtime::cred::Cred;
 use crate::runtime::error::RuntimeError;
@@ -12,7 +12,7 @@ use crate::runtime::state::RuntimeState;
 
 pub(crate) async fn executor(
     state: watch::Sender<RuntimeState>,
-    transport: Arc<dyn Transport>,
+    transport: Arc<dyn ClientTransport>,
     cred: Cred,
     alg: Alg,
     reconnect_delay: Duration,

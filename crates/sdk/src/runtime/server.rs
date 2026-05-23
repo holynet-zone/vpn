@@ -11,7 +11,7 @@ use std::{
 };
 
 use dashmap::DashMap;
-use tokio::sync::broadcast;
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tracing::info;
 
@@ -205,7 +205,7 @@ impl Server {
 
         let sessions = Sessions::new(&self.tun_ip, self.tun_prefix);
         let tun = Arc::new(tun);
-        let (stop_tx, _) = broadcast::channel::<RuntimeError>(8);
+        let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 
         let mut set: JoinSet<()> = JoinSet::new();
 
@@ -228,28 +228,28 @@ impl Server {
             let inf_timeout = self.session_timeout.is_none();
 
             set.spawn(transport_listener(
-                stop_tx.subscribe(),
+                stop_rx.clone(),
                 transport.clone(),
                 handshake_tx,
                 data_transport_tx,
             ));
             set.spawn(transport_sender(
-                stop_tx.subscribe(),
+                stop_rx.clone(),
                 transport.clone(),
                 out_transport_rx,
             ));
             set.spawn(tun_listener(
-                stop_tx.subscribe(),
+                stop_rx.clone(),
                 tun.clone(),
                 data_tun_tx,
             ));
             set.spawn(tun_sender(
-                stop_tx.subscribe(),
+                stop_rx.clone(),
                 tun.clone(),
                 out_tun_rx,
             ));
             set.spawn(handshake_executor(
-                stop_tx.subscribe(),
+                stop_rx.clone(),
                 handshake_rx,
                 out_transport_tx.clone(),
                 self.known_clients.clone(),
@@ -257,7 +257,7 @@ impl Server {
                 self.sk.clone(),
             ));
             set.spawn(data_transport_executor(
-                stop_tx.subscribe(),
+                stop_rx.clone(),
                 data_transport_rx,
                 out_transport_tx.clone(),
                 out_tun_tx.clone(),
@@ -265,7 +265,7 @@ impl Server {
                 inf_timeout,
             ));
             set.spawn(data_tun_executor(
-                stop_tx.subscribe(),
+                stop_rx.clone(),
                 data_tun_rx,
                 out_transport_tx,
                 sessions.clone(),
@@ -275,7 +275,7 @@ impl Server {
         if let Some(timeout) = self.session_timeout {
             info!("session cleanup worker started (timeout: {:?})", timeout);
             set.spawn(session::worker::run(
-                stop_tx.clone(),
+                stop_rx.clone(),
                 sessions.clone(),
                 timeout,
                 self.session_cleanup_interval,

@@ -1,5 +1,5 @@
 use crate::runtime::error::RuntimeError;
-use crate::gateway::transport::{Transport, TransportReceiver, TransportSender};
+use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
 use async_trait::async_trait;
 use std::any::Any;
 use std::net::SocketAddr;
@@ -162,15 +162,17 @@ impl TransportReceiver for MockTransport {
     }
 }
 
-#[async_trait]
 impl Transport for MockTransport {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[async_trait]
+impl ClientTransport for MockTransport {
     async fn connect(&self) -> std::io::Result<()> {
         info!("MockTransport::connect called - ready for communication");
         Ok(())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

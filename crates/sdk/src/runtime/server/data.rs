@@ -1,16 +1,15 @@
 use std::net::SocketAddr;
 
-use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 use crate::protocol::{DataClientBody, DataServerBody, EncryptedData, Packet, SessionId};
 use crate::runtime::crypto::{noise_decrypt, noise_encrypt};
-use crate::runtime::error::RuntimeError;
 use super::session::{HolyIp, Sessions};
 
 pub(super) async fn data_transport_executor(
-    mut stop: Receiver<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     mut queue: mpsc::Receiver<(SessionId, EncryptedData, SocketAddr)>,
     transport_tx: mpsc::Sender<(Packet, SocketAddr)>,
     tun_tx: mpsc::Sender<Vec<u8>>,
@@ -19,7 +18,7 @@ pub(super) async fn data_transport_executor(
 ) {
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = stop.changed() => break,
             data = queue.recv() => match data {
                 Some((sid, encrypted, addr)) => match sessions.get_by_sid(&sid) {
                     Some(session) => match noise_decrypt::<DataClientBody>(&encrypted, &session.state) {
@@ -69,16 +68,16 @@ pub(super) async fn data_transport_executor(
 }
 
 pub(super) async fn data_tun_executor(
-    mut stop: Receiver<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     mut queue: mpsc::Receiver<(Vec<u8>, HolyIp)>,
     transport_tx: mpsc::Sender<(Packet, SocketAddr)>,
     sessions: Sessions,
 ) {
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = stop.changed() => break,
             data = queue.recv() => match data {
-                Some((packet, holy_ip)) => match sessions.get_by_ip(&holy_ip) {
+                Some((packet, holy_ip)) => match sessions.get_by_holy_ip(&holy_ip) {
                     Some(session) => {
                         match noise_encrypt(&DataServerBody::Packet(packet), &session.state) {
                             Ok(body) => {

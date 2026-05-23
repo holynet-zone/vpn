@@ -1,20 +1,18 @@
 use std::time::Duration;
-use tokio::sync::broadcast::Sender;
-use crate::runtime::error::RuntimeError;
+use tokio::sync::watch;
 use super::Sessions;
 
 pub async fn run(
-    stop_tx: Sender<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     sessions: Sessions,
     timeout: Duration,
     cleanup_interval: Duration,
 ) {
-    let mut stop = stop_tx.subscribe();
     let mut timer = tokio::time::interval(cleanup_interval);
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
-            _ = timer.tick() => sessions.cleanup_sessions(timeout).await,
+            _ = stop.changed() => break,
+            _ = timer.tick() => sessions.cleanup_sessions(timeout),
         }
     }
 }

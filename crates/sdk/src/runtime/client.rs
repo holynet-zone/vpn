@@ -4,7 +4,7 @@ mod network;
 mod transport;
 
 use crate::{
-    gateway::{network::Network, transport::Transport},
+    gateway::{network::Network, transport::ClientTransport},
     protocol::{Alg, EncryptedData, Packet},
     runtime::{
         cred::Cred,
@@ -26,7 +26,7 @@ pub(super) const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
 pub(super) const MAX_PACKET_SIZE: usize = 65536;
 
 pub struct ClientBuilder {
-    transport: Option<Box<dyn Transport>>,
+    transport: Option<Box<dyn ClientTransport>>,
     network: Option<Box<dyn Network>>,
     addr: Option<SocketAddr>,
     alg: Option<Alg>,
@@ -58,7 +58,7 @@ impl ClientBuilder {
         }
     }
 
-    pub fn transport<T: Transport + 'static>(mut self, value: T) -> Self {
+    pub fn transport<T: ClientTransport + 'static>(mut self, value: T) -> Self {
         self.transport = Some(Box::new(value));
         self
     }
@@ -147,7 +147,7 @@ impl ClientBuilder {
 }
 
 pub struct Client {
-    transport: Arc<dyn Transport>,
+    transport: Arc<dyn ClientTransport>,
     network: Arc<dyn Network>,
     addr: SocketAddr,
     alg: Alg,

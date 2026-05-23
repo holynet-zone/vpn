@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use snow::Builder;
-use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::crypto::{PublicKey, SecretKey};
@@ -16,7 +16,6 @@ use crate::protocol::handshake::{
     params_from_alg, NOISE_IK_PSK2_25519_AESGCM_BLAKE2S, NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
 };
 use crate::runtime::cred::ServerCredential;
-use crate::runtime::error::RuntimeError;
 use super::session::Sessions;
 
 fn decode_handshake_params(
@@ -65,7 +64,7 @@ async fn complete(
     let _len = responder.read_message(handshake, &mut buffer)?;
 
     let (body, keys) = match sessions.next_session_id() {
-        Some(sid) => match sessions.next_holy_ip().await {
+        Some(sid) => match sessions.next_holy_ip() {
             Some(ipaddr) => {
                 info!("[{}] session created with sid: {}", addr, sid);
                 (
@@ -75,7 +74,7 @@ async fn complete(
             }
             None => {
                 warn!("[{}] failed to create session: no holy ip available", addr);
-                sessions.release_session_id(&sid).await;
+                sessions.release_session_id(&sid);
                 (
                     HandshakeResponderBody::Disconnect(HandshakeError::ServerOverloaded),
                     None,
@@ -104,7 +103,7 @@ async fn complete(
 }
 
 pub(super) async fn handshake_executor(
-    mut stop: Receiver<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     mut queue: mpsc::Receiver<(EncryptedHandshake, SocketAddr)>,
     transport_tx: mpsc::Sender<(Packet, SocketAddr)>,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
@@ -113,7 +112,7 @@ pub(super) async fn handshake_executor(
 ) {
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = stop.changed() => break,
             data = queue.recv() => match data {
                 Some((handshake, addr)) => match decode_handshake_params(&handshake, &sk) {
                     Ok((peer_pk, alg)) => match known_clients.get(&peer_pk) {

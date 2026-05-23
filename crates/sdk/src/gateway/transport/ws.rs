@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::{Bytes, Message};
 use tokio_tungstenite::{accept_async, connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info};
 
-use crate::gateway::transport::{Transport, TransportReceiver, TransportSender};
+use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
 use crate::runtime::error::RuntimeError;
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,10 @@ use crate::runtime::error::RuntimeError;
 pub struct WsTransport {
     listener: TcpListener,
     active_connections: Arc<DashMap<SocketAddr, SplitSink<WebSocketStream<TcpStream>, Message>>>,
-    message_queue: Arc<Mutex<mpsc::UnboundedReceiver<(Bytes, SocketAddr)>>>,
+    // Mutex without Arc: WsTransport is already wrapped in Arc by the caller.
+    // recv_from needs &self so we use Mutex for interior mutability.
+    // tokio::sync::Mutex is required because recv() is async (lock held across await).
+    message_queue: Mutex<mpsc::UnboundedReceiver<(Bytes, SocketAddr)>>,
     message_sender: mpsc::UnboundedSender<(Bytes, SocketAddr)>,
 }
 
@@ -60,7 +63,7 @@ impl WsTransport {
             listeners.push(Self {
                 listener,
                 active_connections: active_connections.clone(),
-                message_queue: Arc::new(Mutex::new(receiver)),
+                message_queue: Mutex::new(receiver),
                 message_sender: sender,
             });
         }
@@ -70,7 +73,7 @@ impl WsTransport {
         listeners.push(Self {
             listener,
             active_connections,
-            message_queue: Arc::new(Mutex::new(receiver)),
+            message_queue: Mutex::new(receiver),
             message_sender: sender,
         });
 
@@ -158,17 +161,9 @@ impl TransportSender for WsTransport {
     }
 }
 
-#[async_trait]
 impl Transport for WsTransport {
     fn as_any(&self) -> &dyn Any {
         self
-    }
-
-    async fn connect(&self) -> io::Result<()> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "server transport does not connect",
-        ))
     }
 }
 
@@ -255,12 +250,14 @@ impl TransportSender for WsClientTransport {
     }
 }
 
-#[async_trait]
 impl Transport for WsClientTransport {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
 
+#[async_trait]
+impl ClientTransport for WsClientTransport {
     async fn connect(&self) -> io::Result<()> {
         info!("connecting to ws://{}", self.addr);
         let request = format!("ws://{}", self.addr)

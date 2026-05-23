@@ -2,15 +2,16 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use etherparse::SlicedPacket;
-use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tracing::error;
 use tun_rs::AsyncDevice;
 
-use crate::runtime::error::RuntimeError;
 use super::session::HolyIp;
 
-pub fn parse_source(packet: &[u8]) -> anyhow::Result<IpAddr> {
+/// Returns the **destination** IP of the given IP packet.
+/// Used to route TUN packets to the correct VPN session (the destination is the client's HolyIp).
+pub fn parse_destination(packet: &[u8]) -> anyhow::Result<IpAddr> {
     match SlicedPacket::from_ip(packet) {
         Ok(sliced) => match sliced.net {
             Some(net) => match net {
@@ -31,13 +32,13 @@ pub fn parse_source(packet: &[u8]) -> anyhow::Result<IpAddr> {
 }
 
 pub async fn tun_sender(
-    mut stop: Receiver<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     tun: Arc<AsyncDevice>,
     mut out_tun_rx: mpsc::Receiver<Vec<u8>>,
 ) {
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = stop.changed() => break,
             result = out_tun_rx.recv() => match result {
                 Some(data) => {
                     if let Err(e) = tun.send(&data).await {
@@ -51,16 +52,16 @@ pub async fn tun_sender(
 }
 
 pub async fn tun_listener(
-    mut stop: Receiver<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     tun: Arc<AsyncDevice>,
     data_tun_tx: mpsc::Sender<(Vec<u8>, HolyIp)>,
 ) {
     let mut buffer = [0u8; 65536];
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = stop.changed() => break,
             result = tun.recv(&mut buffer) => match result {
-                Ok(len) => match parse_source(&buffer[..len]) {
+                Ok(len) => match parse_destination(&buffer[..len]) {
                     Ok(ip) => {
                         if let Err(e) = data_tun_tx.send((buffer[..len].to_vec(), ip)).await {
                             error!("failed to forward tun packet: {}", e);

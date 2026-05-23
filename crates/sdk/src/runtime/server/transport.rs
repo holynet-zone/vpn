@@ -1,22 +1,21 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tracing::{debug, error, warn};
 
 use crate::gateway::transport::{TransportReceiver, TransportSender};
 use crate::protocol::{EncryptedData, EncryptedHandshake, Packet, SessionId};
-use crate::runtime::error::RuntimeError;
 
 pub async fn transport_sender(
-    mut stop: Receiver<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     transport: Arc<dyn TransportSender>,
     mut out_transport_rx: mpsc::Receiver<(Packet, SocketAddr)>,
 ) {
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = stop.changed() => break,
             result = out_transport_rx.recv() => match result {
                 Some((packet, client_addr)) => {
                     match transport.send_to(&packet.to_bytes(), &client_addr).await {
@@ -31,7 +30,7 @@ pub async fn transport_sender(
 }
 
 pub async fn transport_listener(
-    mut stop: Receiver<RuntimeError>,
+    mut stop: watch::Receiver<bool>,
     transport: Arc<dyn TransportReceiver>,
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
     data_tx: mpsc::Sender<(SessionId, EncryptedData, SocketAddr)>,
@@ -39,7 +38,7 @@ pub async fn transport_listener(
     let mut buffer = [0u8; 65536];
     loop {
         tokio::select! {
-            _ = stop.recv() => break,
+            _ = stop.changed() => break,
             result = transport.recv_from(&mut buffer) => match result {
                 Ok((n, client_addr)) => {
                     debug!("received {} bytes from {}", n, client_addr);
