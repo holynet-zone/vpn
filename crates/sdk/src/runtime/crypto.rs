@@ -87,6 +87,45 @@ pub(crate) fn noise_encrypt<T: serde::Serialize>(
     })
 }
 
+/// Build a matched (initiator, responder) `StatelessTransportState` pair for
+/// tests. Uses Noise IKpsk2 with ChaCha20Poly1305 and freshly generated keys.
+#[cfg(test)]
+pub(crate) fn make_noise_pair_for_test(
+) -> (StatelessTransportState, StatelessTransportState) {
+    use snow::Builder;
+    use crate::crypto::{PublicKey, SecretKey};
+    use crate::protocol::handshake::NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S;
+
+    let server_sk = SecretKey::generate_x25519();
+    let server_pk = PublicKey::from_secret(&server_sk);
+    let client_sk = SecretKey::generate_x25519();
+    let client_pk = PublicKey::from_secret(&client_sk);
+    let psk = [0u8; 32];
+    let params = NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone();
+
+    let mut init = Builder::new(params.clone())
+        .local_private_key(client_sk.as_slice()).unwrap()
+        .remote_public_key(server_pk.as_slice()).unwrap()
+        .psk(2, &psk).unwrap()
+        .build_initiator().unwrap();
+    let mut resp = Builder::new(params)
+        .local_private_key(server_sk.as_slice()).unwrap()
+        .remote_public_key(client_pk.as_slice()).unwrap()
+        .psk(2, &psk).unwrap()
+        .build_responder().unwrap();
+
+    let mut buf = [0u8; 65536];
+    let n = init.write_message(&[], &mut buf).unwrap();
+    resp.read_message(&buf[..n], &mut [0u8; 65536]).unwrap();
+    let n = resp.write_message(&[], &mut buf).unwrap();
+    init.read_message(&buf[..n], &mut [0u8; 65536]).unwrap();
+
+    (
+        init.into_stateless_transport_mode().unwrap(),
+        resp.into_stateless_transport_mode().unwrap(),
+    )
+}
+
 /// Decrypt `encrypted` via Noise `StatelessTransportState` then bincode/serde.
 ///
 /// Allocations: only what `T`'s `Deserialize` impl requires (e.g., `Vec<u8>`
@@ -103,4 +142,96 @@ pub(crate) fn noise_decrypt<T: serde::de::DeserializeOwned>(
             .map(|(obj, _)| obj)
             .map_err(|e| anyhow::anyhow!("bincode decode: {e}"))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{DataClientBody, DataServerBody};
+
+    #[test]
+    fn test_roundtrip_data_packet() {
+        let (tx, rx) = make_noise_pair_for_test();
+        let body = DataClientBody::Packet(vec![1, 2, 3, 4, 5]);
+        let enc = noise_encrypt(&body, &tx).unwrap();
+        let dec: DataClientBody = noise_decrypt(&enc, &rx).unwrap();
+        match dec {
+            DataClientBody::Packet(data) => assert_eq!(data, [1, 2, 3, 4, 5]),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_keepalive() {
+        let (tx, rx) = make_noise_pair_for_test();
+        let body = DataServerBody::KeepAlive(0xDEAD_CAFE_1234_5678u128);
+        let enc = noise_encrypt(&body, &tx).unwrap();
+        let dec: DataServerBody = noise_decrypt(&enc, &rx).unwrap();
+        match dec {
+            DataServerBody::KeepAlive(ts) => assert_eq!(ts, 0xDEAD_CAFE_1234_5678u128),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_empty_payload() {
+        let (tx, rx) = make_noise_pair_for_test();
+        let body = DataClientBody::Packet(vec![]);
+        let enc = noise_encrypt(&body, &tx).unwrap();
+        let dec: DataClientBody = noise_decrypt(&enc, &rx).unwrap();
+        match dec {
+            DataClientBody::Packet(data) => assert!(data.is_empty()),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn test_decrypt_with_wrong_key_fails() {
+        let (tx, _) = make_noise_pair_for_test();
+        let (_, rx_wrong) = make_noise_pair_for_test(); // independent key pair
+        let body = DataClientBody::KeepAlive(42);
+        let enc = noise_encrypt(&body, &tx).unwrap();
+        assert!(noise_decrypt::<DataClientBody>(&enc, &rx_wrong).is_err());
+    }
+
+    /// Encrypt multiple packets without dropping previous results — the pool
+    /// must allocate separate buffers and each must decrypt independently.
+    #[test]
+    fn test_pool_grows_under_concurrent_in_flight() {
+        let (tx, rx) = make_noise_pair_for_test();
+
+        let enc1 = noise_encrypt(&DataClientBody::Packet(vec![1; 64]), &tx).unwrap();
+        let enc2 = noise_encrypt(&DataClientBody::Packet(vec![2; 64]), &tx).unwrap();
+        let enc3 = noise_encrypt(&DataClientBody::Packet(vec![3; 64]), &tx).unwrap();
+
+        // All three EncryptedData objects are live simultaneously.
+        // Decrypting each must return its own payload unchanged.
+        let dec = |enc: &EncryptedData, expected: u8| {
+            let body: DataClientBody = noise_decrypt(enc, &rx).unwrap();
+            match body {
+                DataClientBody::Packet(d) => assert_eq!(d, vec![expected; 64]),
+                _ => panic!("unexpected variant"),
+            }
+        };
+        dec(&enc1, 1);
+        dec(&enc2, 2);
+        dec(&enc3, 3);
+    }
+
+    /// After enc is dropped, the pool slot's refcount returns to 1 and the
+    /// buffer is reused for the next call — data must not bleed across packets.
+    #[test]
+    fn test_pool_reuse_after_drop() {
+        let (tx, rx) = make_noise_pair_for_test();
+        for byte in 0u8..=16 {
+            let body = DataClientBody::Packet(vec![byte; 128]);
+            let enc = noise_encrypt(&body, &tx).unwrap();
+            // enc dropped at end of this iteration → pool slot refcount → 1
+            let dec: DataClientBody = noise_decrypt(&enc, &rx).unwrap();
+            match dec {
+                DataClientBody::Packet(data) => assert_eq!(data, vec![byte; 128]),
+                _ => panic!("unexpected variant"),
+            }
+        }
+    }
 }

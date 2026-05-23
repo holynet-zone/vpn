@@ -202,6 +202,11 @@ impl Sessions {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.map.len()
+    }
+
     pub fn update_sock_addr(&self, sid: SessionId, addr: SocketAddr) {
         if let Some(entry) = self.map.get(&sid) {
             let session = entry.value();
@@ -229,5 +234,203 @@ impl Sessions {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use snow::StatelessTransportState;
+
+    use super::*;
+    use crate::protocol::Alg;
+    use crate::runtime::crypto::make_noise_pair_for_test;
+    use crate::time::sec_since_start;
+
+    fn make_sessions() -> Sessions {
+        Sessions::new(&"10.0.0.0".parse().unwrap(), 8)
+    }
+
+    fn add_one(sessions: &Sessions, addr: SocketAddr, state: StatelessTransportState) -> (SessionId, HolyIp) {
+        let sid = sessions.next_session_id().unwrap();
+        let ip = sessions.next_holy_ip().unwrap();
+        sessions.add(sid, ip, addr, Alg::ChaCha20Poly1305, state);
+        (sid, ip)
+    }
+
+    // ── add / lookup ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_add_lookup_by_sid() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let (sid, ip) = add_one(&sessions, "127.0.0.1:1234".parse().unwrap(), state);
+
+        let session = sessions.get_by_sid(&sid).unwrap();
+        assert_eq!(session.id, sid);
+        assert_eq!(session.holy_ip, ip);
+    }
+
+    #[test]
+    fn test_add_lookup_by_holy_ip() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let (sid, ip) = add_one(&sessions, "127.0.0.1:1234".parse().unwrap(), state);
+
+        let session = sessions.get_by_holy_ip(&ip).unwrap();
+        assert_eq!(session.id, sid);
+    }
+
+    #[test]
+    fn test_unknown_sid_returns_none() {
+        let sessions = make_sessions();
+        assert!(sessions.get_by_sid(&0xDEAD_BEEF).is_none());
+    }
+
+    // ── release ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_release_by_sid_removes_session_and_ip() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let (sid, ip) = add_one(&sessions, "127.0.0.1:1111".parse().unwrap(), state);
+
+        assert!(sessions.is_sid_allocated(sid));
+        assert!(sessions.is_holy_ip_allocated(&ip));
+
+        sessions.release_by_sid(sid);
+
+        assert!(!sessions.is_sid_allocated(sid));
+        assert!(!sessions.is_holy_ip_allocated(&ip));
+    }
+
+    // ── cleanup_sessions ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cleanup_removes_expired_keeps_fresh() {
+        let sessions = make_sessions();
+
+        let (s1, _) = make_noise_pair_for_test();
+        let (s2, _) = make_noise_pair_for_test();
+        let (sid1, ip1) = add_one(&sessions, "127.0.0.1:2001".parse().unwrap(), s1);
+        let (sid2, ip2) = add_one(&sessions, "127.0.0.1:2002".parse().unwrap(), s2);
+
+        // Mark sid1 as ancient (last_seen = process epoch).
+        sessions.get_by_sid(&sid1).unwrap().last_seen.store(0, Ordering::Relaxed);
+        // Mark sid2 as unreachably fresh — cannot expire regardless of `now`.
+        sessions.get_by_sid(&sid2).unwrap().last_seen.store(u64::MAX, Ordering::Relaxed);
+
+        // Wait until sec_since_start() > 0 so the expiry condition fires for sid1.
+        while sec_since_start() == 0 {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // TTL = 0 → expired when `now - last_seen > 0`.
+        // sid1: now - 0 = now > 0 ✓ (removed)
+        // sid2: now.saturating_sub(u64::MAX) = 0 > 0 ✗ (kept)
+        sessions.cleanup_sessions(Duration::ZERO);
+
+        assert!(!sessions.is_sid_allocated(sid1), "expired session must be removed");
+        assert!(!sessions.is_holy_ip_allocated(&ip1), "expired ip must be released");
+        assert!(sessions.is_sid_allocated(sid2), "fresh session must be kept");
+        assert!(sessions.is_holy_ip_allocated(&ip2), "fresh ip must be kept");
+    }
+
+    #[test]
+    fn test_cleanup_with_large_ttl_keeps_all() {
+        let sessions = make_sessions();
+        let (s1, _) = make_noise_pair_for_test();
+        let (sid, ip) = add_one(&sessions, "127.0.0.1:3000".parse().unwrap(), s1);
+
+        sessions.cleanup_sessions(Duration::from_secs(86400));
+
+        assert!(sessions.is_sid_allocated(sid));
+        assert!(sessions.is_holy_ip_allocated(&ip));
+    }
+
+    // ── update_sock_addr ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_initial_v4_sock_addr() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let addr: SocketAddr = "192.168.1.100:8080".parse().unwrap();
+        let (sid, _) = add_one(&sessions, addr, state);
+        assert_eq!(sessions.get_by_sid(&sid).unwrap().sock_addr(), addr);
+    }
+
+    #[test]
+    fn test_initial_v6_sock_addr() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let addr: SocketAddr = "[2001:db8::1]:443".parse().unwrap();
+        let (sid, _) = add_one(&sessions, addr, state);
+        assert_eq!(sessions.get_by_sid(&sid).unwrap().sock_addr(), addr);
+    }
+
+    #[test]
+    fn test_update_sock_addr_v4_to_v6() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let v4: SocketAddr = "10.0.0.1:1234".parse().unwrap();
+        let v6: SocketAddr = "[::1]:9090".parse().unwrap();
+        let (sid, _) = add_one(&sessions, v4, state);
+
+        sessions.update_sock_addr(sid, v6);
+        assert_eq!(sessions.get_by_sid(&sid).unwrap().sock_addr(), v6);
+    }
+
+    #[test]
+    fn test_update_sock_addr_v6_to_v4() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let v6: SocketAddr = "[::1]:9090".parse().unwrap();
+        let v4: SocketAddr = "172.16.0.1:5555".parse().unwrap();
+        let (sid, _) = add_one(&sessions, v6, state);
+
+        sessions.update_sock_addr(sid, v4);
+        assert_eq!(sessions.get_by_sid(&sid).unwrap().sock_addr(), v4);
+    }
+
+    #[test]
+    fn test_update_sock_addr_v4_to_v4() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let v4a: SocketAddr = "192.168.0.1:100".parse().unwrap();
+        let v4b: SocketAddr = "10.10.10.10:200".parse().unwrap();
+        let (sid, _) = add_one(&sessions, v4a, state);
+
+        sessions.update_sock_addr(sid, v4b);
+        assert_eq!(sessions.get_by_sid(&sid).unwrap().sock_addr(), v4b);
+    }
+
+    #[test]
+    fn test_update_sock_addr_v6_to_v6() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let v6a: SocketAddr = "[::1]:1".parse().unwrap();
+        let v6b: SocketAddr = "[2001:db8::ff]:2".parse().unwrap();
+        let (sid, _) = add_one(&sessions, v6a, state);
+
+        sessions.update_sock_addr(sid, v6b);
+        assert_eq!(sessions.get_by_sid(&sid).unwrap().sock_addr(), v6b);
+    }
+
+    // ── touch ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_touch_updates_last_seen() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let (sid, _) = add_one(&sessions, "127.0.0.1:9999".parse().unwrap(), state);
+
+        // Force last_seen to 0 then touch — must become non-zero (current time).
+        sessions.get_by_sid(&sid).unwrap().last_seen.store(0, Ordering::Relaxed);
+        sessions.touch(sid);
+        let seen = sessions.get_by_sid(&sid).unwrap().last_seen.load(Ordering::Relaxed);
+        assert!(seen >= sec_since_start(), "touch must set last_seen to now");
     }
 }

@@ -106,3 +106,74 @@ impl Packet {
             .expect("unexpected error encoding packet")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    fn make_encrypted(data: Vec<u8>) -> EncryptedData {
+        EncryptedData(Bytes::from(data))
+    }
+
+    #[test]
+    fn test_encrypted_data_bincode_roundtrip() {
+        let original = make_encrypted(vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        let encoded = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
+        let (decoded, _): (EncryptedData, _) =
+            bincode::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        assert_eq!(&*decoded, &*original);
+    }
+
+    #[test]
+    fn test_encrypted_data_empty_roundtrip() {
+        let original = make_encrypted(vec![]);
+        let encoded = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
+        let (decoded, _): (EncryptedData, _) =
+            bincode::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_packet_data_client_roundtrip() {
+        let encrypted = make_encrypted(vec![1, 2, 3]);
+        let packet = Packet::DataClient { sid: 0xDEAD_BEEF, encrypted };
+        let bytes = packet.to_bytes();
+        let decoded = Packet::try_from(bytes.as_slice()).unwrap();
+        match decoded {
+            Packet::DataClient { sid, encrypted } => {
+                assert_eq!(sid, 0xDEAD_BEEF);
+                assert_eq!(&*encrypted, &[1u8, 2, 3]);
+            }
+            _ => panic!("wrong packet variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_data_server_roundtrip() {
+        let encrypted = make_encrypted(vec![0xFF, 0x00, 0xAB]);
+        let packet = Packet::DataServer(encrypted);
+        let bytes = packet.to_bytes();
+        let decoded = Packet::try_from(bytes.as_slice()).unwrap();
+        match decoded {
+            Packet::DataServer(encrypted) => {
+                assert_eq!(&*encrypted, &[0xFF, 0x00, 0xAB]);
+            }
+            _ => panic!("wrong packet variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_corrupt_bytes_returns_err() {
+        assert!(Packet::try_from(&[0xFF, 0xFF, 0xFF, 0xFF][..]).is_err());
+    }
+
+    #[test]
+    fn test_encrypted_data_clone_shares_data() {
+        let original = make_encrypted(vec![1, 2, 3]);
+        let cloned = original.clone();
+        assert_eq!(&*original, &*cloned);
+        // Bytes clone is zero-copy — both point to the same allocation
+        assert!(std::ptr::eq(original.0.as_ptr(), cloned.0.as_ptr()));
+    }
+}
