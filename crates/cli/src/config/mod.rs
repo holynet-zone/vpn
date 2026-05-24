@@ -1,7 +1,7 @@
 pub mod connection;
 
-use holynet_sdk::crypto::SecretKey;
 use crate::network::find_available_ifname;
+use holynet_sdk::crypto::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};

@@ -1,8 +1,8 @@
+use crate::gateway::network::{Network, NetworkReceiver, NetworkSender};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tun_rs::AsyncDevice;
-use crate::gateway::network::{Network, NetworkReceiver, NetworkSender};
 
 #[derive(Clone)]
 pub struct TunNetwork {
@@ -37,7 +37,10 @@ impl TunNetwork {
             }
         }
 
-        Ok(Self { device: Arc::new(device), mtu })
+        Ok(Self {
+            device: Arc::new(device),
+            mtu,
+        })
     }
 
     pub fn configure_ip(&self, ip: IpAddr, prefix: u8) -> io::Result<()> {
