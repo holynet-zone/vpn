@@ -11,7 +11,7 @@ pub enum Alg {
 impl Default for Alg {
     fn default() -> Self {
         #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("aes") {
+        if is_x86_feature_detected!("aes") {
             return Alg::Aes256;
         }
         Alg::ChaCha20Poly1305

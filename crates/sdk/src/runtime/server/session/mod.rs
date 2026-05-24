@@ -1,8 +1,8 @@
 mod generator;
 pub mod worker;
 
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
+use std::collections::BTreeMap;
+use std::sync::{Mutex as StdMutex, atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering}};
 use std::time::Duration;
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -56,21 +56,29 @@ impl Session {
 #[derive(Clone)]
 pub struct Sessions {
     sid_gen: Arc<SessionIdGenerator>,
-    holy_ip_gen: Arc<Mutex<IpAddressGenerator>>,
+    holy_ip_gen: Arc<IpAddressGenerator>,
     map: Arc<DashMap<SessionId, Arc<Session>>>,
     holy_ip_map: Arc<DashMap<HolyIp, SessionId>>,
+    /// TTL-ordered queue for O(k) cleanup.
+    ///
+    /// Key = seconds-since-start when the session was inserted or last re-queued.
+    /// A session at key T becomes a cleanup candidate when `now >= T + ttl_secs`.
+    /// Updated only on `add()` and inside `cleanup_sessions()` (not on `touch()`),
+    /// so the hot data path sees zero overhead.
+    expiry_queue: Arc<StdMutex<BTreeMap<u64, Vec<SessionId>>>>,
 }
 
 impl Sessions {
     pub fn new(network: &IpAddr, prefix: u8) -> Self {
         Sessions {
             sid_gen: Arc::new(SessionIdGenerator::new()),
-            holy_ip_gen: Arc::new(Mutex::new(IpAddressGenerator::new(
+            holy_ip_gen: Arc::new(IpAddressGenerator::new(
                 increment_ip(*network),
                 prefix,
-            ))),
+            )),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new()),
+            expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
     }
 
@@ -79,7 +87,7 @@ impl Sessions {
     }
 
     pub fn next_holy_ip(&self) -> Option<HolyIp> {
-        self.holy_ip_gen.lock().unwrap().next()
+        self.holy_ip_gen.next()
     }
 
     /// Only call if the SessionId was allocated via `next_session_id` but never passed to `add`.
@@ -89,7 +97,7 @@ impl Sessions {
 
     /// Only call if the HolyIp was allocated via `next_holy_ip` but never passed to `add`.
     pub fn release_holy_ip(&self, holy_ip: &HolyIp) {
-        self.holy_ip_gen.lock().unwrap().release(holy_ip);
+        self.holy_ip_gen.release(holy_ip);
     }
 
     pub fn add(
@@ -136,46 +144,70 @@ impl Sessions {
 
         self.map.insert(sid, session);
         self.holy_ip_map.insert(ip, sid);
+        self.expiry_queue
+            .lock()
+            .unwrap()
+            .entry(sec_since_start())
+            .or_default()
+            .push(sid);
     }
 
+    /// Remove expired sessions in O(k + m) time, where k = candidate sessions
+    /// old enough to check, m = still-alive sessions that need re-queuing.
+    ///
+    /// Sessions inserted less than `ttl` ago are never examined, so steady-state
+    /// servers with mostly active clients do near-zero work per cleanup tick.
     pub fn cleanup_sessions(&self, ttl: Duration) {
         let now = sec_since_start();
         let ttl_secs = ttl.as_secs();
 
-        let expired_sids: Vec<SessionId> = self
-            .map
-            .iter()
-            .filter(|entry| {
-                now.saturating_sub(entry.value().last_seen.load(Ordering::Relaxed)) > ttl_secs
-            })
-            .map(|entry| *entry.key())
-            .collect();
+        // Pull all queue entries old enough to be candidates (inserted <= ttl ago).
+        let cutoff = now.saturating_sub(ttl_secs);
+        let candidates: Vec<(u64, Vec<SessionId>)> = {
+            let mut queue = self.expiry_queue.lock().unwrap();
+            let keys: Vec<u64> = queue.range(..=cutoff).map(|(&k, _)| k).collect();
+            keys.into_iter()
+                .filter_map(|k| queue.remove(&k).map(|v| (k, v)))
+                .collect()
+        }; // lock released here
 
-        let mut holy_ips_to_release = Vec::with_capacity(expired_sids.len());
-        let mut session_ids_to_release = Vec::with_capacity(expired_sids.len());
+        let mut removed = 0usize;
+        let mut requeue: Vec<(u64, SessionId)> = Vec::new();
 
-        for sid in expired_sids {
-            if let Some((_, session)) = self.map.remove(&sid) {
-                if let Some((holy_ip, _)) = self.holy_ip_map.remove(&session.holy_ip) {
-                    holy_ips_to_release.push(holy_ip);
+        for (_insert_time, sids) in candidates {
+            for sid in sids {
+                let Some(session) = self.map.get(&sid) else {
+                    // Already removed by explicit disconnect or prior cleanup.
+                    continue;
+                };
+                let last_seen = session.last_seen.load(Ordering::Relaxed);
+                if now.saturating_sub(last_seen) > ttl_secs {
+                    // Truly expired.
+                    drop(session);
+                    if let Some((_, session)) = self.map.remove(&sid) {
+                        if let Some((holy_ip, _)) = self.holy_ip_map.remove(&session.holy_ip) {
+                            self.holy_ip_gen.release(&holy_ip);
+                        }
+                        self.sid_gen.release(&sid);
+                        removed += 1;
+                    }
+                } else {
+                    // Still alive — re-queue at its current last_seen so we
+                    // check again after another TTL duration of inactivity.
+                    drop(session);
+                    requeue.push((last_seen, sid));
                 }
-                session_ids_to_release.push(sid);
             }
         }
 
-        for sid in session_ids_to_release.iter() {
-            self.sid_gen.release(sid);
+        if !requeue.is_empty() {
+            let mut queue = self.expiry_queue.lock().unwrap();
+            for (ts, sid) in requeue {
+                queue.entry(ts).or_default().push(sid);
+            }
         }
 
-        let mut holy_ip_gen = self.holy_ip_gen.lock().unwrap();
-        for holy_ip in holy_ips_to_release.iter() {
-            holy_ip_gen.release(holy_ip);
-        }
-
-        debug!(
-            "[cleanup_sessions] cleaned up {} sessions",
-            session_ids_to_release.len()
-        );
+        debug!("[cleanup_sessions] removed {} sessions", removed);
     }
 
     pub fn release_by_sid(&self, sid: SessionId) {
@@ -184,7 +216,7 @@ impl Sessions {
             session.holy_ip
         });
         if let Some(holy_ip) = holy_ip {
-            self.holy_ip_gen.lock().unwrap().release(&holy_ip);
+            self.holy_ip_gen.release(&holy_ip);
         }
         self.sid_gen.release(&sid);
     }

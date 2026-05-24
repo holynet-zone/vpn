@@ -114,11 +114,7 @@ impl StartCmd {
             .tun_ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)
-            .out_transport_buf(runtime.out_udp_buf)
-            .out_tun_buf(runtime.out_tun_buf)
-            .handshake_buf(runtime.handshake_buf)
-            .data_transport_buf(runtime.data_udp_buf)
-            .data_tun_buf(runtime.data_tun_buf);
+            .handshake_buf(runtime.handshake_buf);
 
         let server = match builder.build() {
             Ok(s) => s,

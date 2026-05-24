@@ -1,26 +1,28 @@
 mod connector;
-mod data;
-mod network;
-mod transport;
+mod keepalive;
+mod recv;
+mod tun;
+
+use std::{sync::Arc, time::Duration};
+
+use tokio::sync::watch;
+use tokio::task::JoinSet;
+use tracing::{debug, warn};
 
 use crate::{
     gateway::{network::Network, transport::ClientTransport},
-    protocol::{Alg, EncryptedData, Packet},
+    protocol::Alg,
     runtime::{
         client::{
-            data::{data_tun_executor, data_udp_executor, keepalive_sender},
-            network::{network_receiver, network_sender},
-            transport::{transport_receiver, transport_sender},
+            keepalive::keepalive_sender,
+            recv::recv_decrypt_forward,
+            tun::tun_encrypt_forward,
         },
         cred::Cred,
         error::{BuildError, RuntimeError},
         state::RuntimeState,
     },
 };
-use std::{sync::Arc, time::Duration};
-use tokio::sync::{mpsc, watch};
-use tokio::task::JoinSet;
-use tracing::{debug, warn};
 
 pub(super) const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
 pub(super) const MAX_PACKET_SIZE: usize = 65536;
@@ -33,10 +35,6 @@ pub struct ClientBuilder {
     handshake_timeout: Duration,
     reconnect_delay: Duration,
     cred: Option<Cred>,
-    out_transport_buf: usize,
-    out_network_buf: usize,
-    data_transport_buf: usize,
-    data_network_buf: usize,
 }
 
 impl Default for ClientBuilder {
@@ -55,10 +53,6 @@ impl ClientBuilder {
             handshake_timeout: Duration::from_secs(5),
             reconnect_delay: Duration::from_secs(3),
             cred: None,
-            out_transport_buf: 1000,
-            out_network_buf: 1000,
-            data_transport_buf: 1000,
-            data_network_buf: 1000,
         }
     }
 
@@ -99,26 +93,6 @@ impl ClientBuilder {
         self
     }
 
-    pub fn out_transport_buf(mut self, value: usize) -> Self {
-        self.out_transport_buf = value;
-        self
-    }
-
-    pub fn out_network_buf(mut self, value: usize) -> Self {
-        self.out_network_buf = value;
-        self
-    }
-
-    pub fn data_transport_buf(mut self, value: usize) -> Self {
-        self.data_transport_buf = value;
-        self
-    }
-
-    pub fn data_network_buf(mut self, value: usize) -> Self {
-        self.data_network_buf = value;
-        self
-    }
-
     pub fn build(self) -> Result<Client, BuildError> {
         let (state, _) = watch::channel(RuntimeState::Connecting);
         Ok(Client {
@@ -135,10 +109,6 @@ impl ClientBuilder {
             handshake_timeout: self.handshake_timeout,
             reconnect_delay: self.reconnect_delay,
             cred: self.cred.ok_or(BuildError::MissingRequiredField("cred"))?,
-            out_transport_buf: self.out_transport_buf,
-            out_network_buf: self.out_network_buf,
-            data_transport_buf: self.data_transport_buf,
-            data_network_buf: self.data_network_buf,
             state,
         })
     }
@@ -152,10 +122,6 @@ pub struct Client {
     handshake_timeout: Duration,
     reconnect_delay: Duration,
     cred: Cred,
-    out_transport_buf: usize,
-    out_network_buf: usize,
-    data_transport_buf: usize,
-    data_network_buf: usize,
     state: watch::Sender<RuntimeState>,
 }
 
@@ -165,57 +131,35 @@ impl Client {
     }
 
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
-        let (transport_sender_tx, transport_sender_rx) =
-            mpsc::channel::<Packet>(self.out_transport_buf);
-        let (network_sender_tx, network_sender_rx) = mpsc::channel::<Vec<u8>>(self.out_network_buf);
-        let (data_transport_tx, data_transport_rx) =
-            mpsc::channel::<EncryptedData>(self.data_transport_buf);
-        let (data_network_tx, data_network_rx) = mpsc::channel::<Vec<u8>>(self.data_network_buf);
-
         let mut set: JoinSet<()> = JoinSet::new();
 
-        set.spawn(transport_receiver(
+        // Hot path 1: UDP → decrypt → TUN
+        set.spawn(recv_decrypt_forward(
             self.state.clone(),
             self.transport.clone(),
-            data_transport_tx,
-        ));
-        set.spawn(transport_sender(
-            self.state.clone(),
-            self.transport.clone(),
-            transport_sender_rx,
-        ));
-        set.spawn(network_receiver(
-            self.state.clone(),
             self.network.clone(),
-            data_network_tx,
-        ));
-        set.spawn(network_sender(
-            self.state.clone(),
-            self.network.clone(),
-            network_sender_rx,
-        ));
-        set.spawn(data_tun_executor(
-            self.state.clone(),
-            data_network_rx,
-            transport_sender_tx.clone(),
-        ));
-        set.spawn(data_udp_executor(
-            self.state.clone(),
-            data_transport_rx,
-            network_sender_tx,
         ));
 
+        // Hot path 2: TUN → encrypt → UDP
+        set.spawn(tun_encrypt_forward(
+            self.state.clone(),
+            self.network.clone(),
+            self.transport.clone(),
+        ));
+
+        // Keepalive (optional)
         if let Some(duration) = self.keepalive {
             debug!("starting keepalive with interval {:?}", duration);
             set.spawn(keepalive_sender(
                 self.state.clone(),
-                transport_sender_tx.clone(),
+                self.transport.clone(),
                 duration,
             ));
         } else {
             debug!("keepalive disabled");
         }
 
+        // Connector: handles connect + handshake + reconnect
         set.spawn(connector::executor(
             self.state.clone(),
             self.transport.clone(),

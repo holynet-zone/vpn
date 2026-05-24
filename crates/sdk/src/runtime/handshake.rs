@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::gateway::transport::ClientTransport;
 use crate::protocol::handshake::{
-    NOISE_IK_PSK2_25519_AESGCM_BLAKE2S, NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S,
+    alg_hint_byte, params_from_alg,
 };
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
@@ -16,11 +16,7 @@ use crate::runtime::cred::Cred;
 use crate::runtime::error::RuntimeError;
 
 fn initial(alg: &Alg, cred: &Cred) -> Result<(EncryptedHandshake, HandshakeState), RuntimeError> {
-    let params = match alg {
-        Alg::ChaCha20Poly1305 => NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone(),
-        Alg::Aes256 => NOISE_IK_PSK2_25519_AESGCM_BLAKE2S.clone(),
-    };
-    let mut initiator = Builder::new(params)
+    let mut initiator = Builder::new(params_from_alg(alg).clone())
         .local_private_key(cred.sk.as_slice())?
         .remote_public_key(cred.spk.as_slice())?
         .psk(2, cred.psk.as_bytes())?
@@ -28,7 +24,12 @@ fn initial(alg: &Alg, cred: &Cred) -> Result<(EncryptedHandshake, HandshakeState
 
     let mut buffer = [0u8; 65536];
     let len = initiator.write_message(&[], &mut buffer)?;
-    Ok((buffer[..len].to_vec().into(), initiator))
+    // Prepend a 1-byte algorithm hint so the server can select the correct
+    // Noise params on first read without a decrypt-then-retry heuristic.
+    let mut msg = Vec::with_capacity(1 + len);
+    msg.push(alg_hint_byte(alg));
+    msg.extend_from_slice(&buffer[..len]);
+    Ok((msg.into(), initiator))
 }
 
 fn complete(

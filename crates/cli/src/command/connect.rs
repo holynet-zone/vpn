@@ -141,10 +141,6 @@ impl ConnectCmd {
             .keepalive(runtime.keepalive.map(Duration::from_secs))
             .handshake_timeout(Duration::from_millis(runtime.handshake_timeout))
             .cred(cred)
-            .out_transport_buf(runtime.out_udp_buf)
-            .out_network_buf(runtime.out_tun_buf)
-            .data_transport_buf(runtime.data_udp_buf)
-            .data_network_buf(runtime.data_tun_buf)
             .build()
         {
             Ok(c) => c,

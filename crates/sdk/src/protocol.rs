@@ -2,13 +2,16 @@ mod data;
 pub mod handshake;
 mod primitives;
 mod session;
+pub(crate) mod varint;
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 pub use data::{DataClientBody, DataServerBody};
+pub(crate) use data::{DataClientBodyRef, DataServerBodyRef};
 pub use handshake::{HandshakeError, HandshakeResponderBody, HandshakeResponderPayload};
 use primitives::VecU16;
 pub use session::{Alg, SessionId};
+use varint::{read_u16, read_u32};
 
 pub type EncryptedHandshake = VecU16<u8>;
 
@@ -107,6 +110,61 @@ impl Packet {
     }
 }
 
+// Zero-copy packet view
+
+/// Zero-copy view into a raw UDP receive buffer.
+///
+/// Parses the bincode-encoded `Packet` without heap allocation by borrowing
+/// byte slices directly from the input. Used on the hot receive path so the
+/// ciphertext never needs to leave the stack buffer.
+///
+/// Wire format mirrors the bincode `Decode` impl for `Packet`:
+///   variant (varint u32) | fields...
+/// where `EncryptedData` fields are: varint-u16 length | raw bytes.
+pub(crate) enum PacketRef<'a> {
+    HandshakeInitial(&'a [u8]),
+    HandshakeResponder(&'a [u8]),
+    DataClient { sid: SessionId, ciphertext: &'a [u8] },
+    DataServer { ciphertext: &'a [u8] },
+}
+
+impl<'a> PacketRef<'a> {
+    /// Parse a `PacketRef` from `buf` without allocating.
+    /// Returns `None` on truncation or unknown variant.
+    pub(crate) fn from_bytes(buf: &'a [u8]) -> Option<Self> {
+        let (variant, buf) = read_u32(buf)?;
+        match variant {
+            0 => {
+                // HandshakeInitial(VecU16<u8>) — encoded as varint-u16 len + bytes
+                let (len, buf) = read_u16(buf)?;
+                let data = buf.get(..len as usize)?;
+                Some(PacketRef::HandshakeInitial(data))
+            }
+            1 => {
+                // HandshakeResponder(VecU16<u8>)
+                let (len, buf) = read_u16(buf)?;
+                let data = buf.get(..len as usize)?;
+                Some(PacketRef::HandshakeResponder(data))
+            }
+            2 => {
+                // DataClient { sid: SessionId(u32), encrypted: EncryptedData }
+                // EncryptedData is encoded as varint-u16 len + bytes
+                let (sid, buf) = read_u32(buf)?;
+                let (enc_len, buf) = read_u16(buf)?;
+                let ciphertext = buf.get(..enc_len as usize)?;
+                Some(PacketRef::DataClient { sid, ciphertext })
+            }
+            3 => {
+                // DataServer(EncryptedData)
+                let (enc_len, buf) = read_u16(buf)?;
+                let ciphertext = buf.get(..enc_len as usize)?;
+                Some(PacketRef::DataServer { ciphertext })
+            }
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +236,65 @@ mod tests {
         assert_eq!(&*original, &*cloned);
         // Bytes clone is zero-copy — both point to the same allocation
         assert!(std::ptr::eq(original.0.as_ptr(), cloned.0.as_ptr()));
+    }
+
+    // PacketRef tests
+
+    /// Build a Packet, encode it, parse via PacketRef, verify ciphertext matches.
+    #[test]
+    fn test_packet_ref_data_client() {
+        let cipher = vec![0xAAu8; 32];
+        let enc = make_encrypted(cipher.clone());
+        let pkt = Packet::DataClient { sid: 42, encrypted: enc };
+        let raw = pkt.to_bytes();
+
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::DataClient { sid, ciphertext } => {
+                assert_eq!(sid, 42);
+                assert_eq!(ciphertext, &cipher[..]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_data_server() {
+        let cipher = vec![0xBBu8; 48];
+        let enc = make_encrypted(cipher.clone());
+        let pkt = Packet::DataServer(enc);
+        let raw = pkt.to_bytes();
+
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::DataServer { ciphertext } => {
+                assert_eq!(ciphertext, &cipher[..]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_large_ciphertext() {
+        let cipher = vec![0xCCu8; 1416]; // typical MTU-sized encrypted packet
+        let enc = make_encrypted(cipher.clone());
+        let pkt = Packet::DataClient { sid: 0xDEAD_BEEF, encrypted: enc };
+        let raw = pkt.to_bytes();
+
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::DataClient { sid, ciphertext } => {
+                assert_eq!(sid, 0xDEAD_BEEF);
+                assert_eq!(ciphertext, &cipher[..]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_truncated_returns_none() {
+        let cipher = vec![0xAAu8; 32];
+        let enc = make_encrypted(cipher);
+        let pkt = Packet::DataClient { sid: 1, encrypted: enc };
+        let raw = pkt.to_bytes();
+        // truncate
+        assert!(PacketRef::from_bytes(&raw[..3]).is_none());
     }
 }

@@ -23,7 +23,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use snow::StatelessTransportState;
 
-use crate::protocol::EncryptedData;
+use crate::protocol::{DataClientBodyRef, DataServerBodyRef, EncryptedData};
+use crate::runtime::buf_pool::BufPool;
 
 thread_local! {
     /// Intermediate plaintext buffer: used for bincode encode (encrypt) or
@@ -84,8 +85,66 @@ pub(crate) fn noise_encrypt<T: serde::Serialize>(
     })
 }
 
-/// Build a matched (initiator, responder) `StatelessTransportState` pair for
-/// tests. Uses Noise IKpsk2 with ChaCha20Poly1305 and freshly generated keys.
+
+/// Result of decrypting a DataClientBody (server receives this from clients).
+pub(crate) enum DataClientAction {
+    /// IP packet to forward to TUN. `Bytes` is backed by the caller's BufPool.
+    Forward(Bytes),
+    /// Keepalive timestamp (microseconds since client process start).
+    KeepAlive(u128),
+}
+
+/// Result of decrypting a DataServerBody (client receives this from server).
+pub(crate) enum DataServerAction {
+    /// IP packet to forward to network/TUN.
+    Forward(Bytes),
+    /// Keepalive echo timestamp.
+    KeepAlive(u128),
+    /// Server-initiated disconnect code.
+    Disconnect(u8),
+}
+
+/// Decrypt a DataClientBody from raw ciphertext without any heap allocation.
+///
+/// `ciphertext` is a slice into the UDP receive buffer (stack-allocated in the
+/// caller). `pool` is a task-local BufPool; the returned `Bytes` borrows from
+/// a pool slot and becomes reusable once dropped.
+#[inline]
+pub(crate) fn noise_decrypt_data_client(
+    ciphertext: &[u8],
+    state: &StatelessTransportState,
+    pool: &mut BufPool,
+) -> anyhow::Result<DataClientAction> {
+    PLAIN_BUF.with_borrow_mut(|plain| {
+        let len = state.read_message(0, ciphertext, plain)?;
+        let body = DataClientBodyRef::from_plain_buf(&plain[..len])
+            .ok_or_else(|| anyhow::anyhow!("malformed DataClientBody"))?;
+        Ok(match body {
+            DataClientBodyRef::Packet(data) => DataClientAction::Forward(pool.copy_to_bytes(data)),
+            DataClientBodyRef::KeepAlive(ts) => DataClientAction::KeepAlive(ts),
+        })
+    })
+}
+
+/// Decrypt a DataServerBody from raw ciphertext without any heap allocation.
+#[inline]
+pub(crate) fn noise_decrypt_data_server(
+    ciphertext: &[u8],
+    state: &StatelessTransportState,
+    pool: &mut BufPool,
+) -> anyhow::Result<DataServerAction> {
+    PLAIN_BUF.with_borrow_mut(|plain| {
+        let len = state.read_message(0, ciphertext, plain)?;
+        let body = DataServerBodyRef::from_plain_buf(&plain[..len])
+            .ok_or_else(|| anyhow::anyhow!("malformed DataServerBody"))?;
+        Ok(match body {
+            DataServerBodyRef::Packet(data) => DataServerAction::Forward(pool.copy_to_bytes(data)),
+            DataServerBodyRef::KeepAlive(ts) => DataServerAction::KeepAlive(ts),
+            DataServerBodyRef::Disconnect(code) => DataServerAction::Disconnect(code),
+        })
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn make_noise_pair_for_test() -> (StatelessTransportState, StatelessTransportState) {
     use crate::crypto::{PublicKey, SecretKey};
@@ -130,37 +189,32 @@ pub(crate) fn make_noise_pair_for_test() -> (StatelessTransportState, StatelessT
     )
 }
 
-/// Decrypt `encrypted` via Noise `StatelessTransportState` then bincode/serde.
-///
-/// Allocations: only what `T`'s `Deserialize` impl requires (e.g., `Vec<u8>`
-/// inside `DataServerBody::Packet`). The 65 KB plaintext buffer is reused
-/// from thread-local storage — no intermediate heap allocation for decryption.
-#[inline]
-pub(crate) fn noise_decrypt<T: serde::de::DeserializeOwned>(
-    encrypted: &EncryptedData,
-    state: &StatelessTransportState,
-) -> anyhow::Result<T> {
-    PLAIN_BUF.with_borrow_mut(|buf| {
-        let len = state.read_message(0, encrypted, buf)?;
-        bincode::serde::decode_from_slice(&buf[..len], bincode::config::standard())
-            .map(|(obj, _)| obj)
-            .map_err(|e| anyhow::anyhow!("bincode decode: {e}"))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::{DataClientBody, DataServerBody};
 
+    /// Test-only generic decrypt helper (uses bincode/serde path).
+    fn noise_decrypt<T: serde::de::DeserializeOwned>(
+        encrypted: &EncryptedData,
+        state: &StatelessTransportState,
+    ) -> anyhow::Result<T> {
+        PLAIN_BUF.with_borrow_mut(|buf| {
+            let len = state.read_message(0, encrypted, buf)?;
+            bincode::serde::decode_from_slice(&buf[..len], bincode::config::standard())
+                .map(|(obj, _)| obj)
+                .map_err(|e| anyhow::anyhow!("bincode decode: {e}"))
+        })
+    }
+
     #[test]
     fn test_roundtrip_data_packet() {
         let (tx, rx) = make_noise_pair_for_test();
-        let body = DataClientBody::Packet(vec![1, 2, 3, 4, 5]);
+        let body = DataClientBody::Packet(vec![1, 2, 3, 4, 5].into());
         let enc = noise_encrypt(&body, &tx).unwrap();
         let dec: DataClientBody = noise_decrypt(&enc, &rx).unwrap();
         match dec {
-            DataClientBody::Packet(data) => assert_eq!(data, [1, 2, 3, 4, 5]),
+            DataClientBody::Packet(data) => assert_eq!(&data[..], [1, 2, 3, 4, 5]),
             _ => panic!("unexpected variant"),
         }
     }
@@ -180,7 +234,7 @@ mod tests {
     #[test]
     fn test_roundtrip_empty_payload() {
         let (tx, rx) = make_noise_pair_for_test();
-        let body = DataClientBody::Packet(vec![]);
+        let body = DataClientBody::Packet(Bytes::new());
         let enc = noise_encrypt(&body, &tx).unwrap();
         let dec: DataClientBody = noise_decrypt(&enc, &rx).unwrap();
         match dec {
@@ -204,16 +258,16 @@ mod tests {
     fn test_pool_grows_under_concurrent_in_flight() {
         let (tx, rx) = make_noise_pair_for_test();
 
-        let enc1 = noise_encrypt(&DataClientBody::Packet(vec![1; 64]), &tx).unwrap();
-        let enc2 = noise_encrypt(&DataClientBody::Packet(vec![2; 64]), &tx).unwrap();
-        let enc3 = noise_encrypt(&DataClientBody::Packet(vec![3; 64]), &tx).unwrap();
+        let enc1 = noise_encrypt(&DataClientBody::Packet(vec![1u8; 64].into()), &tx).unwrap();
+        let enc2 = noise_encrypt(&DataClientBody::Packet(vec![2u8; 64].into()), &tx).unwrap();
+        let enc3 = noise_encrypt(&DataClientBody::Packet(vec![3u8; 64].into()), &tx).unwrap();
 
         // All three EncryptedData objects are live simultaneously.
         // Decrypting each must return its own payload unchanged.
         let dec = |enc: &EncryptedData, expected: u8| {
             let body: DataClientBody = noise_decrypt(enc, &rx).unwrap();
             match body {
-                DataClientBody::Packet(d) => assert_eq!(d, vec![expected; 64]),
+                DataClientBody::Packet(d) => assert_eq!(&d[..], vec![expected; 64]),
                 _ => panic!("unexpected variant"),
             }
         };
@@ -228,12 +282,12 @@ mod tests {
     fn test_pool_reuse_after_drop() {
         let (tx, rx) = make_noise_pair_for_test();
         for byte in 0u8..=16 {
-            let body = DataClientBody::Packet(vec![byte; 128]);
+            let body = DataClientBody::Packet(vec![byte; 128].into());
             let enc = noise_encrypt(&body, &tx).unwrap();
             // enc dropped at end of this iteration → pool slot refcount → 1
             let dec: DataClientBody = noise_decrypt(&enc, &rx).unwrap();
             match dec {
-                DataClientBody::Packet(data) => assert_eq!(data, vec![byte; 128]),
+                DataClientBody::Packet(data) => assert_eq!(&data[..], vec![byte; 128]),
                 _ => panic!("unexpected variant"),
             }
         }

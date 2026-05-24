@@ -44,7 +44,7 @@ sequenceDiagram
     Server->>Client: S (Trusted setup)
     Note over Server,Client: ...
 
-    Client->>+Server: Handshake Initial (e, es, s, ss)
+    Client->>+Server: Handshake Initial (alg, e, es, s, ss)
     Server-->>-Client: Handshake Complete (e, ee, se, psk)
     Note over Server,Client: Handshake completed! <br/>Packets can be transmit
     
@@ -105,13 +105,17 @@ sequenceDiagram
 
 #### Handshake Initial
 ```text
-0      8        24                                            792  bit
-┌──────┬─────────┬──────────────────────────────────────────────┐     
-│ TYPE │   LEN   │              NOISE METADATA                  │     
-│ 0x00 │    N    │                (ENCRYPTED)                   │     
-│(8bit)│ (16bit) │                 (768 bit)                    │     
-└──────┴─────────┴──────────────────────────────────────────────┘     
+0      8        24      32                                    800  bit
+┌──────┬─────────┬───────┬──────────────────────────────────────┐
+│ TYPE │   LEN   │  ALG  │            NOISE METADATA            │
+│ 0x00 │    N    │       │              (ENCRYPTED)             │
+│(8bit)│ (16bit) │ (8bit)│               (768 bit)             │
+└──────┴─────────┴───────┴──────────────────────────────────────┘
 ```
+
+ALG values:
+- `0x01` — AES-256-GCM (`Noise_IKpsk2_25519_AESGCM_BLAKE2s`)
+- `0x02` — ChaCha20-Poly1305 (`Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s`)
 
 #### Handshake Response
 ```text

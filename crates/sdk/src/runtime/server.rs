@@ -1,8 +1,7 @@
-mod data;
 mod handshake;
-mod network;
+mod recv;
 pub mod session;
-mod transport;
+mod tun;
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
@@ -11,18 +10,17 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tracing::info;
 
-use self::session::{HolyIp, Sessions};
+use self::session::Sessions;
 use self::{
-    data::{data_transport_executor, data_tun_executor},
     handshake::handshake_executor,
-    network::{tun_listener, tun_sender},
-    transport::{transport_listener, transport_sender},
+    recv::recv_decrypt_forward,
+    tun::tun_encrypt_forward,
 };
 use crate::crypto::{PublicKey, SecretKey};
 use crate::gateway::transport::Transport;
 use crate::network::set_ipv4_forwarding;
 use crate::runtime::error::{BuildError, RuntimeError};
-use crate::tun;
+use crate::tun::setup as tun_setup;
 
 pub struct ServerBuilder {
     transports: Vec<Arc<dyn Transport>>,
@@ -37,11 +35,7 @@ pub struct ServerBuilder {
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
     // Buffers
-    out_transport_buf: usize,
-    out_tun_buf: usize,
     handshake_buf: usize,
-    data_transport_buf: usize,
-    data_tun_buf: usize,
 }
 
 impl Default for ServerBuilder {
@@ -62,11 +56,7 @@ impl ServerBuilder {
             tun_prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
             session_cleanup_interval: Duration::from_secs(60),
-            out_transport_buf: 1000,
-            out_tun_buf: 1000,
             handshake_buf: 1000,
-            data_transport_buf: 1000,
-            data_tun_buf: 1000,
         }
     }
 
@@ -118,28 +108,8 @@ impl ServerBuilder {
         self
     }
 
-    pub fn out_transport_buf(mut self, size: usize) -> Self {
-        self.out_transport_buf = size;
-        self
-    }
-
-    pub fn out_tun_buf(mut self, size: usize) -> Self {
-        self.out_tun_buf = size;
-        self
-    }
-
     pub fn handshake_buf(mut self, size: usize) -> Self {
         self.handshake_buf = size;
-        self
-    }
-
-    pub fn data_transport_buf(mut self, size: usize) -> Self {
-        self.data_transport_buf = size;
-        self
-    }
-
-    pub fn data_tun_buf(mut self, size: usize) -> Self {
-        self.data_tun_buf = size;
         self
     }
 
@@ -166,11 +136,7 @@ impl ServerBuilder {
             tun_prefix: self.tun_prefix,
             session_timeout: self.session_timeout,
             session_cleanup_interval: self.session_cleanup_interval,
-            out_transport_buf: self.out_transport_buf,
-            out_tun_buf: self.out_tun_buf,
             handshake_buf: self.handshake_buf,
-            data_transport_buf: self.data_transport_buf,
-            data_tun_buf: self.data_tun_buf,
         })
     }
 }
@@ -188,18 +154,14 @@ pub struct Server {
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
     // Buffers
-    out_transport_buf: usize,
-    out_tun_buf: usize,
     handshake_buf: usize,
-    data_transport_buf: usize,
-    data_tun_buf: usize,
 }
 
 impl Server {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
         set_ipv4_forwarding(true)?;
 
-        let tun = tun::setup(&self.tun_name, self.tun_mtu, true).await?;
+        let tun = tun_setup(&self.tun_name, self.tun_mtu, true).await?;
 
         match self.tun_ip {
             IpAddr::V4(addr) => {
@@ -219,56 +181,42 @@ impl Server {
         let mut set: JoinSet<()> = JoinSet::new();
 
         for transport in self.transports {
-            let tun = tun
+            let tun_clone = tun
                 .try_clone()
                 .map_err(|e| RuntimeError::IO(format!("clone tun device: {e}")))?;
-            let tun = Arc::new(tun);
+            let tun_clone = Arc::new(tun_clone);
 
-            let (out_transport_tx, out_transport_rx) =
-                tokio::sync::mpsc::channel(self.out_transport_buf);
-            let (out_tun_tx, out_tun_rx) = tokio::sync::mpsc::channel(self.out_tun_buf);
-            let (handshake_tx, handshake_rx) = tokio::sync::mpsc::channel(self.handshake_buf);
-            let (data_transport_tx, data_transport_rx) =
-                tokio::sync::mpsc::channel(self.data_transport_buf);
-            let (data_tun_tx, data_tun_rx) =
-                tokio::sync::mpsc::channel::<(Vec<u8>, HolyIp)>(self.data_tun_buf);
+            let (handshake_tx, handshake_rx) =
+                tokio::sync::mpsc::channel(self.handshake_buf);
 
             let inf_timeout = self.session_timeout.is_none();
 
-            set.spawn(transport_listener(
+            // Hot path 1: UDP → decrypt → TUN (+ inline keepalive responses)
+            set.spawn(recv_decrypt_forward(
                 stop_rx.clone(),
                 transport.clone(),
+                tun_clone.clone(),
+                sessions.clone(),
                 handshake_tx,
-                data_transport_tx,
+                inf_timeout,
             ));
-            set.spawn(transport_sender(
+
+            // Hot path 2: TUN → encrypt → UDP
+            set.spawn(tun_encrypt_forward(
                 stop_rx.clone(),
+                tun_clone,
                 transport.clone(),
-                out_transport_rx,
+                sessions.clone(),
             ));
-            set.spawn(tun_listener(stop_rx.clone(), tun.clone(), data_tun_tx));
-            set.spawn(tun_sender(stop_rx.clone(), tun.clone(), out_tun_rx));
+
+            // Rare path: handshake completion
             set.spawn(handshake_executor(
                 stop_rx.clone(),
                 handshake_rx,
-                out_transport_tx.clone(),
+                transport,
                 self.known_clients.clone(),
                 sessions.clone(),
                 self.sk.clone(),
-            ));
-            set.spawn(data_transport_executor(
-                stop_rx.clone(),
-                data_transport_rx,
-                out_transport_tx.clone(),
-                out_tun_tx.clone(),
-                sessions.clone(),
-                inf_timeout,
-            ));
-            set.spawn(data_tun_executor(
-                stop_rx.clone(),
-                data_tun_rx,
-                out_transport_tx,
-                sessions.clone(),
             ));
         }
 
