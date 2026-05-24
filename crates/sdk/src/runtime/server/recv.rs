@@ -56,21 +56,23 @@ pub(super) async fn recv_decrypt_forward<T: Transport>(
         tokio::select! {
             _ = stop.changed() => break,
             result = transport.recv_from(&mut udp_buf) => match result {
-                Err(e) => warn!("transport recv error: {}", e),
+                Err(e) => { warn!("transport recv error: {}", e); }
                 Ok((n, addr)) => {
                     if n == 0 || n >= udp_buf.len() {
                         warn!("dropping packet from {} (size {})", addr, n);
                         continue;
                     }
+
                     match PacketRef::from_bytes(&udp_buf[..n]) {
                         None => warn!("failed to parse packet from {}", addr),
-                        Some(PacketRef::HandshakeInitial(data)) => {
-                            // Handshakes are rare — allocation here is acceptable.
-                            let hs = data.to_vec().into();
+
+                        Some(PacketRef::HandshakeInitial(hs_data)) => {
+                            let hs = hs_data.to_vec().into();
                             if let Err(e) = handshake_tx.send((hs, addr)).await {
                                 error!("handshake_tx closed: {}", e);
                             }
                         }
+
                         Some(PacketRef::DataClient { sid, nonce, ciphertext }) => {
                             // Per-task session cache: on cache hit avoid DashMap entirely.
                             // On miss: one DashMap lookup then cache the Arc.
@@ -126,11 +128,7 @@ pub(super) async fn recv_decrypt_forward<T: Transport>(
                                         Err(e) => error!("[{}] keepalive encrypt failed: {}", addr, e),
                                         Ok(encrypted) => {
                                             let pkt = Packet::DataServer { nonce: send_nonce, encrypted };
-                                            match bincode::encode_into_slice(
-                                                &pkt,
-                                                &mut encode_buf,
-                                                bincode::config::standard(),
-                                            ) {
+                                            match bincode::encode_into_slice(&pkt, &mut encode_buf, bincode::config::standard()) {
                                                 Err(e) => error!("[{}] encode failed: {}", addr, e),
                                                 Ok(n) => {
                                                     if let Err(e) = transport.send_to(&encode_buf[..n], &addr).await {
@@ -143,6 +141,7 @@ pub(super) async fn recv_decrypt_forward<T: Transport>(
                                 }
                             }
                         }
+
                         Some(_) => warn!("[{}] unexpected packet variant", addr),
                     }
                 }
