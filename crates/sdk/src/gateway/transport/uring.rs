@@ -11,7 +11,7 @@
 
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
 use crate::runtime::error::RuntimeError;
-use io_uring::{opcode, types, IoUring};
+use io_uring::{IoUring, opcode, types};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::VecDeque;
 use std::mem::{size_of, zeroed};
@@ -58,20 +58,16 @@ impl UringInner {
         ring.submitter().register_eventfd(event_fd_raw)?;
 
         let mut bufs = Box::new([[0u8; BUF_SIZE]; NUM_BUFS]);
-        let mut addrs: Box<[libc::sockaddr_storage; NUM_BUFS]> =
-            Box::new(unsafe { zeroed() });
-        let mut iovecs: Box<[libc::iovec; NUM_BUFS]> =
-            Box::new(unsafe { zeroed() });
-        let mut msghdrs: Box<[libc::msghdr; NUM_BUFS]> =
-            Box::new(unsafe { zeroed() });
+        let mut addrs: Box<[libc::sockaddr_storage; NUM_BUFS]> = Box::new(unsafe { zeroed() });
+        let mut iovecs: Box<[libc::iovec; NUM_BUFS]> = Box::new(unsafe { zeroed() });
+        let mut msghdrs: Box<[libc::msghdr; NUM_BUFS]> = Box::new(unsafe { zeroed() });
 
         for i in 0..NUM_BUFS {
             iovecs[i].iov_base = bufs[i].as_mut_ptr() as *mut libc::c_void;
             iovecs[i].iov_len = BUF_SIZE;
 
             msghdrs[i].msg_name = &mut addrs[i] as *mut _ as *mut libc::c_void;
-            msghdrs[i].msg_namelen =
-                size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+            msghdrs[i].msg_namelen = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
             msghdrs[i].msg_iov = &mut iovecs[i] as *mut libc::iovec;
             msghdrs[i].msg_iovlen = 1;
         }
@@ -132,10 +128,7 @@ impl UringInner {
                 // lifetime of UringInner (Box), so the pointers remain valid.
                 unsafe {
                     sq.push(&sqe).map_err(|_| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::WouldBlock,
-                            "io_uring SQ full",
-                        )
+                        std::io::Error::new(std::io::ErrorKind::WouldBlock, "io_uring SQ full")
                     })?;
                 }
                 self.inflight += 1;
@@ -168,8 +161,7 @@ impl UringUdpTransport {
         so_sndbuf: usize,
         count: usize,
     ) -> Result<Vec<Self>, RuntimeError> {
-        let template =
-            Socket::new(Domain::for_address(addr), Type::DGRAM, Some(Protocol::UDP))?;
+        let template = Socket::new(Domain::for_address(addr), Type::DGRAM, Some(Protocol::UDP))?;
         template.set_nonblocking(true)?;
         template.set_reuse_port(true)?;
         template.set_reuse_address(true)?;
@@ -209,8 +201,7 @@ impl UringUdpTransport {
             OwnedFd::from_raw_fd(fd)
         };
         let event_fd_raw = event_fd.as_raw_fd();
-        let async_efd = AsyncFd::new(event_fd)
-            .map_err(|e| RuntimeError::IO(e.to_string()))?;
+        let async_efd = AsyncFd::new(event_fd).map_err(|e| RuntimeError::IO(e.to_string()))?;
 
         let inner = UringInner::new(socket_fd, event_fd_raw)
             .map_err(|e| RuntimeError::IO(e.to_string()))?;
@@ -233,8 +224,7 @@ impl TransportReceiver for UringUdpTransport {
                 inner.poll_completions();
                 if let Some((idx, n, addr)) = inner.completions.pop_front() {
                     let copy_len = n.min(buf.len());
-                    buf[..copy_len]
-                        .copy_from_slice(&inner.bufs[idx as usize][..copy_len]);
+                    buf[..copy_len].copy_from_slice(&inner.bufs[idx as usize][..copy_len]);
                     inner.free.push(idx);
                     // Submit only when the completion queue is drained so that
                     // ring.submit() is amortised over a burst, not per-packet.
@@ -299,20 +289,14 @@ pub(crate) fn sockaddr_to_socket_addr(
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     unsafe {
         match storage.ss_family as libc::c_int {
-            libc::AF_INET
-                if namelen
-                    >= size_of::<libc::sockaddr_in>() as libc::socklen_t =>
-            {
+            libc::AF_INET if namelen >= size_of::<libc::sockaddr_in>() as libc::socklen_t => {
                 let a = &*(storage as *const _ as *const libc::sockaddr_in);
                 SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr))),
                     u16::from_be(a.sin_port),
                 )
             }
-            libc::AF_INET6
-                if namelen
-                    >= size_of::<libc::sockaddr_in6>() as libc::socklen_t =>
-            {
+            libc::AF_INET6 if namelen >= size_of::<libc::sockaddr_in6>() as libc::socklen_t => {
                 let a = &*(storage as *const _ as *const libc::sockaddr_in6);
                 SocketAddr::new(
                     IpAddr::V6(Ipv6Addr::from(a.sin6_addr.s6_addr)),

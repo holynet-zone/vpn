@@ -27,7 +27,7 @@ use super::session::{Session, Sessions};
 use crate::gateway::transport::Transport;
 use crate::protocol::{DataServerBody, EncryptedHandshake, Packet, PacketRef, SessionId};
 use crate::runtime::buf_pool::BufPool;
-use crate::runtime::crypto::{noise_decrypt_data_client, noise_encrypt, DataClientAction};
+use crate::runtime::crypto::{DataClientAction, noise_decrypt_data_client, noise_encrypt};
 use crate::time::sec_since_start;
 
 /// Combined receive → decrypt → forward task.

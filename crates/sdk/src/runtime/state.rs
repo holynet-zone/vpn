@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 
 use snow::StatelessTransportState;
 

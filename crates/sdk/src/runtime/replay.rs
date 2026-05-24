@@ -110,9 +110,7 @@ fn clear_bitmap_range(bitmap: &mut [u64; BITMAP_WORDS], start: usize, end: usize
     } else {
         // Clear high bits of the first word, full middle words, low bits of the last word.
         bitmap[start_w] &= !high_bits_from(start % 64);
-        for w in (start_w + 1)..end_w {
-            bitmap[w] = 0;
-        }
+        bitmap[(start_w + 1)..end_w].fill(0);
         bitmap[end_w] &= !low_bits_to(end % 64);
     }
 }
@@ -182,7 +180,7 @@ mod tests {
     fn out_of_order_within_window_accepted() {
         let mut w = ReplayWindow::new();
         w.check_and_update(100);
-        assert!(w.check_and_update(50));  // within window, not seen
+        assert!(w.check_and_update(50)); // within window, not seen
         assert!(!w.check_and_update(50)); // now it's a replay
     }
 

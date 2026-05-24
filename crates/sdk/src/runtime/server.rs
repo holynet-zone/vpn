@@ -11,11 +11,7 @@ use tokio::task::JoinSet;
 use tracing::info;
 
 use self::session::Sessions;
-use self::{
-    handshake::handshake_executor,
-    recv::recv_decrypt_forward,
-    tun::tun_encrypt_forward,
-};
+use self::{handshake::handshake_executor, recv::recv_decrypt_forward, tun::tun_encrypt_forward};
 use crate::crypto::{PublicKey, SecretKey};
 use crate::gateway::transport::Transport;
 use crate::network::set_ipv4_forwarding;
@@ -171,8 +167,7 @@ impl<T: Transport + 'static> Server<T> {
                 .map_err(|e| RuntimeError::IO(format!("clone tun device: {e}")))?;
             let tun_clone = Arc::new(tun_clone);
 
-            let (handshake_tx, handshake_rx) =
-                tokio::sync::mpsc::channel(self.handshake_buf);
+            let (handshake_tx, handshake_rx) = tokio::sync::mpsc::channel(self.handshake_buf);
 
             let inf_timeout = self.session_timeout.is_none();
 

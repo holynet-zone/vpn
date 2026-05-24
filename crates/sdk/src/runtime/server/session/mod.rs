@@ -2,7 +2,10 @@ mod generator;
 pub mod worker;
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, Mutex as StdMutex, atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering}};
+use std::sync::{
+    Mutex, Mutex as StdMutex,
+    atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering},
+};
 use std::time::Duration;
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -104,10 +107,7 @@ impl Sessions {
     pub fn new(network: &IpAddr, prefix: u8) -> Self {
         Sessions {
             sid_gen: Arc::new(SessionIdGenerator::new()),
-            holy_ip_gen: Arc::new(IpAddressGenerator::new(
-                increment_ip(*network),
-                prefix,
-            )),
+            holy_ip_gen: Arc::new(IpAddressGenerator::new(increment_ip(*network), prefix)),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new()),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
@@ -512,7 +512,11 @@ mod tests {
         let (state, _) = make_noise_pair_for_test();
         let (sid, _) = add_one(&sessions, "127.0.0.1:4321".parse().unwrap(), state);
 
-        sessions.get_by_sid(&sid).unwrap().last_seen.store(0, Ordering::Relaxed);
+        sessions
+            .get_by_sid(&sid)
+            .unwrap()
+            .last_seen
+            .store(0, Ordering::Relaxed);
         let session = sessions.get_and_touch(&sid).unwrap();
         assert!(
             session.last_seen.load(Ordering::Relaxed) >= sec_since_start(),

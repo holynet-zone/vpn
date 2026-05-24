@@ -249,7 +249,18 @@ mod tests {
 
     #[test]
     fn test_u64_values() {
-        for v in [0u64, 1, 42, 250, 251, 1000, 65535, 65536, u32::MAX as u64, u64::MAX] {
+        for v in [
+            0u64,
+            1,
+            42,
+            250,
+            251,
+            1000,
+            65535,
+            65536,
+            u32::MAX as u64,
+            u64::MAX,
+        ] {
             let enc = enc_u64(v);
             let (dec, rest) = read_u64(&enc).unwrap();
             assert_eq!(dec, v, "v={v}");
@@ -292,7 +303,18 @@ mod tests {
 
     #[test]
     fn test_write_u64_roundtrip() {
-        for v in [0u64, 1, 42, 250, 251, 1000, 65535, 65536, u32::MAX as u64, u64::MAX] {
+        for v in [
+            0u64,
+            1,
+            42,
+            250,
+            251,
+            1000,
+            65535,
+            65536,
+            u32::MAX as u64,
+            u64::MAX,
+        ] {
             let mut buf = [0u8; 10];
             let n = write_u64(&mut buf, v);
             let (dec, rest) = read_u64(&buf[..n]).unwrap();

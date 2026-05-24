@@ -34,7 +34,10 @@ pub(super) fn parse_destination(packet: &[u8]) -> anyhow::Result<IpAddr> {
     match version {
         Some(4) => {
             if packet.len() < 20 {
-                return Err(anyhow::anyhow!("IPv4 packet too short: {} bytes", packet.len()));
+                return Err(anyhow::anyhow!(
+                    "IPv4 packet too short: {} bytes",
+                    packet.len()
+                ));
             }
             Ok(Ipv4Addr::from([packet[16], packet[17], packet[18], packet[19]]).into())
         }

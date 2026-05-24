@@ -9,8 +9,8 @@ use tracing::{debug, info, warn};
 
 use super::session::Sessions;
 use crate::crypto::{PublicKey, SecretKey};
-use crate::protocol::handshake::{alg_from_hint_byte, params_from_alg};
 use crate::gateway::transport::Transport;
+use crate::protocol::handshake::{alg_from_hint_byte, params_from_alg};
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
     Packet,

@@ -22,7 +22,7 @@ use crate::gateway::{network::Network, transport::ClientTransport};
 use crate::protocol::PacketRef;
 use crate::runtime::buf_pool::BufPool;
 use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
-use crate::runtime::crypto::{noise_decrypt_data_server, DataServerAction};
+use crate::runtime::crypto::{DataServerAction, noise_decrypt_data_server};
 use crate::runtime::state::{ClientSession, RuntimeState};
 use crate::time::{format_duration_millis, micros_since_start};
 

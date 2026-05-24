@@ -26,9 +26,7 @@ pub type HolyIp = IpAddr;
 impl IpAddressGenerator {
     pub fn new(start_with: IpAddr, prefix: u8) -> Self {
         let (start, end, is_v4) = Self::subnet_range(start_with, prefix);
-        let range_size = (end - start)
-            .saturating_add(1)
-            .min(u64::MAX as u128) as u64;
+        let range_size = (end - start).saturating_add(1).min(u64::MAX as u128) as u64;
 
         let initial_offset = match start_with {
             IpAddr::V4(v4) => (u32::from(v4) as u128).saturating_sub(start),
@@ -101,12 +99,12 @@ impl IpAddressGenerator {
 
 pub fn increment_ip(ip: IpAddr) -> IpAddr {
     match ip {
-        IpAddr::V4(v4) => {
-            IpAddr::V4(Ipv4Addr::from(u32::from_be_bytes(v4.octets()).wrapping_add(1)))
-        }
-        IpAddr::V6(v6) => {
-            IpAddr::V6(Ipv6Addr::from(u128::from_be_bytes(v6.octets()).wrapping_add(1)))
-        }
+        IpAddr::V4(v4) => IpAddr::V4(Ipv4Addr::from(
+            u32::from_be_bytes(v4.octets()).wrapping_add(1),
+        )),
+        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from(
+            u128::from_be_bytes(v6.octets()).wrapping_add(1),
+        )),
     }
 }
 

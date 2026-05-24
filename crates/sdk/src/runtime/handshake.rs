@@ -5,9 +5,7 @@ use tokio::select;
 use tracing::warn;
 
 use crate::gateway::transport::ClientTransport;
-use crate::protocol::handshake::{
-    alg_hint_byte, params_from_alg,
-};
+use crate::protocol::handshake::{alg_hint_byte, params_from_alg};
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
     Packet,

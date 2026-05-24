@@ -80,7 +80,6 @@ pub(crate) fn noise_encrypt<T: serde::Serialize>(
     })
 }
 
-
 // --- Zero-copy IP-packet encode path ---
 
 #[inline]
@@ -402,7 +401,9 @@ mod tests {
     fn test_encode_data_server_packet_roundtrip() {
         use crate::protocol::PacketRef;
         use crate::runtime::buf_pool::BufPool;
-        use crate::runtime::crypto::{encode_data_server_packet, noise_decrypt_data_server, DataServerAction};
+        use crate::runtime::crypto::{
+            DataServerAction, encode_data_server_packet, noise_decrypt_data_server,
+        };
 
         let (tx, rx) = make_noise_pair_for_test();
         let payload = vec![0xABu8; 1400];
@@ -414,7 +415,10 @@ mod tests {
 
         // Parse header
         match PacketRef::from_bytes(frame).unwrap() {
-            PacketRef::DataServer { nonce: pkt_nonce, ciphertext } => {
+            PacketRef::DataServer {
+                nonce: pkt_nonce,
+                ciphertext,
+            } => {
                 assert_eq!(pkt_nonce, nonce);
                 // Decrypt
                 let mut pool = BufPool::new(65536);
@@ -432,7 +436,9 @@ mod tests {
     fn test_encode_data_client_packet_roundtrip() {
         use crate::protocol::PacketRef;
         use crate::runtime::buf_pool::BufPool;
-        use crate::runtime::crypto::{encode_data_client_packet, noise_decrypt_data_client, DataClientAction};
+        use crate::runtime::crypto::{
+            DataClientAction, encode_data_client_packet, noise_decrypt_data_client,
+        };
 
         let (tx, rx) = make_noise_pair_for_test();
         let payload = vec![0xDEu8; 512];
@@ -444,7 +450,11 @@ mod tests {
         let frame = &out[..n];
 
         match PacketRef::from_bytes(frame).unwrap() {
-            PacketRef::DataClient { sid: pkt_sid, nonce: pkt_nonce, ciphertext } => {
+            PacketRef::DataClient {
+                sid: pkt_sid,
+                nonce: pkt_nonce,
+                ciphertext,
+            } => {
                 assert_eq!(pkt_sid, sid);
                 assert_eq!(pkt_nonce, nonce);
                 let mut pool = BufPool::new(65536);
@@ -471,8 +481,7 @@ mod tests {
         // Old path
         let body = DataServerBody::Packet(Bytes::from(payload.clone()));
         let encrypted = noise_encrypt(&body, &tx, nonce).unwrap();
-        let old_frame = Packet::DataServer { nonce, encrypted }
-            .to_bytes();
+        let old_frame = Packet::DataServer { nonce, encrypted }.to_bytes();
 
         // New path
         let mut out = vec![0u8; 65600];
@@ -496,8 +505,12 @@ mod tests {
         // Old path
         let body = DataClientBody::Packet(Bytes::from(payload.clone()));
         let encrypted = noise_encrypt(&body, &tx, nonce).unwrap();
-        let old_frame = Packet::DataClient { sid, nonce, encrypted }
-            .to_bytes();
+        let old_frame = Packet::DataClient {
+            sid,
+            nonce,
+            encrypted,
+        }
+        .to_bytes();
 
         // New path
         let mut out = vec![0u8; 65600];

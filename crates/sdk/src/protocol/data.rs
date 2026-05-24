@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use super::varint::{read_u128, read_u32, read_usize};
+use super::varint::{read_u32, read_u128, read_usize};
 
 /// Bodies encrypted inside a Noise transport message.
 #[derive(Serialize, Deserialize)]
@@ -100,15 +100,15 @@ mod tests {
     /// DataClientBodyRef::from_plain_buf and verify the result matches.
     fn encode_client(body: &DataClientBody) -> Vec<u8> {
         let mut buf = [0u8; 65536];
-        let n = bincode::serde::encode_into_slice(body, &mut buf, bincode::config::standard())
-            .unwrap();
+        let n =
+            bincode::serde::encode_into_slice(body, &mut buf, bincode::config::standard()).unwrap();
         buf[..n].to_vec()
     }
 
     fn encode_server(body: &DataServerBody) -> Vec<u8> {
         let mut buf = [0u8; 65536];
-        let n = bincode::serde::encode_into_slice(body, &mut buf, bincode::config::standard())
-            .unwrap();
+        let n =
+            bincode::serde::encode_into_slice(body, &mut buf, bincode::config::standard()).unwrap();
         buf[..n].to_vec()
     }
 
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn test_noise_roundtrip_via_body_ref() {
         use crate::runtime::buf_pool::BufPool;
-        use crate::runtime::crypto::{noise_decrypt_data_client, noise_encrypt, DataClientAction};
+        use crate::runtime::crypto::{DataClientAction, noise_decrypt_data_client, noise_encrypt};
 
         let (tx, rx) = make_noise_pair_for_test();
         let payload = vec![1u8, 2, 3, 4, 5];
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn test_noise_roundtrip_keepalive() {
         use crate::runtime::buf_pool::BufPool;
-        use crate::runtime::crypto::{noise_decrypt_data_client, noise_encrypt, DataClientAction};
+        use crate::runtime::crypto::{DataClientAction, noise_decrypt_data_client, noise_encrypt};
 
         let (tx, rx) = make_noise_pair_for_test();
         let ts = 0xDEAD_CAFE_1234_5678u128;

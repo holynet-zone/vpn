@@ -69,7 +69,11 @@ impl BufPool {
 
         // Find a slot that is solely owned by the pool (no live Bytes view).
         // strong_count == 1 ↔ only the pool Vec holds a reference.
-        let slot = match self.slots.iter_mut().position(|a| Arc::strong_count(a) == 1) {
+        let slot = match self
+            .slots
+            .iter_mut()
+            .position(|a| Arc::strong_count(a) == 1)
+        {
             Some(idx) => &mut self.slots[idx],
             None => {
                 // All slots are referenced by live Bytes objects; grow the pool.
