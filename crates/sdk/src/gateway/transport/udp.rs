@@ -1,6 +1,5 @@
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
 use crate::runtime::error::RuntimeError;
-use async_trait::async_trait;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -71,7 +70,6 @@ impl UdpTransport {
     }
 }
 
-#[async_trait]
 impl TransportReceiver for UdpTransport {
     #[inline(always)]
     async fn recv_from(&self, buffer: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
@@ -84,7 +82,6 @@ impl TransportReceiver for UdpTransport {
     }
 }
 
-#[async_trait]
 impl TransportSender for UdpTransport {
     #[inline(always)]
     async fn send_to(&self, data: &[u8], addr: &SocketAddr) -> std::io::Result<usize> {
@@ -99,7 +96,6 @@ impl TransportSender for UdpTransport {
 
 impl Transport for UdpTransport {}
 
-#[async_trait]
 impl ClientTransport for UdpTransport {
     async fn connect(&self) -> std::io::Result<()> {
         info!("connecting to udp://{}", self.socket.peer_addr()?);

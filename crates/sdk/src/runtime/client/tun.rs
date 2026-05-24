@@ -5,41 +5,39 @@
 //! ## Zero-allocation hot path
 //!
 //! ```text
-//! network.recv → stack buffer (no alloc)
-//!   → BufPool::copy_to_bytes   — no alloc after warmup
-//!   → noise_encrypt             — CIPHER_POOL, no alloc after warmup
-//!   → encode_into_slice         — stack encode_buf, no alloc
-//!   → transport.send            — direct UDP write
+//! network.recv → buf (stack)
+//!   → write_ip_packet_plain  — PLAIN_BUF (thread-local), Copy 1
+//!   → noise write_message    — AEAD encrypt into encode_buf (stack), Copy 2
+//!   → transport.send         — direct UDP write, no intermediate buffers
 //! ```
 
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use tokio::sync::watch;
 use tracing::warn;
 
 use crate::gateway::{network::Network, transport::ClientTransport};
-use crate::protocol::{DataClientBody, Packet, SessionId};
-use crate::runtime::buf_pool::BufPool;
+use crate::protocol::SessionId;
 use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
-use crate::runtime::crypto::noise_encrypt;
+use crate::runtime::crypto::encode_data_client_packet;
 use crate::runtime::error::RuntimeError;
-use crate::runtime::state::RuntimeState;
+use crate::runtime::state::{ClientSession, RuntimeState};
 
-pub(super) async fn tun_encrypt_forward(
+pub(super) async fn tun_encrypt_forward<T: ClientTransport, N: Network>(
     state_tx: watch::Sender<RuntimeState>,
-    network: Arc<dyn Network>,
-    transport: Arc<dyn ClientTransport>,
+    network: Arc<N>,
+    transport: Arc<T>,
 ) {
     let mut state_rx = state_tx.subscribe();
     let mut buf = [0u8; MAX_PACKET_SIZE];
     let mut encode_buf = [0u8; MAX_PACKET_SIZE + 64];
-    let mut pool = BufPool::new(MAX_PACKET_SIZE);
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
     let mut is_connected = false;
     let mut sid = SessionId::default();
-    let mut transport_state = None;
+    let mut transport_state: Option<ClientSession> = None;
 
     loop {
         // Pause reading until connected to avoid encrypting with stale state.
@@ -62,9 +60,9 @@ pub(super) async fn tun_encrypt_forward(
                         is_connected = false;
                         transport_state = None;
                     }
-                    RuntimeState::Connected((payload, ts)) => {
+                    RuntimeState::Connected((payload, session)) => {
                         sid = payload.sid;
-                        transport_state = Some(ts.clone());
+                        transport_state = Some(session.clone());
                         is_connected = true;
                     }
                     _ => {}
@@ -86,32 +84,21 @@ pub(super) async fn tun_encrypt_forward(
                         warn!("received network packet >= {} bytes, possible truncation", buf.len());
                         continue;
                     }
-                    let Some(ref s) = transport_state else {
+                    let Some(ref session) = transport_state else {
                         warn!("received tun packet before connected state, dropping");
                         continue;
                     };
-                    // Copy raw IP packet into pool buffer (zero-alloc in steady state).
-                    let packet_bytes = pool.copy_to_bytes(&buf[..n]);
-                    match noise_encrypt(&DataClientBody::Packet(packet_bytes), s) {
+                    let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                    match encode_data_client_packet(&buf[..n], sid, &session.noise, nonce, &mut encode_buf) {
                         Err(e) => {
                             if state_tx.send(RuntimeState::Error(
                                 RuntimeError::Unexpected(format!("failed to encrypt data: {}", e))
                             )).is_err() { break; }
                         }
-                        Ok(encrypted) => {
-                            let pkt = Packet::DataClient { sid, encrypted };
-                            match bincode::encode_into_slice(
-                                &pkt,
-                                &mut encode_buf,
-                                bincode::config::standard(),
-                            ) {
-                                Err(e) => warn!("encode failed: {}", e),
-                                Ok(n) => {
-                                    if let Err(e) = transport.send(&encode_buf[..n]).await {
-                                        warn!("transport send error, reconnecting: {}", e);
-                                        if state_tx.send(RuntimeState::Connecting).is_err() { break; }
-                                    }
-                                }
+                        Ok(total) => {
+                            if let Err(e) = transport.send(&encode_buf[..total]).await {
+                                warn!("transport send error, reconnecting: {}", e);
+                                if state_tx.send(RuntimeState::Connecting).is_err() { break; }
                             }
                         }
                     }

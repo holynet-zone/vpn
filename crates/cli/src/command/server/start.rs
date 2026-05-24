@@ -97,16 +97,7 @@ impl StartCmd {
             .map(|s| Duration::from_secs(s.cleanup_interval as u64))
             .unwrap_or(Duration::from_secs(60));
 
-        let builder = ServerBuilder::new()
-            .transports(
-                transports
-                    .into_iter()
-                    .map(|t| {
-                        std::sync::Arc::new(t)
-                            as std::sync::Arc<dyn holynet_sdk::gateway::transport::Transport>
-                    })
-                    .collect(),
-            )
+        let builder = ServerBuilder::new(transports)
             .secret_key(config.general.secret_key)
             .known_clients(known_clients)
             .tun_name(config.interface.name)

@@ -109,10 +109,10 @@ async fn complete(
     Ok(buffer[..len].to_vec().into())
 }
 
-pub(super) async fn handshake_executor(
+pub(super) async fn handshake_executor<T: Transport>(
     mut stop: watch::Receiver<bool>,
     mut queue: mpsc::Receiver<(EncryptedHandshake, SocketAddr)>,
-    transport: Arc<dyn Transport>,
+    transport: Arc<T>,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sessions: Sessions,
     sk: SecretKey,

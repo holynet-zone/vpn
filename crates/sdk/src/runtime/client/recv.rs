@@ -23,21 +23,22 @@ use crate::protocol::PacketRef;
 use crate::runtime::buf_pool::BufPool;
 use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
 use crate::runtime::crypto::{noise_decrypt_data_server, DataServerAction};
-use crate::runtime::state::RuntimeState;
+use crate::runtime::state::{ClientSession, RuntimeState};
 use crate::time::{format_duration_millis, micros_since_start};
 
-pub(super) async fn recv_decrypt_forward(
+pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
     state_tx: watch::Sender<RuntimeState>,
-    transport: Arc<dyn ClientTransport>,
-    network: Arc<dyn Network>,
+    transport: Arc<T>,
+    network: Arc<N>,
+    tun_mtu: u16,
 ) {
     let mut state_rx = state_tx.subscribe();
     let mut buf = [0u8; MAX_PACKET_SIZE];
-    let mut net_pool = BufPool::new(MAX_PACKET_SIZE);
+    let mut net_pool = BufPool::new(tun_mtu as usize + 32);
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
     let mut is_connected = false;
-    let mut transport_state = None;
+    let mut transport_state: Option<ClientSession> = None;
 
     loop {
         // Pause receiving until connected to avoid processing stale data.
@@ -60,8 +61,8 @@ pub(super) async fn recv_decrypt_forward(
                         is_connected = false;
                         transport_state = None;
                     }
-                    RuntimeState::Connected((_, ts)) => {
-                        transport_state = Some(ts.clone());
+                    RuntimeState::Connected((_, session)) => {
+                        transport_state = Some(session.clone());
                         is_connected = true;
                     }
                     _ => {}
@@ -77,14 +78,22 @@ pub(super) async fn recv_decrypt_forward(
                         warn!("dropping transport packet (size {})", n);
                         continue;
                     }
-                    let Some(ref s) = transport_state else {
+                    let Some(ref session) = transport_state else {
                         warn!("received data before connected state, dropping");
                         continue;
                     };
                     match PacketRef::from_bytes(&buf[..n]) {
                         None => warn!("failed to parse transport packet"),
-                        Some(PacketRef::DataServer { ciphertext }) => {
-                            match noise_decrypt_data_server(ciphertext, s, &mut net_pool) {
+                        Some(PacketRef::DataServer { nonce, ciphertext }) => {
+                            let nonce_ok = session.recv_window
+                                .lock()
+                                .unwrap()
+                                .check_and_update(nonce);
+                            if !nonce_ok {
+                                warn!("replay/stale nonce {} from server", nonce);
+                                continue;
+                            }
+                            match noise_decrypt_data_server(ciphertext, &session.noise, &mut net_pool, nonce) {
                                 Err(e) => warn!("decrypt failed: {}", e),
                                 Ok(DataServerAction::Forward(bytes)) => {
                                     if let Err(e) = network.send(&bytes).await {

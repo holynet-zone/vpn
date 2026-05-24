@@ -2,7 +2,6 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex as StdMutex};
 
-use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
@@ -115,7 +114,6 @@ impl WsTransport {
     }
 }
 
-#[async_trait]
 impl TransportReceiver for WsTransport {
     #[inline(always)]
     async fn recv_from(&self, buffer: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
@@ -138,7 +136,6 @@ impl TransportReceiver for WsTransport {
     }
 }
 
-#[async_trait]
 impl TransportSender for WsTransport {
     #[inline(always)]
     async fn send_to(&self, data: &[u8], addr: &SocketAddr) -> io::Result<usize> {
@@ -172,7 +169,7 @@ impl TransportSender for WsTransport {
 impl Transport for WsTransport {}
 
 // ---------------------------------------------------------------------------
-// Client-side transport
+// Client-side transport (WsClientTransport)
 // ---------------------------------------------------------------------------
 
 type ClientSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
@@ -196,7 +193,6 @@ impl WsClientTransport {
     }
 }
 
-#[async_trait]
 impl TransportReceiver for WsClientTransport {
     #[inline(always)]
     async fn recv_from(&self, _buffer: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
@@ -230,7 +226,6 @@ impl TransportReceiver for WsClientTransport {
     }
 }
 
-#[async_trait]
 impl TransportSender for WsClientTransport {
     #[inline(always)]
     async fn send_to(&self, _data: &[u8], _addr: &SocketAddr) -> io::Result<usize> {
@@ -261,7 +256,6 @@ impl TransportSender for WsClientTransport {
 
 impl Transport for WsClientTransport {}
 
-#[async_trait]
 impl ClientTransport for WsClientTransport {
     async fn connect(&self) -> io::Result<()> {
         info!("connecting to ws://{}", self.addr);

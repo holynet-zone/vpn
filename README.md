@@ -188,52 +188,56 @@ sequenceDiagram
 
 #### DataClient
 ```text
-0      8      40      56                                        N  bit
-┌──────┬───────┬───────┬────────────────────────────────────────┐     
-│ TYPE │  SID  │  LEN  │     DATA PAYLOAD + NOISE METADATA      │     
-│ 0x02 │       │   N   │             (ENCRYPTED)                │     
-│(8bit)│(32bit)│(16bit)│              (N-56bit)                 │     
-└──────┴───────┴───────┴────────────────────────────────────────┘     
-                       0        8      24                             
-                       ┌────────┬───────┬───────────────────────┐     
-                       │  TYPE  │  LEN  │           IP          │     
-            IP PACKET  │  0x00  │   X   │         PACKET        │     
-                       │ (8bit) │(16bit)│        (X-24bit)      │     
-                       └────────┴───────┴───────────────────────┘     
-                       0        8                      136            
-                       ┌────────┬────────────────────────┐            
-                       │  TYPE  │    CLIENT TIMESTAMP    │            
-            KEEPALIVE  │  0x01  │         micros         │            
-                       │ (8bit) │        (128bit)        │            
-                       └────────┴────────────────────────┘            
+0      8      40                   104    120                              N  bit
+┌──────┬───────┬────────────────────┬──────┬──────────────────────────────────┐
+│ TYPE │  SID  │       NONCE        │ LEN  │   DATA PAYLOAD + NOISE METADATA  │
+│ 0x02 │       │                    │  N   │           (ENCRYPTED)            │
+│(8bit)│(32bit)│      (64bit)       │(16bit)            (N-120bit)            │
+└──────┴───────┴────────────────────┴──────┴──────────────────────────────────┘
+                                           0        8      24                  
+                                           ┌────────┬───────┬───────────────┐  
+                                           │  TYPE  │  LEN  │      IP       │  
+                                IP PACKET  │  0x00  │   X   │    PACKET     │  
+                                           │ (8bit) │(16bit)│   (X-24bit)   │  
+                                           └────────┴───────┴───────────────┘  
+                                           0        8                 136      
+                                           ┌────────┬──────────────────────┐   
+                                           │  TYPE  │   CLIENT TIMESTAMP   │   
+                                KEEPALIVE  │  0x01  │        micros        │   
+                                           │ (8bit) │       (128bit)       │   
+                                           └────────┴──────────────────────┘   
 ```
 
+> NONCE is a monotonically increasing counter controlled by the sender.
+> Used as the nonce for AEAD (Noise `StatelessTransportState`).
+> The receiver checks it against a sliding anti-replay window (2048 bits) before decrypting.
+
 #### DataServer
-```text                                                
-0      8      24                                                N  bit
-┌──────┬───────┬────────────────────────────────────────────────┐     
-│ TYPE │  LEN  │         DATA PAYLOAD + NOISE METADATA          │     
-│ 0x03 │   N   │                 (ENCRYPTED)                    │     
-│(8bit)│(16bit)│                  (N-24bit)                     │     
-└──────┴───────┴────────────────────────────────────────────────┘     
-               0        8      24                                     
-               ┌────────┬───────┬───────────────────────────────┐     
-               │  TYPE  │  LEN  │           IP                  │     
-       PACKET  │  0x00  │   X   │         PACKET                │     
-               │ (8bit) │(16bit)│        (X-24bit)              │     
-               └────────┴───────┴───────────────────────────────┘     
-               0        8                      136                    
-               ┌────────┬────────────────────────┐                    
-               │  TYPE  │    CLIENT TIMESTAMP    │                    
-    KEEPALIVE  │  0x01  │         micros         │                    
-               │ (8bit) │        (128bit)        │                    
-               └────────┴────────────────────────┘                    
-               0        8       16                                    
-               ┌────────┬────────┐                                    
-               │  TYPE  │  CODE  │                                    
-   DISCONNECT  │  0x02  │        │                                    
-               │ (8bit) │ (8bit) │                                    
-               └────────┴────────┘                                    
+```text
+0      8                    72     88                                     N  bit
+┌──────┬─────────────────────┬──────┬──────────────────────────────────────────┐
+│ TYPE │        NONCE        │ LEN  │       DATA PAYLOAD + NOISE METADATA      │
+│ 0x03 │                     │  N   │               (ENCRYPTED)               │
+│(8bit)│       (64bit)       │(16bit)                (N-88bit)                │
+└──────┴─────────────────────┴──────┴──────────────────────────────────────────┘
+                                    0        8      24                          
+                                    ┌────────┬───────┬───────────────────────┐  
+                                    │  TYPE  │  LEN  │          IP           │  
+                            PACKET  │  0x00  │   X   │        PACKET         │  
+                                    │ (8bit) │(16bit)│       (X-24bit)       │  
+                                    └────────┴───────┴───────────────────────┘  
+                                    0        8                       136        
+                                    ┌────────┬──────────────────────────┐       
+                                    │  TYPE  │     CLIENT TIMESTAMP     │       
+                         KEEPALIVE  │  0x01  │          micros          │       
+                                    │ (8bit) │         (128bit)         │       
+                                    └────────┴──────────────────────────┘       
+                                    0        8       16                         
+                                    ┌────────┬────────┐                         
+                                    │  TYPE  │  CODE  │                         
+                        DISCONNECT  │  0x02  │        │                         
+                                    │ (8bit) │ (8bit) │                         
+                                    └────────┴────────┘                         
 ```
 
 ## License

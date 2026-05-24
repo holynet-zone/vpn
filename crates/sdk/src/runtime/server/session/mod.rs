@@ -2,7 +2,7 @@ mod generator;
 pub mod worker;
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex as StdMutex, atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering}};
+use std::sync::{Mutex, Mutex as StdMutex, atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering}};
 use std::time::Duration;
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -15,6 +15,7 @@ use snow::StatelessTransportState;
 use tracing::debug;
 
 use crate::protocol::{Alg, SessionId};
+use crate::runtime::replay::ReplayWindow;
 use crate::time::sec_since_start;
 
 pub use generator::HolyIp;
@@ -32,6 +33,10 @@ pub struct Session {
     pub holy_ip: HolyIp,
     pub enc: Alg,
     pub state: StatelessTransportState,
+    /// Monotonically increasing nonce for packets sent by the server to this client.
+    pub(crate) send_nonce: AtomicU64,
+    /// Anti-replay window for packets received from this client.
+    pub(crate) recv_window: Mutex<ReplayWindow>,
 }
 
 impl Session {
@@ -48,6 +53,33 @@ impl Session {
             } else {
                 let (ip_u128, port) = unsafe { *ptr };
                 SocketAddr::new(IpAddr::from(ip_u128.to_be_bytes()), port)
+            }
+        }
+    }
+
+    /// Update the client's observed socket address directly on the session.
+    /// Used by recv workers that already hold an `Arc<Session>` to avoid a
+    /// second DashMap lookup.
+    pub fn set_sock_addr(&self, addr: SocketAddr) {
+        match addr {
+            SocketAddr::V4(addr_v4) => {
+                let ip_u32 = u32::from_be_bytes(addr_v4.ip().octets());
+                let encoded = ((ip_u32 as u64) << 32) | addr_v4.port() as u64;
+                self.ipv4_data.store(encoded, Ordering::Relaxed);
+                let old_ptr = self.ipv6_data.swap(std::ptr::null_mut(), Ordering::AcqRel);
+                self.is_ipv4.store(true, Ordering::Release);
+                if !old_ptr.is_null() {
+                    unsafe { drop(Box::from_raw(old_ptr)) }
+                }
+            }
+            SocketAddr::V6(addr_v6) => {
+                let ip_u128 = u128::from_be_bytes(addr_v6.ip().octets());
+                let new_ptr = Box::into_raw(Box::new((ip_u128, addr_v6.port())));
+                let old_ptr = self.ipv6_data.swap(new_ptr, Ordering::AcqRel);
+                self.is_ipv4.store(false, Ordering::Release);
+                if !old_ptr.is_null() {
+                    unsafe { drop(Box::from_raw(old_ptr)) }
+                }
             }
         }
     }
@@ -140,6 +172,8 @@ impl Sessions {
             holy_ip: ip,
             enc,
             state,
+            send_nonce: AtomicU64::new(0),
+            recv_window: Mutex::new(ReplayWindow::new()),
         });
 
         self.map.insert(sid, session);
@@ -233,6 +267,14 @@ impl Sessions {
         self.map.get(sid).map(|entry| entry.value().clone())
     }
 
+    /// Fetch a session and atomically update its `last_seen` timestamp within
+    /// the same DashMap read guard — one lookup instead of two.
+    pub fn get_and_touch(&self, sid: &SessionId) -> Option<Arc<Session>> {
+        let entry = self.map.get(sid)?;
+        entry.last_seen.store(sec_since_start(), Ordering::Relaxed);
+        Some(entry.value().clone())
+    }
+
     pub fn get_by_holy_ip(&self, ip: &HolyIp) -> Option<Arc<Session>> {
         self.holy_ip_map
             .get(ip)
@@ -254,32 +296,7 @@ impl Sessions {
 
     pub fn update_sock_addr(&self, sid: SessionId, addr: SocketAddr) {
         if let Some(entry) = self.map.get(&sid) {
-            let session = entry.value();
-            match addr {
-                SocketAddr::V4(addr_v4) => {
-                    let ip_u32 = u32::from_be_bytes(addr_v4.ip().octets());
-                    let encoded = ((ip_u32 as u64) << 32) | addr_v4.port() as u64;
-                    session.ipv4_data.store(encoded, Ordering::Relaxed);
-                    // Release: ensures ipv4_data write is visible before is_ipv4 flips
-                    let old_ptr = session
-                        .ipv6_data
-                        .swap(std::ptr::null_mut(), Ordering::AcqRel);
-                    session.is_ipv4.store(true, Ordering::Release);
-                    if !old_ptr.is_null() {
-                        unsafe { drop(Box::from_raw(old_ptr)) }
-                    }
-                }
-                SocketAddr::V6(addr_v6) => {
-                    let ip_u128 = u128::from_be_bytes(addr_v6.ip().octets());
-                    let new_ptr = Box::into_raw(Box::new((ip_u128, addr_v6.port())));
-                    // Release: ensures pointer is written before is_ipv4 flips
-                    let old_ptr = session.ipv6_data.swap(new_ptr, Ordering::AcqRel);
-                    session.is_ipv4.store(false, Ordering::Release);
-                    if !old_ptr.is_null() {
-                        unsafe { drop(Box::from_raw(old_ptr)) }
-                    }
-                }
-            }
+            entry.value().set_sock_addr(addr);
         }
     }
 }
@@ -485,6 +502,43 @@ mod tests {
 
         sessions.update_sock_addr(sid, v6b);
         assert_eq!(sessions.get_by_sid(&sid).unwrap().sock_addr(), v6b);
+    }
+
+    // ── get_and_touch ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_get_and_touch_updates_last_seen() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let (sid, _) = add_one(&sessions, "127.0.0.1:4321".parse().unwrap(), state);
+
+        sessions.get_by_sid(&sid).unwrap().last_seen.store(0, Ordering::Relaxed);
+        let session = sessions.get_and_touch(&sid).unwrap();
+        assert!(
+            session.last_seen.load(Ordering::Relaxed) >= sec_since_start(),
+            "get_and_touch must update last_seen"
+        );
+    }
+
+    #[test]
+    fn test_get_and_touch_unknown_sid_returns_none() {
+        let sessions = make_sessions();
+        assert!(sessions.get_and_touch(&0xDEAD_BEEF).is_none());
+    }
+
+    // ── set_sock_addr ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_set_sock_addr_direct_v4() {
+        let sessions = make_sessions();
+        let (state, _) = make_noise_pair_for_test();
+        let v4a: SocketAddr = "1.2.3.4:1000".parse().unwrap();
+        let v4b: SocketAddr = "5.6.7.8:2000".parse().unwrap();
+        let (sid, _) = add_one(&sessions, v4a, state);
+
+        let session = sessions.get_by_sid(&sid).unwrap();
+        session.set_sock_addr(v4b);
+        assert_eq!(session.sock_addr(), v4b);
     }
 
     // ── touch ──────────────────────────────────────────────────────────────────

@@ -22,8 +22,8 @@ use crate::network::set_ipv4_forwarding;
 use crate::runtime::error::{BuildError, RuntimeError};
 use crate::tun::setup as tun_setup;
 
-pub struct ServerBuilder {
-    transports: Vec<Arc<dyn Transport>>,
+pub struct ServerBuilder<T: Transport + 'static> {
+    transports: Vec<Arc<T>>,
     sk: Option<SecretKey>,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     // TUN
@@ -38,16 +38,12 @@ pub struct ServerBuilder {
     handshake_buf: usize,
 }
 
-impl Default for ServerBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ServerBuilder {
-    pub fn new() -> Self {
+impl<T: Transport + 'static> ServerBuilder<T> {
+    /// Create a builder with the given pool of transports (e.g. from
+    /// `UdpTransport::new_pool` for SO_REUSEPORT workers).
+    pub fn new(transports: Vec<T>) -> Self {
         Self {
-            transports: Vec::new(),
+            transports: transports.into_iter().map(Arc::new).collect(),
             sk: None,
             known_clients: Arc::new(DashMap::new()),
             tun_name: None,
@@ -58,17 +54,6 @@ impl ServerBuilder {
             session_cleanup_interval: Duration::from_secs(60),
             handshake_buf: 1000,
         }
-    }
-
-    /// Add a transport. Call multiple times for multiple workers.
-    pub fn transport<T: Transport + 'static>(mut self, transport: T) -> Self {
-        self.transports.push(Arc::new(transport));
-        self
-    }
-
-    pub fn transports(mut self, transports: Vec<Arc<dyn Transport>>) -> Self {
-        self.transports = transports;
-        self
     }
 
     pub fn secret_key(mut self, sk: SecretKey) -> Self {
@@ -113,7 +98,7 @@ impl ServerBuilder {
         self
     }
 
-    pub fn build(self) -> Result<Server, BuildError> {
+    pub fn build(self) -> Result<Server<T>, BuildError> {
         Ok(Server {
             transports: if self.transports.is_empty() {
                 return Err(BuildError::MissingRequiredField(
@@ -141,8 +126,8 @@ impl ServerBuilder {
     }
 }
 
-pub struct Server {
-    transports: Vec<Arc<dyn Transport>>,
+pub struct Server<T: Transport + 'static> {
+    transports: Vec<Arc<T>>,
     sk: SecretKey,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     // TUN
@@ -157,7 +142,7 @@ pub struct Server {
     handshake_buf: usize,
 }
 
-impl Server {
+impl<T: Transport + 'static> Server<T> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
         set_ipv4_forwarding(true)?;
 
@@ -199,6 +184,7 @@ impl Server {
                 sessions.clone(),
                 handshake_tx,
                 inf_timeout,
+                self.tun_mtu,
             ));
 
             // Hot path 2: TUN → encrypt → UDP

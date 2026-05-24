@@ -13,6 +13,7 @@
 
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tokio::sync::watch;
@@ -23,12 +24,12 @@ use crate::protocol::{DataClientBody, Packet, SessionId};
 use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
 use crate::runtime::crypto::noise_encrypt;
 use crate::runtime::error::RuntimeError;
-use crate::runtime::state::RuntimeState;
+use crate::runtime::state::{ClientSession, RuntimeState};
 use crate::time::micros_since_start;
 
-pub(super) async fn keepalive_sender(
+pub(super) async fn keepalive_sender<T: ClientTransport>(
     state_tx: watch::Sender<RuntimeState>,
-    transport: Arc<dyn ClientTransport>,
+    transport: Arc<T>,
     duration: Duration,
 ) {
     let mut state_rx = state_tx.subscribe();
@@ -38,7 +39,7 @@ pub(super) async fn keepalive_sender(
 
     let mut is_connected = false;
     let mut sid = SessionId::default();
-    let mut transport_state = None;
+    let mut transport_state: Option<ClientSession> = None;
 
     loop {
         // Check for state changes without blocking.
@@ -51,9 +52,9 @@ pub(super) async fn keepalive_sender(
                         is_connected = false;
                         transport_state = None;
                     }
-                    RuntimeState::Connected((payload, ts)) => {
+                    RuntimeState::Connected((payload, session)) => {
                         sid = payload.sid;
-                        transport_state = Some(ts.clone());
+                        transport_state = Some(session.clone());
                         is_connected = true;
                     }
                     _ => {}
@@ -73,15 +74,16 @@ pub(super) async fn keepalive_sender(
                 state_rx.mark_changed(); // re-process on next loop iteration
             }
             _ = keepalive_timer.tick() => {
-                let Some(ref s) = transport_state else { continue; };
-                match noise_encrypt(&DataClientBody::KeepAlive(micros_since_start()), s) {
+                let Some(ref session) = transport_state else { continue; };
+                let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                match noise_encrypt(&DataClientBody::KeepAlive(micros_since_start()), &session.noise, nonce) {
                     Err(e) => {
                         if state_tx.send(RuntimeState::Error(
                             RuntimeError::Unexpected(format!("failed to encrypt keepalive: {}", e))
                         )).is_err() { break; }
                     }
                     Ok(encrypted) => {
-                        let pkt = Packet::DataClient { sid, encrypted };
+                        let pkt = Packet::DataClient { sid, nonce, encrypted };
                         match bincode::encode_into_slice(
                             &pkt,
                             &mut encode_buf,

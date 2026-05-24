@@ -134,12 +134,11 @@ impl ConnectCmd {
             spk: config.credentials.server_public_key,
         };
 
-        let client = match ClientBuilder::new()
-            .transport(transport)
-            .network(network)
+        let client = match ClientBuilder::new(transport, network)
             .alg(config.general.alg)
             .keepalive(runtime.keepalive.map(Duration::from_secs))
             .handshake_timeout(Duration::from_millis(runtime.handshake_timeout))
+            .tun_mtu(iface.mtu)
             .cred(cred)
             .build()
         {

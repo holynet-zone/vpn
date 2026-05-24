@@ -47,8 +47,8 @@ fn complete(
     }
 }
 
-pub async fn handshake_step(
-    transport: Arc<dyn ClientTransport>,
+pub async fn handshake_step<T: ClientTransport>(
+    transport: Arc<T>,
     cred: &Cred,
     alg: &Alg,
     timeout: Duration,

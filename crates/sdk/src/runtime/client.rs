@@ -27,43 +27,29 @@ use crate::{
 pub(super) const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
 pub(super) const MAX_PACKET_SIZE: usize = 65536;
 
-pub struct ClientBuilder {
-    transport: Option<Box<dyn ClientTransport>>,
-    network: Option<Box<dyn Network>>,
+pub struct ClientBuilder<T: ClientTransport + 'static, N: Network + 'static> {
+    transport: Arc<T>,
+    network: Arc<N>,
     alg: Option<Alg>,
     keepalive: Option<Duration>,
     handshake_timeout: Duration,
     reconnect_delay: Duration,
     cred: Option<Cred>,
+    tun_mtu: u16,
 }
 
-impl Default for ClientBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ClientBuilder {
-    pub fn new() -> Self {
+impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
+    pub fn new(transport: T, network: N) -> Self {
         Self {
-            transport: None,
-            network: None,
+            transport: Arc::new(transport),
+            network: Arc::new(network),
             alg: None,
             keepalive: Some(Duration::from_secs(15)),
             handshake_timeout: Duration::from_secs(5),
             reconnect_delay: Duration::from_secs(3),
             cred: None,
+            tun_mtu: 1420,
         }
-    }
-
-    pub fn transport<T: ClientTransport + 'static>(mut self, value: T) -> Self {
-        self.transport = Some(Box::new(value));
-        self
-    }
-
-    pub fn network<N: Network + 'static>(mut self, value: N) -> Self {
-        self.network = Some(Box::new(value));
-        self
     }
 
     /// Set encryption algorithm. Defaults to best algorithm for current CPU.
@@ -93,39 +79,42 @@ impl ClientBuilder {
         self
     }
 
-    pub fn build(self) -> Result<Client, BuildError> {
+    /// Set the TUN interface MTU. Used to size the decrypt-path buffer pool.
+    /// Must match the MTU configured on the TUN device. Default: 1420.
+    pub fn tun_mtu(mut self, mtu: u16) -> Self {
+        self.tun_mtu = mtu;
+        self
+    }
+
+    pub fn build(self) -> Result<Client<T, N>, BuildError> {
         let (state, _) = watch::channel(RuntimeState::Connecting);
         Ok(Client {
-            transport: Arc::from(
-                self.transport
-                    .ok_or(BuildError::MissingRequiredField("transport"))?,
-            ),
-            network: Arc::from(
-                self.network
-                    .ok_or(BuildError::MissingRequiredField("network"))?,
-            ),
+            transport: self.transport,
+            network: self.network,
             alg: self.alg.unwrap_or_default(),
             keepalive: self.keepalive,
             handshake_timeout: self.handshake_timeout,
             reconnect_delay: self.reconnect_delay,
             cred: self.cred.ok_or(BuildError::MissingRequiredField("cred"))?,
+            tun_mtu: self.tun_mtu,
             state,
         })
     }
 }
 
-pub struct Client {
-    transport: Arc<dyn ClientTransport>,
-    network: Arc<dyn Network>,
+pub struct Client<T: ClientTransport + 'static, N: Network + 'static> {
+    transport: Arc<T>,
+    network: Arc<N>,
     alg: Alg,
     keepalive: Option<Duration>,
     handshake_timeout: Duration,
     reconnect_delay: Duration,
     cred: Cred,
+    tun_mtu: u16,
     state: watch::Sender<RuntimeState>,
 }
 
-impl Client {
+impl<T: ClientTransport + 'static, N: Network + 'static> Client<T, N> {
     pub fn subscribe(&self) -> watch::Receiver<RuntimeState> {
         self.state.subscribe()
     }
@@ -138,6 +127,7 @@ impl Client {
             self.state.clone(),
             self.transport.clone(),
             self.network.clone(),
+            self.tun_mtu,
         ));
 
         // Hot path 2: TUN → encrypt → UDP
