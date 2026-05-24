@@ -1,6 +1,5 @@
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
 use crate::runtime::error::RuntimeError;
-use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -109,7 +108,6 @@ impl MockTransportSender {
     }
 }
 
-#[async_trait]
 impl TransportSender for MockTransport {
     async fn send_to(&self, data: &[u8], _addr: &SocketAddr) -> std::io::Result<usize> {
         let inner = self.inner.lock().await;
@@ -128,7 +126,6 @@ impl TransportSender for MockTransport {
     }
 }
 
-#[async_trait]
 impl TransportReceiver for MockTransport {
     async fn recv_from(&self, buffer: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
         let mut inner = self.inner.lock().await;
@@ -165,7 +162,6 @@ impl TransportReceiver for MockTransport {
 
 impl Transport for MockTransport {}
 
-#[async_trait]
 impl ClientTransport for MockTransport {
     async fn connect(&self) -> std::io::Result<()> {
         info!("MockTransport::connect called - ready for communication");

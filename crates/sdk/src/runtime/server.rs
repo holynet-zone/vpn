@@ -1,8 +1,7 @@
-mod data;
 mod handshake;
 mod network;
+mod recv;
 pub mod session;
-mod transport;
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
@@ -11,74 +10,38 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tracing::info;
 
-use self::session::{HolyIp, Sessions};
-use self::{
-    data::{data_transport_executor, data_tun_executor},
-    handshake::handshake_executor,
-    network::{tun_listener, tun_sender},
-    transport::{transport_listener, transport_sender},
-};
+use self::session::Sessions;
+use self::{handshake::handshake_executor, network::encrypt_forward, recv::recv_decrypt_forward};
 use crate::crypto::{PublicKey, SecretKey};
+use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
-use crate::network::set_ipv4_forwarding;
 use crate::runtime::error::{BuildError, RuntimeError};
-use crate::tun;
 
-pub struct ServerBuilder {
-    transports: Vec<Arc<dyn Transport>>,
+pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
+    transports: Vec<Arc<T>>,
+    network: Arc<N>,
     sk: Option<SecretKey>,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
-    // TUN
-    tun_name: Option<String>,
-    tun_mtu: u16,
-    tun_ip: Option<IpAddr>,
-    tun_prefix: u8,
-    // Session cleanup
+    ip: Option<IpAddr>,
+    prefix: u8,
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
-    // Buffers
-    out_transport_buf: usize,
-    out_tun_buf: usize,
     handshake_buf: usize,
-    data_transport_buf: usize,
-    data_tun_buf: usize,
 }
 
-impl Default for ServerBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ServerBuilder {
-    pub fn new() -> Self {
+impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
+    pub fn new(transports: Vec<T>, network: N) -> Self {
         Self {
-            transports: Vec::new(),
+            transports: transports.into_iter().map(Arc::new).collect(),
+            network: Arc::new(network),
             sk: None,
             known_clients: Arc::new(DashMap::new()),
-            tun_name: None,
-            tun_mtu: 1420,
-            tun_ip: None,
-            tun_prefix: 24,
+            ip: None,
+            prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
             session_cleanup_interval: Duration::from_secs(60),
-            out_transport_buf: 1000,
-            out_tun_buf: 1000,
             handshake_buf: 1000,
-            data_transport_buf: 1000,
-            data_tun_buf: 1000,
         }
-    }
-
-    /// Add a transport. Call multiple times for multiple workers.
-    pub fn transport<T: Transport + 'static>(mut self, transport: T) -> Self {
-        self.transports.push(Arc::new(transport));
-        self
-    }
-
-    pub fn transports(mut self, transports: Vec<Arc<dyn Transport>>) -> Self {
-        self.transports = transports;
-        self
     }
 
     pub fn secret_key(mut self, sk: SecretKey) -> Self {
@@ -91,19 +54,10 @@ impl ServerBuilder {
         self
     }
 
-    pub fn tun_name(mut self, name: impl Into<String>) -> Self {
-        self.tun_name = Some(name.into());
-        self
-    }
-
-    pub fn tun_mtu(mut self, mtu: u16) -> Self {
-        self.tun_mtu = mtu;
-        self
-    }
-
-    pub fn tun_ip(mut self, ip: IpAddr, prefix: u8) -> Self {
-        self.tun_ip = Some(ip);
-        self.tun_prefix = prefix;
+    /// Set the VPN server IP and subnet prefix used for client session assignment.
+    pub fn ip(mut self, ip: IpAddr, prefix: u8) -> Self {
+        self.ip = Some(ip);
+        self.prefix = prefix;
         self
     }
 
@@ -118,32 +72,12 @@ impl ServerBuilder {
         self
     }
 
-    pub fn out_transport_buf(mut self, size: usize) -> Self {
-        self.out_transport_buf = size;
-        self
-    }
-
-    pub fn out_tun_buf(mut self, size: usize) -> Self {
-        self.out_tun_buf = size;
-        self
-    }
-
     pub fn handshake_buf(mut self, size: usize) -> Self {
         self.handshake_buf = size;
         self
     }
 
-    pub fn data_transport_buf(mut self, size: usize) -> Self {
-        self.data_transport_buf = size;
-        self
-    }
-
-    pub fn data_tun_buf(mut self, size: usize) -> Self {
-        self.data_tun_buf = size;
-        self
-    }
-
-    pub fn build(self) -> Result<Server, BuildError> {
+    pub fn build(self) -> Result<Server<T, N>, BuildError> {
         Ok(Server {
             transports: if self.transports.is_empty() {
                 return Err(BuildError::MissingRequiredField(
@@ -152,123 +86,70 @@ impl ServerBuilder {
             } else {
                 self.transports
             },
+            network: self.network,
             sk: self
                 .sk
                 .ok_or(BuildError::MissingRequiredField("secret_key"))?,
             known_clients: self.known_clients,
-            tun_name: self
-                .tun_name
-                .ok_or(BuildError::MissingRequiredField("tun_name"))?,
-            tun_mtu: self.tun_mtu,
-            tun_ip: self
-                .tun_ip
-                .ok_or(BuildError::MissingRequiredField("tun_ip"))?,
-            tun_prefix: self.tun_prefix,
+            ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
+            prefix: self.prefix,
             session_timeout: self.session_timeout,
             session_cleanup_interval: self.session_cleanup_interval,
-            out_transport_buf: self.out_transport_buf,
-            out_tun_buf: self.out_tun_buf,
             handshake_buf: self.handshake_buf,
-            data_transport_buf: self.data_transport_buf,
-            data_tun_buf: self.data_tun_buf,
         })
     }
 }
 
-pub struct Server {
-    transports: Vec<Arc<dyn Transport>>,
+pub struct Server<T: Transport + 'static, N: Network + 'static> {
+    transports: Vec<Arc<T>>,
+    network: Arc<N>,
     sk: SecretKey,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
-    // TUN
-    tun_name: String,
-    tun_mtu: u16,
-    tun_ip: IpAddr,
-    tun_prefix: u8,
-    // Session cleanup
+    ip: IpAddr,
+    prefix: u8,
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
-    // Buffers
-    out_transport_buf: usize,
-    out_tun_buf: usize,
     handshake_buf: usize,
-    data_transport_buf: usize,
-    data_tun_buf: usize,
 }
 
-impl Server {
+impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
-        set_ipv4_forwarding(true)?;
-
-        let tun = tun::setup(&self.tun_name, self.tun_mtu, true).await?;
-
-        match self.tun_ip {
-            IpAddr::V4(addr) => {
-                tun.set_network_address(addr, self.tun_prefix, None)
-                    .map_err(|e| RuntimeError::IO(format!("set tun network address: {e}")))?;
-            }
-            IpAddr::V6(addr) => {
-                tun.add_address_v6(addr, self.tun_prefix)
-                    .map_err(|e| RuntimeError::IO(format!("set tun ipv6 address: {e}")))?;
-            }
-        }
-
-        let sessions = Sessions::new(&self.tun_ip, self.tun_prefix);
-        let tun = Arc::new(tun);
+        let sessions = Sessions::new(&self.ip, self.prefix);
         let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 
         let mut set: JoinSet<()> = JoinSet::new();
 
         for transport in self.transports {
-            let tun = tun
-                .try_clone()
-                .map_err(|e| RuntimeError::IO(format!("clone tun device: {e}")))?;
-            let tun = Arc::new(tun);
-
-            let (out_transport_tx, out_transport_rx) =
-                tokio::sync::mpsc::channel(self.out_transport_buf);
-            let (out_tun_tx, out_tun_rx) = tokio::sync::mpsc::channel(self.out_tun_buf);
+            let network = self.network.clone();
             let (handshake_tx, handshake_rx) = tokio::sync::mpsc::channel(self.handshake_buf);
-            let (data_transport_tx, data_transport_rx) =
-                tokio::sync::mpsc::channel(self.data_transport_buf);
-            let (data_tun_tx, data_tun_rx) =
-                tokio::sync::mpsc::channel::<(Vec<u8>, HolyIp)>(self.data_tun_buf);
-
             let inf_timeout = self.session_timeout.is_none();
 
-            set.spawn(transport_listener(
+            // Hot path 1: UDP → decrypt → network (+ inline keepalive responses)
+            set.spawn(recv_decrypt_forward(
                 stop_rx.clone(),
                 transport.clone(),
+                network.clone(),
+                sessions.clone(),
                 handshake_tx,
-                data_transport_tx,
+                inf_timeout,
             ));
-            set.spawn(transport_sender(
+
+            // Hot path 2: network → encrypt → UDP
+            set.spawn(encrypt_forward(
                 stop_rx.clone(),
+                network,
                 transport.clone(),
-                out_transport_rx,
+                sessions.clone(),
             ));
-            set.spawn(tun_listener(stop_rx.clone(), tun.clone(), data_tun_tx));
-            set.spawn(tun_sender(stop_rx.clone(), tun.clone(), out_tun_rx));
+
+            // Rare path: handshake completion
             set.spawn(handshake_executor(
                 stop_rx.clone(),
                 handshake_rx,
-                out_transport_tx.clone(),
+                transport,
                 self.known_clients.clone(),
                 sessions.clone(),
                 self.sk.clone(),
-            ));
-            set.spawn(data_transport_executor(
-                stop_rx.clone(),
-                data_transport_rx,
-                out_transport_tx.clone(),
-                out_tun_tx.clone(),
-                sessions.clone(),
-                inf_timeout,
-            ));
-            set.spawn(data_tun_executor(
-                stop_rx.clone(),
-                data_tun_rx,
-                out_transport_tx,
-                sessions.clone(),
             ));
         }
 
@@ -289,8 +170,6 @@ impl Server {
                 tracing::error!("worker panicked: {}", e);
             }
         }
-
-        set_ipv4_forwarding(false)?;
 
         Err(RuntimeError::Unexpected(
             "all workers exited unexpectedly".into(),

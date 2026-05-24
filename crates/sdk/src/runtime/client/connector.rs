@@ -8,11 +8,11 @@ use crate::protocol::Alg;
 use crate::runtime::cred::Cred;
 use crate::runtime::error::RuntimeError;
 use crate::runtime::handshake::handshake_step;
-use crate::runtime::state::RuntimeState;
+use crate::runtime::state::{ClientSession, RuntimeState};
 
-pub(crate) async fn executor(
+pub(crate) async fn executor<T: ClientTransport>(
     state: watch::Sender<RuntimeState>,
-    transport: Arc<dyn ClientTransport>,
+    transport: Arc<T>,
     cred: Cred,
     alg: Alg,
     reconnect_delay: Duration,
@@ -36,7 +36,7 @@ pub(crate) async fn executor(
                                     state
                                         .send(RuntimeState::Connected((
                                             payload,
-                                            Arc::new(transport_state),
+                                            ClientSession::new(transport_state),
                                         )))
                                         .expect("broken runtime state pipe");
                                     continue;

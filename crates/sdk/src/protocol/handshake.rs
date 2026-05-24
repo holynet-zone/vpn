@@ -6,6 +6,25 @@ use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+/// Single-byte algorithm hint prepended to every `HandshakeInitial` payload.
+///
+/// Lets the server select the correct Noise params on the first read without
+/// a decrypt-then-retry heuristic.
+pub fn alg_hint_byte(alg: &Alg) -> u8 {
+    match alg {
+        Alg::Aes256 => 0x01,
+        Alg::ChaCha20Poly1305 => 0x02,
+    }
+}
+
+pub fn alg_from_hint_byte(b: u8) -> Option<Alg> {
+    match b {
+        0x01 => Some(Alg::Aes256),
+        0x02 => Some(Alg::ChaCha20Poly1305),
+        _ => None,
+    }
+}
+
 pub static NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S: LazyLock<NoiseParams> =
     LazyLock::new(|| NoiseParams::from_str("Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s").unwrap());
 

@@ -9,9 +9,8 @@ use tracing::{debug, info, warn};
 
 use super::session::Sessions;
 use crate::crypto::{PublicKey, SecretKey};
-use crate::protocol::handshake::{
-    NOISE_IK_PSK2_25519_AESGCM_BLAKE2S, NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S, params_from_alg,
-};
+use crate::gateway::transport::Transport;
+use crate::protocol::handshake::{alg_from_hint_byte, params_from_alg};
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
     Packet,
@@ -22,23 +21,17 @@ fn decode_handshake_params(
     handshake: &EncryptedHandshake,
     sk: &SecretKey,
 ) -> anyhow::Result<(PublicKey, Alg)> {
-    let mut buffer = [0u8; 65536];
+    let (hint, noise_msg) = handshake
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("empty handshake"))?;
+    let alg = alg_from_hint_byte(*hint)
+        .ok_or_else(|| anyhow::anyhow!("unknown algorithm hint byte: 0x{:02x}", hint))?;
 
-    let mut responder = Builder::new(NOISE_IK_PSK2_25519_AESGCM_BLAKE2S.clone())
+    let mut buffer = [0u8; 65536];
+    let mut responder = Builder::new(params_from_alg(&alg).clone())
         .local_private_key(sk.as_slice())?
         .build_responder()?;
-
-    let alg = match responder.read_message(handshake, &mut buffer) {
-        Ok(_) => Alg::Aes256,
-        Err(snow::Error::Decrypt) => {
-            responder = Builder::new(NOISE_IK_PSK2_25519_CHACHAPOLY_BLAKE2S.clone())
-                .local_private_key(sk.as_slice())?
-                .build_responder()?;
-            responder.read_message(handshake, &mut buffer)?;
-            Alg::ChaCha20Poly1305
-        }
-        Err(err) => return Err(anyhow::Error::from(err)),
-    };
+    responder.read_message(noise_msg, &mut buffer)?;
 
     match responder
         .get_remote_static()
@@ -50,8 +43,10 @@ fn decode_handshake_params(
     }
 }
 
+/// `noise_msg` must be the handshake payload with the leading algorithm-hint
+/// byte already stripped (i.e. `&handshake[1..]`).
 async fn complete(
-    handshake: &[u8],
+    noise_msg: &[u8],
     cred: &ServerCredential,
     alg: Alg,
     addr: &SocketAddr,
@@ -64,7 +59,7 @@ async fn complete(
         .build_responder()?;
 
     let mut buffer = [0u8; 65536];
-    let _len = responder.read_message(handshake, &mut buffer)?;
+    let _len = responder.read_message(noise_msg, &mut buffer)?;
 
     let (body, keys) = match sessions.next_session_id() {
         Some(sid) => match sessions.next_holy_ip() {
@@ -114,14 +109,18 @@ async fn complete(
     Ok(buffer[..len].to_vec().into())
 }
 
-pub(super) async fn handshake_executor(
+pub(super) async fn handshake_executor<T: Transport>(
     mut stop: watch::Receiver<bool>,
     mut queue: mpsc::Receiver<(EncryptedHandshake, SocketAddr)>,
-    transport_tx: mpsc::Sender<(Packet, SocketAddr)>,
+    transport: Arc<T>,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
     sessions: Sessions,
     sk: SecretKey,
 ) {
+    // Encode buffer for handshake responses (handshakes are rare, but we still
+    // avoid per-call allocation by reusing this buffer across iterations).
+    let mut encode_buf = [0u8; 4096];
+
     loop {
         tokio::select! {
             _ = stop.changed() => break,
@@ -134,11 +133,19 @@ pub(super) async fn handshake_executor(
                                 psk: psk.clone(),
                                 peer_pk,
                             };
-                            match complete(&handshake, &cred, alg, &addr, &sessions).await {
+                            match complete(&handshake[1..], &cred, alg, &addr, &sessions).await {
                                 Ok(response) => {
-                                    match transport_tx.send((Packet::HandshakeResponder(response), addr)).await {
-                                        Ok(_) => info!("[{}] handshake complete", addr),
-                                        Err(e) => warn!("[{}] failed to send handshake response: {}", addr, e),
+                                    let pkt = Packet::HandshakeResponder(response);
+                                    match bincode::encode_into_slice(
+                                        &pkt,
+                                        &mut encode_buf,
+                                        bincode::config::standard(),
+                                    ) {
+                                        Ok(n) => match transport.send_to(&encode_buf[..n], &addr).await {
+                                            Ok(_) => info!("[{}] handshake complete", addr),
+                                            Err(e) => warn!("[{}] failed to send handshake response: {}", addr, e),
+                                        },
+                                        Err(e) => warn!("[{}] failed to encode handshake response: {}", addr, e),
                                     }
                                 }
                                 Err(err) => warn!("[{}] failed to complete handshake: {}", addr, err),

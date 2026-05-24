@@ -1,7 +1,7 @@
+use crate::network::find_available_ifname;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use holynet_sdk::crypto::{PublicKey, SecretKey};
-use holynet_sdk::network::find_available_ifname;
 use holynet_sdk::protocol::Alg;
 use serde::{Deserialize, Serialize};
 use std::path::Path;

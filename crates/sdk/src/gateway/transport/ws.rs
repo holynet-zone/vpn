@@ -1,8 +1,7 @@
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
-use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
@@ -15,6 +14,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, accept_async, connect_a
 use tracing::{debug, info};
 
 use crate::gateway::transport::{ClientTransport, Transport, TransportReceiver, TransportSender};
+use crate::runtime::buf_pool::BufPool;
 use crate::runtime::error::RuntimeError;
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,9 @@ pub struct WsTransport {
     // tokio::sync::Mutex is required because recv() is async (lock held across await).
     message_queue: Mutex<mpsc::UnboundedReceiver<(Bytes, SocketAddr)>>,
     message_sender: mpsc::UnboundedSender<(Bytes, SocketAddr)>,
+    // Pooled allocation for outbound WS messages — reuses Arc<[u8]> slots instead of
+    // calling malloc on every send. Held only for the memcpy, never across .await.
+    send_pool: StdMutex<BufPool>,
 }
 
 impl WsTransport {
@@ -64,6 +67,7 @@ impl WsTransport {
                 active_connections: active_connections.clone(),
                 message_queue: Mutex::new(receiver),
                 message_sender: sender,
+                send_pool: StdMutex::new(BufPool::new(65536)),
             });
         }
 
@@ -74,6 +78,7 @@ impl WsTransport {
             active_connections,
             message_queue: Mutex::new(receiver),
             message_sender: sender,
+            send_pool: StdMutex::new(BufPool::new(65536)),
         });
 
         debug!("make ws transport pool with {} workers", listeners.len());
@@ -109,7 +114,6 @@ impl WsTransport {
     }
 }
 
-#[async_trait]
 impl TransportReceiver for WsTransport {
     #[inline(always)]
     async fn recv_from(&self, buffer: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
@@ -132,14 +136,16 @@ impl TransportReceiver for WsTransport {
     }
 }
 
-#[async_trait]
 impl TransportSender for WsTransport {
     #[inline(always)]
     async fn send_to(&self, data: &[u8], addr: &SocketAddr) -> io::Result<usize> {
         if let Some(mut writer) = self.active_connections.get_mut(addr) {
+            // Copy into a pooled buffer (no malloc after warmup); release the
+            // lock before the async send so we never hold it across an await.
+            let bytes = self.send_pool.lock().unwrap().copy_to_bytes(data);
             writer
                 .value_mut()
-                .send(Message::Binary(Bytes::copy_from_slice(data)))
+                .send(Message::Binary(bytes))
                 .await
                 .map_err(io::Error::other)?;
             Ok(data.len())
@@ -163,7 +169,7 @@ impl TransportSender for WsTransport {
 impl Transport for WsTransport {}
 
 // ---------------------------------------------------------------------------
-// Client-side transport
+// Client-side transport (WsClientTransport)
 // ---------------------------------------------------------------------------
 
 type ClientSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
@@ -173,6 +179,7 @@ pub struct WsClientTransport {
     addr: SocketAddr,
     write: Arc<Mutex<Option<ClientSink>>>,
     read: Arc<Mutex<Option<ClientStream>>>,
+    send_pool: StdMutex<BufPool>,
 }
 
 impl WsClientTransport {
@@ -181,11 +188,11 @@ impl WsClientTransport {
             addr,
             write: Arc::new(Mutex::new(None)),
             read: Arc::new(Mutex::new(None)),
+            send_pool: StdMutex::new(BufPool::new(65536)),
         }
     }
 }
 
-#[async_trait]
 impl TransportReceiver for WsClientTransport {
     #[inline(always)]
     async fn recv_from(&self, _buffer: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
@@ -219,7 +226,6 @@ impl TransportReceiver for WsClientTransport {
     }
 }
 
-#[async_trait]
 impl TransportSender for WsClientTransport {
     #[inline(always)]
     async fn send_to(&self, _data: &[u8], _addr: &SocketAddr) -> io::Result<usize> {
@@ -231,9 +237,12 @@ impl TransportSender for WsClientTransport {
 
     #[inline(always)]
     async fn send(&self, data: &[u8]) -> io::Result<usize> {
+        // Copy into a pooled buffer before acquiring the async write lock so
+        // the std Mutex is never held across an await point.
+        let bytes = self.send_pool.lock().unwrap().copy_to_bytes(data);
         match self.write.lock().await.as_mut() {
             Some(write) => write
-                .send(Message::Binary(Bytes::copy_from_slice(data)))
+                .send(Message::Binary(bytes))
                 .await
                 .map(|_| data.len())
                 .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string())),
@@ -247,7 +256,6 @@ impl TransportSender for WsClientTransport {
 
 impl Transport for WsClientTransport {}
 
-#[async_trait]
 impl ClientTransport for WsClientTransport {
     async fn connect(&self) -> io::Result<()> {
         info!("connecting to ws://{}", self.addr);

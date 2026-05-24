@@ -1,114 +1,97 @@
-use dashmap::DashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use dashmap::DashSet;
+
+/// Lock-free IP address pool.
+///
+/// Addresses are represented internally as `u64` offsets from the subnet base
+/// address (sufficient for IPv4 and IPv6 subnets up to /64 in size).
+/// `next` and `release` take `&self` so the pool can be shared across tasks
+/// without a `Mutex`.
 pub struct IpAddressGenerator {
-    current: IpAddr,
-    borrowed: DashSet<IpAddr>,
-    prefix: u8,
-    start: IpAddr,
-    end: IpAddr,
+    /// Subnet base address as u128 (uniform representation for V4 and V6).
+    start: u128,
+    /// Number of addresses in the subnet (saturated at u64::MAX for huge V6 subnets).
+    range_size: u64,
+    /// Monotonic cursor; taken modulo `range_size` to get the next candidate offset.
+    cursor: AtomicU64,
+    /// Set of currently allocated offsets.
+    borrowed: DashSet<u64>,
+    is_v4: bool,
 }
 
 pub type HolyIp = IpAddr;
 
 impl IpAddressGenerator {
     pub fn new(start_with: IpAddr, prefix: u8) -> Self {
-        let (start, end) = Self::calculate_range(start_with, prefix);
+        let (start, end, is_v4) = Self::subnet_range(start_with, prefix);
+        let range_size = (end - start).saturating_add(1).min(u64::MAX as u128) as u64;
+
+        let initial_offset = match start_with {
+            IpAddr::V4(v4) => (u32::from(v4) as u128).saturating_sub(start),
+            IpAddr::V6(v6) => u128::from(v6).saturating_sub(start),
+        }
+        .min(u64::MAX as u128) as u64;
+
         IpAddressGenerator {
-            current: start_with,
-            borrowed: DashSet::new(),
-            prefix,
             start,
-            end,
+            range_size,
+            cursor: AtomicU64::new(initial_offset),
+            borrowed: DashSet::new(),
+            is_v4,
         }
     }
 
-    pub fn next(&mut self) -> Option<IpAddr> {
-        if self.borrowed.len() as u128 >= self.max_addresses() {
+    pub fn next(&self) -> Option<IpAddr> {
+        if self.borrowed.len() as u64 >= self.range_size {
             return None;
         }
+        for _ in 0..self.range_size {
+            let offset = self.cursor.fetch_add(1, Ordering::Relaxed) % self.range_size;
+            if self.borrowed.insert(offset) {
+                return Some(self.offset_to_ip(offset));
+            }
+        }
+        None
+    }
 
-        let initial = self.current;
-        loop {
-            if self.borrowed.insert(self.current) {
-                return Some(self.current);
-            }
-            self.current = self.increment_address(&self.current);
-            if self.current == initial {
-                return None;
-            }
+    pub fn release(&self, address: &IpAddr) {
+        if let Some(offset) = self.ip_to_offset(address) {
+            self.borrowed.remove(&offset);
         }
     }
 
-    pub fn release(&mut self, address: &IpAddr) {
-        self.borrowed.remove(address);
-    }
-
-    fn increment_address(&self, address: &IpAddr) -> IpAddr {
-        match address {
-            IpAddr::V4(ipv4) => {
-                let mut octets = ipv4.octets();
-                for i in (0..4).rev() {
-                    if octets[i] < 255 {
-                        octets[i] += 1;
-                        break;
-                    } else {
-                        octets[i] = 0;
-                    }
-                }
-                let new_ip = IpAddr::V4(Ipv4Addr::from(octets));
-                if new_ip > self.end {
-                    self.start
-                } else {
-                    new_ip
-                }
-            }
-            IpAddr::V6(ipv6) => {
-                let mut segments = ipv6.segments();
-                for i in (0..8).rev() {
-                    if segments[i] < 0xFFFF {
-                        segments[i] += 1;
-                        break;
-                    } else {
-                        segments[i] = 0;
-                    }
-                }
-                let new_ip = IpAddr::V6(Ipv6Addr::from(segments));
-                if new_ip > self.end {
-                    self.start
-                } else {
-                    new_ip
-                }
-            }
+    fn offset_to_ip(&self, offset: u64) -> IpAddr {
+        let addr = self.start + offset as u128;
+        if self.is_v4 {
+            IpAddr::V4(Ipv4Addr::from(addr as u32))
+        } else {
+            IpAddr::V6(Ipv6Addr::from(addr))
         }
     }
 
-    fn max_addresses(&self) -> u128 {
-        match self.current {
-            IpAddr::V4(_) => 2u128.pow(32 - self.prefix as u32),
-            IpAddr::V6(_) => 2u128.pow(128 - self.prefix as u32),
-        }
+    fn ip_to_offset(&self, ip: &IpAddr) -> Option<u64> {
+        let addr = match ip {
+            IpAddr::V4(v4) => u32::from(*v4) as u128,
+            IpAddr::V6(v6) => u128::from(*v6),
+        };
+        addr.checked_sub(self.start)
+            .filter(|&off| off < self.range_size as u128)
+            .map(|off| off as u64)
     }
 
-    fn calculate_range(start_with: IpAddr, prefix: u8) -> (IpAddr, IpAddr) {
-        match start_with {
-            IpAddr::V4(ipv4) => {
+    fn subnet_range(addr: IpAddr, prefix: u8) -> (u128, u128, bool) {
+        match addr {
+            IpAddr::V4(v4) => {
                 let mask = !0u32 << (32 - prefix);
-                let start = u32::from(ipv4) & mask;
-                let end = start | !mask;
-                (
-                    IpAddr::V4(Ipv4Addr::from(start)),
-                    IpAddr::V4(Ipv4Addr::from(end)),
-                )
+                let base = u32::from(v4) & mask;
+                (base as u128, (base | !mask) as u128, true)
             }
-            IpAddr::V6(ipv6) => {
+            IpAddr::V6(v6) => {
                 let mask = !0u128 << (128 - prefix);
-                let start = u128::from(ipv6) & mask;
-                let end = start | !mask;
-                (
-                    IpAddr::V6(Ipv6Addr::from(start)),
-                    IpAddr::V6(Ipv6Addr::from(end)),
-                )
+                let base = u128::from(v6) & mask;
+                (base, base | !mask, false)
             }
         }
     }
@@ -116,14 +99,12 @@ impl IpAddressGenerator {
 
 pub fn increment_ip(ip: IpAddr) -> IpAddr {
     match ip {
-        IpAddr::V4(ipv4) => {
-            let addr_u32 = u32::from_be_bytes(ipv4.octets()).wrapping_add(1);
-            IpAddr::V4(Ipv4Addr::from(addr_u32))
-        }
-        IpAddr::V6(ipv6) => {
-            let addr_u128 = u128::from_be_bytes(ipv6.octets()).wrapping_add(1);
-            IpAddr::V6(Ipv6Addr::from(addr_u128))
-        }
+        IpAddr::V4(v4) => IpAddr::V4(Ipv4Addr::from(
+            u32::from_be_bytes(v4.octets()).wrapping_add(1),
+        )),
+        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from(
+            u128::from_be_bytes(v6.octets()).wrapping_add(1),
+        )),
     }
 }
 
@@ -133,7 +114,7 @@ mod tests {
 
     #[test]
     fn test_ipv4_address_generator() {
-        let mut generator = IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 24);
+        let generator = IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 24);
         let mut addresses = Vec::new();
         for _ in 0..256 {
             addresses.push(generator.next().unwrap());
@@ -148,5 +129,44 @@ mod tests {
             generator.next(),
             Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)))
         );
+    }
+
+    #[test]
+    fn test_release_and_reuse() {
+        // /30 has 4 addresses; fill the pool completely, then release one.
+        // The cursor is monotonic, so the freed slot is found on the wrap-around scan.
+        let generator = IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 30);
+        let ips: Vec<_> = (0..4).map(|_| generator.next().unwrap()).collect();
+        assert!(generator.next().is_none(), "pool must be exhausted");
+        generator.release(&ips[0]);
+        // Only one slot is free — next() must return exactly that one.
+        assert_eq!(generator.next(), Some(ips[0]));
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_no_duplicates() {
+        use std::sync::Arc;
+        use tokio::task;
+
+        const TASKS: usize = 16;
+        const PER_TASK: usize = 16;
+
+        let pool = Arc::new(IpAddressGenerator::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)),
+            24,
+        ));
+        let mut handles = Vec::new();
+        for _ in 0..TASKS {
+            let g = pool.clone();
+            handles.push(task::spawn(async move {
+                (0..PER_TASK).filter_map(|_| g.next()).collect::<Vec<_>>()
+            }));
+        }
+        let mut all = std::collections::HashSet::new();
+        for h in handles {
+            for ip in h.await.unwrap() {
+                assert!(all.insert(ip), "duplicate IP: {ip}");
+            }
+        }
     }
 }

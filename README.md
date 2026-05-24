@@ -1,6 +1,6 @@
 # Holynet VPN
 
-<img src="docs/icons/icon.svg" align="right" alt="Holynet logo" width="120" height="178">
+<img src="https://avatars.githubusercontent.com/u/202399815?s=400" align="right" alt="Holynet logo" height="178">
 
 Holynet VPN is a high-performance VPN protocol built with Rust, designed for fast and secure connections over UDP.
 
@@ -44,7 +44,7 @@ sequenceDiagram
     Server->>Client: S (Trusted setup)
     Note over Server,Client: ...
 
-    Client->>+Server: Handshake Initial (e, es, s, ss)
+    Client->>+Server: Handshake Initial (alg, e, es, s, ss)
     Server-->>-Client: Handshake Complete (e, ee, se, psk)
     Note over Server,Client: Handshake completed! <br/>Packets can be transmit
     
@@ -105,13 +105,17 @@ sequenceDiagram
 
 #### Handshake Initial
 ```text
-0      8        24                                            792  bit
-┌──────┬─────────┬──────────────────────────────────────────────┐     
-│ TYPE │   LEN   │              NOISE METADATA                  │     
-│ 0x00 │    N    │                (ENCRYPTED)                   │     
-│(8bit)│ (16bit) │                 (768 bit)                    │     
-└──────┴─────────┴──────────────────────────────────────────────┘     
+0      8        24      32                                    800  bit
+┌──────┬─────────┬───────┬──────────────────────────────────────┐
+│ TYPE │   LEN   │  ALG  │            NOISE METADATA            │
+│ 0x00 │    N    │       │              (ENCRYPTED)             │
+│(8bit)│ (16bit) │ (8bit)│               (768 bit)             │
+└──────┴─────────┴───────┴──────────────────────────────────────┘
 ```
+
+ALG values:
+- `0x01` — AES-256-GCM (`Noise_IKpsk2_25519_AESGCM_BLAKE2s`)
+- `0x02` — ChaCha20-Poly1305 (`Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s`)
 
 #### Handshake Response
 ```text
@@ -184,52 +188,56 @@ sequenceDiagram
 
 #### DataClient
 ```text
-0      8      40      56                                        N  bit
-┌──────┬───────┬───────┬────────────────────────────────────────┐     
-│ TYPE │  SID  │  LEN  │     DATA PAYLOAD + NOISE METADATA      │     
-│ 0x02 │       │   N   │             (ENCRYPTED)                │     
-│(8bit)│(32bit)│(16bit)│              (N-56bit)                 │     
-└──────┴───────┴───────┴────────────────────────────────────────┘     
-                       0        8      24                             
-                       ┌────────┬───────┬───────────────────────┐     
-                       │  TYPE  │  LEN  │           IP          │     
-            IP PACKET  │  0x00  │   X   │         PACKET        │     
-                       │ (8bit) │(16bit)│        (X-24bit)      │     
-                       └────────┴───────┴───────────────────────┘     
-                       0        8                      136            
-                       ┌────────┬────────────────────────┐            
-                       │  TYPE  │    CLIENT TIMESTAMP    │            
-            KEEPALIVE  │  0x01  │         micros         │            
-                       │ (8bit) │        (128bit)        │            
-                       └────────┴────────────────────────┘            
+0      8      40                   104    120                              N  bit
+┌──────┬───────┬────────────────────┬──────┬──────────────────────────────────┐
+│ TYPE │  SID  │       NONCE        │ LEN  │   DATA PAYLOAD + NOISE METADATA  │
+│ 0x02 │       │                    │  N   │           (ENCRYPTED)            │
+│(8bit)│(32bit)│      (64bit)       │(16bit)            (N-120bit)            │
+└──────┴───────┴────────────────────┴──────┴──────────────────────────────────┘
+                                           0        8      24                  
+                                           ┌────────┬───────┬───────────────┐  
+                                           │  TYPE  │  LEN  │      IP       │  
+                                IP PACKET  │  0x00  │   X   │    PACKET     │  
+                                           │ (8bit) │(16bit)│   (X-24bit)   │  
+                                           └────────┴───────┴───────────────┘  
+                                           0        8                 136      
+                                           ┌────────┬──────────────────────┐   
+                                           │  TYPE  │   CLIENT TIMESTAMP   │   
+                                KEEPALIVE  │  0x01  │        micros        │   
+                                           │ (8bit) │       (128bit)       │   
+                                           └────────┴──────────────────────┘   
 ```
 
+> NONCE is a monotonically increasing counter controlled by the sender.
+> Used as the nonce for AEAD (Noise `StatelessTransportState`).
+> The receiver checks it against a sliding anti-replay window (2048 bits) before decrypting.
+
 #### DataServer
-```text                                                
-0      8      24                                                N  bit
-┌──────┬───────┬────────────────────────────────────────────────┐     
-│ TYPE │  LEN  │         DATA PAYLOAD + NOISE METADATA          │     
-│ 0x03 │   N   │                 (ENCRYPTED)                    │     
-│(8bit)│(16bit)│                  (N-24bit)                     │     
-└──────┴───────┴────────────────────────────────────────────────┘     
-               0        8      24                                     
-               ┌────────┬───────┬───────────────────────────────┐     
-               │  TYPE  │  LEN  │           IP                  │     
-       PACKET  │  0x00  │   X   │         PACKET                │     
-               │ (8bit) │(16bit)│        (X-24bit)              │     
-               └────────┴───────┴───────────────────────────────┘     
-               0        8                      136                    
-               ┌────────┬────────────────────────┐                    
-               │  TYPE  │    CLIENT TIMESTAMP    │                    
-    KEEPALIVE  │  0x01  │         micros         │                    
-               │ (8bit) │        (128bit)        │                    
-               └────────┴────────────────────────┘                    
-               0        8       16                                    
-               ┌────────┬────────┐                                    
-               │  TYPE  │  CODE  │                                    
-   DISCONNECT  │  0x02  │        │                                    
-               │ (8bit) │ (8bit) │                                    
-               └────────┴────────┘                                    
+```text
+0      8                    72     88                                     N  bit
+┌──────┬─────────────────────┬──────┬──────────────────────────────────────────┐
+│ TYPE │        NONCE        │ LEN  │       DATA PAYLOAD + NOISE METADATA      │
+│ 0x03 │                     │  N   │               (ENCRYPTED)               │
+│(8bit)│       (64bit)       │(16bit)                (N-88bit)                │
+└──────┴─────────────────────┴──────┴──────────────────────────────────────────┘
+                                    0        8      24                          
+                                    ┌────────┬───────┬───────────────────────┐  
+                                    │  TYPE  │  LEN  │          IP           │  
+                            PACKET  │  0x00  │   X   │        PACKET         │  
+                                    │ (8bit) │(16bit)│       (X-24bit)       │  
+                                    └────────┴───────┴───────────────────────┘  
+                                    0        8                       136        
+                                    ┌────────┬──────────────────────────┐       
+                                    │  TYPE  │     CLIENT TIMESTAMP     │       
+                         KEEPALIVE  │  0x01  │          micros          │       
+                                    │ (8bit) │         (128bit)         │       
+                                    └────────┴──────────────────────────┘       
+                                    0        8       16                         
+                                    ┌────────┬────────┐                         
+                                    │  TYPE  │  CODE  │                         
+                        DISCONNECT  │  0x02  │        │                         
+                                    │ (8bit) │ (8bit) │                         
+                                    └────────┴────────┘                         
 ```
 
 ## License

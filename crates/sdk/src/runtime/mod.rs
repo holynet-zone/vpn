@@ -1,7 +1,9 @@
+pub(crate) mod buf_pool;
 pub mod client;
 pub mod cred;
 pub(crate) mod crypto;
 pub mod error;
 pub(crate) mod handshake;
+pub(crate) mod replay;
 pub mod server;
 pub mod state;
