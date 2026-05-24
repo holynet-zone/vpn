@@ -1,6 +1,6 @@
 # Holynet VPN
 
-<img src="docs/icons/icon.svg" align="right" alt="Holynet logo" width="120" height="178">
+<img src="https://avatars.githubusercontent.com/u/202399815?s=400" align="right" alt="Holynet logo" height="178">
 
 Holynet VPN is a high-performance VPN protocol built with Rust, designed for fast and secure connections over UDP.
 
