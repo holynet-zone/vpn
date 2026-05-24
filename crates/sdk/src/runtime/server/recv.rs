@@ -9,7 +9,7 @@
 //!   → PacketRef::from_bytes   — borrows ciphertext from stack (no alloc)
 //!   → noise_decrypt_data_client — decrypts into PLAIN_BUF, copies payload
 //!                                  into task-local BufPool (no alloc after warmup)
-//!   → tun.send(&bytes)        — writes directly, no intermediate channel
+//!   → network.send(&bytes)    — writes directly, no intermediate channel
 //! ```
 //!
 //! Keepalive responses are encrypted and encoded inline using a task-local
@@ -21,9 +21,9 @@ use std::sync::atomic::Ordering;
 
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
-use tun_rs::AsyncDevice;
 
 use super::session::{Session, Sessions};
+use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
 use crate::protocol::{DataServerBody, EncryptedHandshake, Packet, PacketRef, SessionId};
 use crate::runtime::buf_pool::BufPool;
@@ -33,21 +33,20 @@ use crate::time::sec_since_start;
 /// Combined receive → decrypt → forward task.
 ///
 /// Reads encrypted UDP datagrams, decrypts them, and:
-/// - **Data packets** → written directly to `tun`.
+/// - **Data packets** → written directly to `network`.
 /// - **Keepalive** → response encrypted and sent back inline.
 /// - **Handshakes** → forwarded to `handshake_tx` (rare, may allocate).
-pub(super) async fn recv_decrypt_forward<T: Transport>(
+pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
     mut stop: watch::Receiver<bool>,
     transport: Arc<T>,
-    tun: Arc<AsyncDevice>,
+    network: Arc<N>,
     sessions: Sessions,
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
     inf_sessions_timeout: bool,
-    tun_mtu: u16,
 ) {
     let mut udp_buf = [0u8; 65536];
     let mut encode_buf = [0u8; 65600]; // for keepalive response encoding, reused in-place
-    let mut tun_pool = BufPool::new(tun_mtu as usize + 32);
+    let mut net_pool = BufPool::new(network.mtu() as usize + 32);
     // Per-task 1-entry session cache: eliminates DashMap lookup on every
     // packet when a single client dominates the worker's receive queue.
     let mut cached_session: Option<(SessionId, Arc<Session>)> = None;
@@ -106,15 +105,15 @@ pub(super) async fn recv_decrypt_forward<T: Transport>(
                                 continue;
                             }
 
-                            match noise_decrypt_data_client(ciphertext, &session.state, &mut tun_pool, nonce) {
+                            match noise_decrypt_data_client(ciphertext, &session.state, &mut net_pool, nonce) {
                                 Err(e) => warn!("[{}] decrypt failed (sid {}): {}", addr, sid, e),
                                 Ok(DataClientAction::Forward(bytes)) => {
                                     if session.sock_addr() != addr {
                                         debug!("[{}] addr changed for sid {}", addr, sid);
                                         session.set_sock_addr(addr);
                                     }
-                                    if let Err(e) = tun.send(&bytes).await {
-                                        error!("tun send error: {}", e);
+                                    if let Err(e) = network.send(&bytes).await {
+                                        error!("network send error: {}", e);
                                     }
                                 }
                                 Ok(DataClientAction::KeepAlive(client_ts)) => {

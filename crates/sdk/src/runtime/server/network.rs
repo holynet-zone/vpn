@@ -1,11 +1,9 @@
-//! Merged TUN-read + encrypt + UDP-send task (server side).
-//!
-//! Replaces the former `tun_listener` + `data_tun_executor` + `transport_sender` chain.
+//! Merged network-read + encrypt + UDP-send task (server side).
 //!
 //! ## Zero-allocation hot path
 //!
 //! ```text
-//! TUN recv → tun_buf (stack)
+//! network.recv → net_buf (stack)
 //!   → write_ip_packet_plain  — PLAIN_BUF (thread-local), Copy 1
 //!   → noise write_message    — AEAD encrypt into encode_buf (stack), Copy 2
 //!   → transport.send_to      — direct UDP write, no intermediate buffers
@@ -17,9 +15,9 @@ use std::sync::atomic::Ordering;
 
 use tokio::sync::watch;
 use tracing::{debug, error, warn};
-use tun_rs::AsyncDevice;
 
 use super::session::{HolyIp, Sessions};
+use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
 use crate::runtime::crypto::encode_data_server_packet;
 
@@ -54,36 +52,36 @@ fn ip_to_holy(ip: IpAddr) -> HolyIp {
     }
 }
 
-/// Combined TUN-read → encrypt → UDP-send task.
+/// Combined network-read → encrypt → UDP-send task.
 ///
-/// Reads raw IP packets from the TUN device, looks up the destination session,
+/// Reads raw IP packets from the network, looks up the destination session,
 /// encrypts the payload, encodes the `Packet`, and sends it directly via the
 /// transport. No intermediate channels or heap allocations in steady state.
-pub(super) async fn tun_encrypt_forward<T: Transport>(
+pub(super) async fn encrypt_forward<T: Transport, N: Network>(
     mut stop: watch::Receiver<bool>,
-    tun: Arc<AsyncDevice>,
+    network: Arc<N>,
     transport: Arc<T>,
     sessions: Sessions,
 ) {
-    let mut tun_buf = [0u8; 65536];
+    let mut net_buf = [0u8; 65536];
     let mut encode_buf = [0u8; 65600];
 
     loop {
         tokio::select! {
             _ = stop.changed() => break,
-            result = tun.recv(&mut tun_buf) => match result {
-                Err(e) => error!("TUN recv error: {}", e),
+            result = network.recv(&mut net_buf) => match result {
+                Err(e) => error!("network recv error: {}", e),
                 Ok(len) => {
-                    match parse_destination(&tun_buf[..len]) {
-                        Err(e) => warn!("failed to parse TUN packet destination: {}", e),
+                    match parse_destination(&net_buf[..len]) {
+                        Err(e) => warn!("failed to parse network packet destination: {}", e),
                         Ok(ip) => {
                             let holy_ip = ip_to_holy(ip);
                             let Some(session) = sessions.get_by_holy_ip(&holy_ip) else {
-                                warn!("[{}] no session for TUN packet destination", ip);
+                                warn!("[{}] no session for network packet destination", ip);
                                 continue;
                             };
                             let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
-                            match encode_data_server_packet(&tun_buf[..len], &session.state, send_nonce, &mut encode_buf) {
+                            match encode_data_server_packet(&net_buf[..len], &session.state, send_nonce, &mut encode_buf) {
                                 Err(e) => warn!("[{}] encrypt failed (sid {}): {}", ip, session.id, e),
                                 Ok(n) => {
                                     let addr = session.sock_addr();
@@ -98,7 +96,7 @@ pub(super) async fn tun_encrypt_forward<T: Transport>(
             }
         }
     }
-    debug!("tun_encrypt_forward stopped");
+    debug!("encrypt_forward stopped");
 }
 
 #[cfg(test)]

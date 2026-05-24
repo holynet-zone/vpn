@@ -30,11 +30,10 @@ pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
     state_tx: watch::Sender<RuntimeState>,
     transport: Arc<T>,
     network: Arc<N>,
-    tun_mtu: u16,
 ) {
     let mut state_rx = state_tx.subscribe();
     let mut buf = [0u8; MAX_PACKET_SIZE];
-    let mut net_pool = BufPool::new(tun_mtu as usize + 32);
+    let mut net_pool = BufPool::new(network.mtu() as usize + 32);
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
     let mut is_connected = false;

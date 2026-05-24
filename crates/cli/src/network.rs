@@ -3,11 +3,41 @@ compile_error!("holynet-cli: network routing is only supported on Linux");
 
 use anyhow::format_err;
 use ipnetwork::{IpNetwork, NetworkSize};
+use std::collections::HashSet;
 use std::fmt::Write;
+use std::io;
 use std::net::IpAddr;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 use tracing::{debug, info, warn};
+
+pub fn find_available_ifname(base_name: &str) -> String {
+    let existing: HashSet<String> = std::fs::read_dir("/sys/class/net")
+        .map(|dir| {
+            dir.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut index = 0u32;
+    loop {
+        let candidate = format!("{}{}", base_name, index);
+        if !existing.contains(&candidate) {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+pub fn set_ipv4_forwarding(value: bool) -> io::Result<()> {
+    Command::new("sysctl")
+        .arg("-w")
+        .arg(format!("net.ipv4.ip_forward={}", if value { 1 } else { 0 }))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|_| ())
+}
 
 pub struct RouteState {
     dev: String,

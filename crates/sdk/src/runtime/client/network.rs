@@ -1,7 +1,5 @@
 //! Merged network-read + encrypt + UDP-send task (client side).
 //!
-//! Replaces `network_receiver` + `data_tun_executor` + `transport_sender`.
-//!
 //! ## Zero-allocation hot path
 //!
 //! ```text
@@ -25,7 +23,7 @@ use crate::runtime::crypto::encode_data_client_packet;
 use crate::runtime::error::RuntimeError;
 use crate::runtime::state::{ClientSession, RuntimeState};
 
-pub(super) async fn tun_encrypt_forward<T: ClientTransport, N: Network>(
+pub(super) async fn encrypt_forward<T: ClientTransport, N: Network>(
     state_tx: watch::Sender<RuntimeState>,
     network: Arc<N>,
     transport: Arc<T>,
@@ -71,7 +69,7 @@ pub(super) async fn tun_encrypt_forward<T: ClientTransport, N: Network>(
             result = network.recv(&mut buf) => match result {
                 Err(e) => {
                     let state = RuntimeState::Error(RuntimeError::IO(
-                        format!("failed to receive network: {}", e)
+                        format!("failed to receive from network: {}", e)
                     ));
                     if state_tx.send(state).is_err() { break; }
                 }
@@ -85,7 +83,7 @@ pub(super) async fn tun_encrypt_forward<T: ClientTransport, N: Network>(
                         continue;
                     }
                     let Some(ref session) = transport_state else {
-                        warn!("received tun packet before connected state, dropping");
+                        warn!("received network packet before connected state, dropping");
                         continue;
                     };
                     let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);

@@ -7,7 +7,7 @@ use crate::protocol::HandshakeResponderPayload;
 use crate::runtime::error::RuntimeError;
 use crate::runtime::replay::ReplayWindow;
 
-/// Per-session state shared by all client tasks (tun, recv, keepalive).
+/// Per-session state shared by all client tasks (network, recv, keepalive).
 ///
 /// Wrapping nonce counters in `Arc` lets the three tasks share the same
 /// counters without cloning underlying state on every watch channel read.

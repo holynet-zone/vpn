@@ -1,7 +1,7 @@
 mod handshake;
+mod network;
 mod recv;
 pub mod session;
-mod tun;
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
@@ -11,41 +11,33 @@ use tokio::task::JoinSet;
 use tracing::info;
 
 use self::session::Sessions;
-use self::{handshake::handshake_executor, recv::recv_decrypt_forward, tun::tun_encrypt_forward};
+use self::{handshake::handshake_executor, network::encrypt_forward, recv::recv_decrypt_forward};
 use crate::crypto::{PublicKey, SecretKey};
+use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
-use crate::network::set_ipv4_forwarding;
 use crate::runtime::error::{BuildError, RuntimeError};
-use crate::tun::setup as tun_setup;
 
-pub struct ServerBuilder<T: Transport + 'static> {
+pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     transports: Vec<Arc<T>>,
+    network: Arc<N>,
     sk: Option<SecretKey>,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
-    // TUN
-    tun_name: Option<String>,
-    tun_mtu: u16,
-    tun_ip: Option<IpAddr>,
-    tun_prefix: u8,
-    // Session cleanup
+    ip: Option<IpAddr>,
+    prefix: u8,
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
-    // Buffers
     handshake_buf: usize,
 }
 
-impl<T: Transport + 'static> ServerBuilder<T> {
-    /// Create a builder with the given pool of transports (e.g. from
-    /// `UdpTransport::new_pool` for SO_REUSEPORT workers).
-    pub fn new(transports: Vec<T>) -> Self {
+impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
+    pub fn new(transports: Vec<T>, network: N) -> Self {
         Self {
             transports: transports.into_iter().map(Arc::new).collect(),
+            network: Arc::new(network),
             sk: None,
             known_clients: Arc::new(DashMap::new()),
-            tun_name: None,
-            tun_mtu: 1420,
-            tun_ip: None,
-            tun_prefix: 24,
+            ip: None,
+            prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
             session_cleanup_interval: Duration::from_secs(60),
             handshake_buf: 1000,
@@ -62,19 +54,10 @@ impl<T: Transport + 'static> ServerBuilder<T> {
         self
     }
 
-    pub fn tun_name(mut self, name: impl Into<String>) -> Self {
-        self.tun_name = Some(name.into());
-        self
-    }
-
-    pub fn tun_mtu(mut self, mtu: u16) -> Self {
-        self.tun_mtu = mtu;
-        self
-    }
-
-    pub fn tun_ip(mut self, ip: IpAddr, prefix: u8) -> Self {
-        self.tun_ip = Some(ip);
-        self.tun_prefix = prefix;
+    /// Set the VPN server IP and subnet prefix used for client session assignment.
+    pub fn ip(mut self, ip: IpAddr, prefix: u8) -> Self {
+        self.ip = Some(ip);
+        self.prefix = prefix;
         self
     }
 
@@ -94,7 +77,7 @@ impl<T: Transport + 'static> ServerBuilder<T> {
         self
     }
 
-    pub fn build(self) -> Result<Server<T>, BuildError> {
+    pub fn build(self) -> Result<Server<T, N>, BuildError> {
         Ok(Server {
             transports: if self.transports.is_empty() {
                 return Err(BuildError::MissingRequiredField(
@@ -103,18 +86,13 @@ impl<T: Transport + 'static> ServerBuilder<T> {
             } else {
                 self.transports
             },
+            network: self.network,
             sk: self
                 .sk
                 .ok_or(BuildError::MissingRequiredField("secret_key"))?,
             known_clients: self.known_clients,
-            tun_name: self
-                .tun_name
-                .ok_or(BuildError::MissingRequiredField("tun_name"))?,
-            tun_mtu: self.tun_mtu,
-            tun_ip: self
-                .tun_ip
-                .ok_or(BuildError::MissingRequiredField("tun_ip"))?,
-            tun_prefix: self.tun_prefix,
+            ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
+            prefix: self.prefix,
             session_timeout: self.session_timeout,
             session_cleanup_interval: self.session_cleanup_interval,
             handshake_buf: self.handshake_buf,
@@ -122,70 +100,44 @@ impl<T: Transport + 'static> ServerBuilder<T> {
     }
 }
 
-pub struct Server<T: Transport + 'static> {
+pub struct Server<T: Transport + 'static, N: Network + 'static> {
     transports: Vec<Arc<T>>,
+    network: Arc<N>,
     sk: SecretKey,
     known_clients: Arc<DashMap<PublicKey, SecretKey>>,
-    // TUN
-    tun_name: String,
-    tun_mtu: u16,
-    tun_ip: IpAddr,
-    tun_prefix: u8,
-    // Session cleanup
+    ip: IpAddr,
+    prefix: u8,
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
-    // Buffers
     handshake_buf: usize,
 }
 
-impl<T: Transport + 'static> Server<T> {
+impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
-        set_ipv4_forwarding(true)?;
-
-        let tun = tun_setup(&self.tun_name, self.tun_mtu, true).await?;
-
-        match self.tun_ip {
-            IpAddr::V4(addr) => {
-                tun.set_network_address(addr, self.tun_prefix, None)
-                    .map_err(|e| RuntimeError::IO(format!("set tun network address: {e}")))?;
-            }
-            IpAddr::V6(addr) => {
-                tun.add_address_v6(addr, self.tun_prefix)
-                    .map_err(|e| RuntimeError::IO(format!("set tun ipv6 address: {e}")))?;
-            }
-        }
-
-        let sessions = Sessions::new(&self.tun_ip, self.tun_prefix);
-        let tun = Arc::new(tun);
+        let sessions = Sessions::new(&self.ip, self.prefix);
         let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 
         let mut set: JoinSet<()> = JoinSet::new();
 
         for transport in self.transports {
-            let tun_clone = tun
-                .try_clone()
-                .map_err(|e| RuntimeError::IO(format!("clone tun device: {e}")))?;
-            let tun_clone = Arc::new(tun_clone);
-
+            let network = self.network.clone();
             let (handshake_tx, handshake_rx) = tokio::sync::mpsc::channel(self.handshake_buf);
-
             let inf_timeout = self.session_timeout.is_none();
 
-            // Hot path 1: UDP → decrypt → TUN (+ inline keepalive responses)
+            // Hot path 1: UDP → decrypt → network (+ inline keepalive responses)
             set.spawn(recv_decrypt_forward(
                 stop_rx.clone(),
                 transport.clone(),
-                tun_clone.clone(),
+                network.clone(),
                 sessions.clone(),
                 handshake_tx,
                 inf_timeout,
-                self.tun_mtu,
             ));
 
-            // Hot path 2: TUN → encrypt → UDP
-            set.spawn(tun_encrypt_forward(
+            // Hot path 2: network → encrypt → UDP
+            set.spawn(encrypt_forward(
                 stop_rx.clone(),
-                tun_clone,
+                network,
                 transport.clone(),
                 sessions.clone(),
             ));
@@ -218,8 +170,6 @@ impl<T: Transport + 'static> Server<T> {
                 tracing::error!("worker panicked: {}", e);
             }
         }
-
-        set_ipv4_forwarding(false)?;
 
         Err(RuntimeError::Unexpected(
             "all workers exited unexpectedly".into(),
