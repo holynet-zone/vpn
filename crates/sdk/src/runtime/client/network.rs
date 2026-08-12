@@ -1,12 +1,14 @@
 //! Merged network-read + encrypt + UDP-send task (client side).
 //!
-//! ## Zero-allocation hot path
+//! ## Batched, zero-allocation hot path
 //!
 //! ```text
-//! network.recv → buf (stack)
-//!   → write_ip_packet_plain  — PLAIN_BUF (thread-local), Copy 1
-//!   → noise write_message    — AEAD encrypt into encode_buf (stack), Copy 2
-//!   → transport.send         — direct UDP write, no intermediate buffers
+//! network.recv_multiple → up to TUN_BATCH_SIZE IP packets from one 64 KiB
+//!                         GSO super-frame (TUN GRO split, one syscall)
+//!   for each packet:
+//!     → write_ip_packet_plain  — PLAIN_BUF (thread-local), Copy 1
+//!     → noise write_message    — AEAD encrypt into encode_buf (stack), Copy 2
+//!     → transport.send         — direct UDP write, no intermediate buffers
 //! ```
 
 use std::ops::Deref;
@@ -16,9 +18,12 @@ use std::sync::atomic::Ordering;
 use tokio::sync::watch;
 use tracing::warn;
 
-use crate::gateway::{network::Network, transport::ClientTransport};
+use crate::gateway::{
+    network::{Network, TUN_BATCH_SIZE},
+    transport::ClientTransport,
+};
 use crate::protocol::SessionId;
-use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
+use crate::runtime::client::AWAIT_STATE_DELAY;
 use crate::runtime::crypto::encode_data_client_packet;
 use crate::runtime::error::RuntimeError;
 use crate::runtime::state::{ClientSession, RuntimeState};
@@ -29,15 +34,19 @@ pub(super) async fn encrypt_forward<T: ClientTransport, N: Network>(
     transport: Arc<T>,
 ) {
     let mut state_rx = state_tx.subscribe();
-    let mut buf = [0u8; MAX_PACKET_SIZE];
-    let mut encode_buf = [0u8; MAX_PACKET_SIZE + 64];
+    // Batched TUN read buffers (reused each iteration — zero alloc in steady state).
+    let mut orig = vec![0u8; 10 + 65535];
+    let seg = network.mtu() as usize + 128;
+    let mut bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; seg]).collect();
+    let mut sizes = vec![0usize; TUN_BATCH_SIZE];
+    let mut encode_buf = [0u8; 65600];
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
     let mut is_connected = false;
     let mut sid = SessionId::default();
     let mut transport_state: Option<ClientSession> = None;
 
-    loop {
+    'main: loop {
         // Pause reading until connected to avoid encrypting with stale state.
         if !is_connected {
             match state_rx.has_changed() {
@@ -66,37 +75,35 @@ pub(super) async fn encrypt_forward<T: ClientTransport, N: Network>(
                     _ => {}
                 }
             }
-            result = network.recv(&mut buf) => match result {
+            result = network.recv_multiple(&mut orig, &mut bufs, &mut sizes, 0) => match result {
                 Err(e) => {
                     let state = RuntimeState::Error(RuntimeError::IO(
                         format!("failed to receive from network: {}", e)
                     ));
                     if state_tx.send(state).is_err() { break; }
                 }
-                Ok(n) => {
-                    if n == 0 {
-                        warn!("received network packet with 0 bytes, dropping");
-                        continue;
-                    }
-                    if n >= buf.len() {
-                        warn!("received network packet >= {} bytes, possible truncation", buf.len());
-                        continue;
-                    }
+                Ok(count) => {
                     let Some(ref session) = transport_state else {
                         warn!("received network packet before connected state, dropping");
                         continue;
                     };
-                    let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
-                    match encode_data_client_packet(&buf[..n], sid, &session.noise, nonce, &mut encode_buf) {
-                        Err(e) => {
-                            if state_tx.send(RuntimeState::Error(
-                                RuntimeError::Unexpected(format!("failed to encrypt data: {}", e))
-                            )).is_err() { break; }
+                    for i in 0..count {
+                        let pkt = &bufs[i][..sizes[i]];
+                        if pkt.is_empty() {
+                            continue;
                         }
-                        Ok(total) => {
-                            if let Err(e) = transport.send(&encode_buf[..total]).await {
-                                warn!("transport send error, reconnecting: {}", e);
-                                if state_tx.send(RuntimeState::Connecting).is_err() { break; }
+                        let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match encode_data_client_packet(pkt, sid, &session.noise, nonce, &mut encode_buf) {
+                            Err(e) => {
+                                if state_tx.send(RuntimeState::Error(
+                                    RuntimeError::Unexpected(format!("failed to encrypt data: {}", e))
+                                )).is_err() { break 'main; }
+                            }
+                            Ok(total) => {
+                                if let Err(e) = transport.send(&encode_buf[..total]).await {
+                                    warn!("transport send error, reconnecting: {}", e);
+                                    if state_tx.send(RuntimeState::Connecting).is_err() { break 'main; }
+                                }
                             }
                         }
                     }

@@ -80,6 +80,16 @@ impl TransportReceiver for UdpTransport {
     async fn recv(&self, buffer: &mut [u8]) -> std::io::Result<usize> {
         self.socket.recv(buffer).await
     }
+
+    #[inline(always)]
+    fn try_recv_from(&self, buffer: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+        self.socket.try_recv_from(buffer)
+    }
+
+    #[inline(always)]
+    fn try_recv(&self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.socket.try_recv(buffer)
+    }
 }
 
 impl TransportSender for UdpTransport {

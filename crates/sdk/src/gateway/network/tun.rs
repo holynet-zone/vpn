@@ -1,13 +1,17 @@
-use crate::gateway::network::{Network, NetworkReceiver, NetworkSender};
+use crate::gateway::network::{GroState, Network, NetworkReceiver, NetworkSender};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tun_rs::AsyncDevice;
 
+/// Env var to force-disable TUN offload at runtime without touching config.
+const DISABLE_OFFLOAD_ENV: &str = "HOLYNET_DISABLE_OFFLOAD";
+
 #[derive(Clone)]
 pub struct TunNetwork {
     device: Arc<AsyncDevice>,
     mtu: u16,
+    offload: bool,
 }
 
 impl TunNetwork {
@@ -16,11 +20,18 @@ impl TunNetwork {
         mtu: u16,
         multi_queue: bool,
         ip: Option<(IpAddr, u8)>,
+        offload: bool,
     ) -> io::Result<Self> {
+        // Runtime kill-switch: `HOLYNET_DISABLE_OFFLOAD=1` overrides config.
+        // tun-rs itself also silently falls back to per-packet if the kernel
+        // rejects TUNSETOFFLOAD, so this is defence-in-depth for buggy NICs.
+        let offload = offload && std::env::var_os(DISABLE_OFFLOAD_ENV).is_none();
+
         let mut config = tun_rs::DeviceBuilder::default()
             .name(name)
             .mtu(mtu)
             .multi_queue(multi_queue)
+            .offload(offload)
             .tx_queue_len(10000)
             .enable(true);
 
@@ -40,6 +51,7 @@ impl TunNetwork {
         Ok(Self {
             device: Arc::new(device),
             mtu,
+            offload,
         })
     }
 
@@ -79,5 +91,32 @@ impl NetworkReceiver for TunNetwork {
 impl Network for TunNetwork {
     fn mtu(&self) -> u16 {
         self.mtu
+    }
+
+    fn offload_enabled(&self) -> bool {
+        self.offload
+    }
+
+    /// Batched read via tun-rs `recv_multiple` (GRO split on Linux).
+    #[cfg(target_os = "linux")]
+    async fn recv_multiple(
+        &self,
+        orig: &mut [u8],
+        bufs: &mut [Vec<u8>],
+        sizes: &mut [usize],
+        offset: usize,
+    ) -> io::Result<usize> {
+        self.device.recv_multiple(orig, bufs, sizes, offset).await
+    }
+
+    /// Batched write via tun-rs `send_multiple` (GRO merge on Linux).
+    #[cfg(target_os = "linux")]
+    async fn send_multiple(
+        &self,
+        gro: &mut GroState,
+        bufs: &mut [Vec<u8>],
+        offset: usize,
+    ) -> io::Result<usize> {
+        self.device.send_multiple(&mut gro.0, bufs, offset).await
     }
 }

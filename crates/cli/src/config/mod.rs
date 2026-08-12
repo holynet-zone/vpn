@@ -17,12 +17,21 @@ pub struct GeneralConfig {
     pub storage: PathBuf,
 }
 
+fn default_offload() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct InterfaceConfig {
     pub name: String,
     pub mtu: u16,
     pub address: IpAddr,
     pub prefix: u8,
+    /// Enable Linux TUN GRO/TSO offload (batched recv_multiple/send_multiple).
+    /// Falls back to per-packet automatically if the kernel rejects it, or when
+    /// `HOLYNET_DISABLE_OFFLOAD=1` is set.
+    #[serde(default = "default_offload")]
+    pub offload: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -99,6 +108,7 @@ impl Default for InterfaceConfig {
             mtu: 1420,
             address: IpAddr::from([10, 8, 0, 0]),
             prefix: 24,
+            offload: true,
         }
     }
 }

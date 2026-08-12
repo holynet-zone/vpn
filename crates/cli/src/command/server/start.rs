@@ -94,6 +94,7 @@ impl StartCmd {
             config.interface.mtu,
             true,
             Some((config.interface.address, config.interface.prefix)),
+            config.interface.offload,
         )
         .await
         {

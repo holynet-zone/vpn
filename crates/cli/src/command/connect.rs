@@ -92,7 +92,7 @@ impl ConnectCmd {
         let iface = config.interface.unwrap_or_default();
         let runtime = config.runtime.unwrap_or_default();
 
-        let tun = match TunNetwork::new(&iface.name, iface.mtu, false, None).await {
+        let tun = match TunNetwork::new(&iface.name, iface.mtu, false, None, iface.offload).await {
             Ok(t) => t,
             Err(e) => {
                 success_err!("setup tun: {}", e);

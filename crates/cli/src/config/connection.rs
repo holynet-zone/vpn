@@ -20,10 +20,18 @@ pub struct CredentialsConfig {
     pub server_public_key: PublicKey,
 }
 
+fn default_offload() -> bool {
+    true
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InterfaceConfig {
     pub name: String,
     pub mtu: u16,
+    /// Enable Linux TUN GRO/TSO offload. Auto-falls back to per-packet if the
+    /// kernel rejects it or `HOLYNET_DISABLE_OFFLOAD=1` is set.
+    #[serde(default = "default_offload")]
+    pub offload: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -97,6 +105,7 @@ impl Default for InterfaceConfig {
         Self {
             name: find_available_ifname("holynet"),
             mtu: 1420,
+            offload: true,
         }
     }
 }
