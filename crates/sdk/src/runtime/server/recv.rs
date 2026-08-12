@@ -5,11 +5,11 @@
 //! ## Zero-allocation hot path
 //!
 //! ```text
-//! UDP recv → stack buffer (no alloc)
-//!   → PacketRef::from_bytes   — borrows ciphertext from stack (no alloc)
-//!   → noise_decrypt_data_client — decrypts into PLAIN_BUF, copies payload
-//!                                  into task-local BufPool (no alloc after warmup)
-//!   → network.send(&bytes)    — writes directly, no intermediate channel
+//! UDP recv → udp_buf (task-owned stack, no alloc)
+//!   → PacketRef::from_bytes            — borrows ciphertext from udp_buf (no alloc)
+//!   → noise_decrypt_data_client_into   — decrypts directly into task-owned plain_buf
+//!   → network.send(plain)              — sends the plaintext slice directly, no
+//!                                        Bytes, no BufPool, no copy, no alloc
 //! ```
 //!
 //! Keepalive responses are encrypted and encoded inline using a task-local
@@ -26,8 +26,7 @@ use super::session::{Session, Sessions};
 use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
 use crate::protocol::{DataServerBody, EncryptedHandshake, Packet, PacketRef, SessionId};
-use crate::runtime::buf_pool::BufPool;
-use crate::runtime::crypto::{DataClientAction, noise_decrypt_data_client, noise_encrypt};
+use crate::runtime::crypto::{DataClientActionRef, noise_decrypt_data_client_into, noise_encrypt};
 use crate::time::sec_since_start;
 
 /// Combined receive → decrypt → forward task.
@@ -46,7 +45,7 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
 ) {
     let mut udp_buf = [0u8; 65536];
     let mut encode_buf = [0u8; 65600]; // for keepalive response encoding, reused in-place
-    let mut net_pool = BufPool::new(network.mtu() as usize + 32);
+    let mut plain_buf = [0u8; 65536]; // decrypt target, reused in-place; sent directly to TUN
     // Per-task 1-entry session cache: eliminates DashMap lookup on every
     // packet when a single client dominates the worker's receive queue.
     let mut cached_session: Option<(SessionId, Arc<Session>)> = None;
@@ -105,18 +104,18 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                                 continue;
                             }
 
-                            match noise_decrypt_data_client(ciphertext, &session.state, &mut net_pool, nonce) {
+                            match noise_decrypt_data_client_into(ciphertext, &session.state, &mut plain_buf, nonce) {
                                 Err(e) => warn!("[{}] decrypt failed (sid {}): {}", addr, sid, e),
-                                Ok(DataClientAction::Forward(bytes)) => {
+                                Ok(DataClientActionRef::Forward(packet)) => {
                                     if session.sock_addr() != addr {
                                         debug!("[{}] addr changed for sid {}", addr, sid);
                                         session.set_sock_addr(addr);
                                     }
-                                    if let Err(e) = network.send(&bytes).await {
+                                    if let Err(e) = network.send(packet).await {
                                         error!("network send error: {}", e);
                                     }
                                 }
-                                Ok(DataClientAction::KeepAlive(client_ts)) => {
+                                Ok(DataClientActionRef::KeepAlive(client_ts)) => {
                                     info!("[{}] keepalive from sid {}", addr, sid);
                                     if session.sock_addr() != addr {
                                         debug!("[{}] addr changed for sid {}", addr, sid);

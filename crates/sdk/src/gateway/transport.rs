@@ -1,7 +1,5 @@
 #[cfg(feature = "udp")]
 pub mod udp;
-#[cfg(all(target_os = "linux", feature = "udp-uring"))]
-pub mod uring;
 
 #[cfg(test)]
 mod mock;

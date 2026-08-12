@@ -5,11 +5,11 @@
 //! ## Zero-allocation hot path
 //!
 //! ```text
-//! transport.recv → stack buffer (no alloc)
-//!   → PacketRef::from_bytes      — borrows ciphertext from stack (no alloc)
-//!   → noise_decrypt_data_server  — decrypts into PLAIN_BUF, copies payload
-//!                                   into task-local BufPool (no alloc after warmup)
-//!   → network.send(&bytes)       — writes directly (no intermediate channel)
+//! transport.recv → buf (task-owned stack, no alloc)
+//!   → PacketRef::from_bytes            — borrows ciphertext from buf (no alloc)
+//!   → noise_decrypt_data_server_into   — decrypts directly into task-owned plain_buf
+//!   → network.send(plain)              — sends the plaintext slice directly, no
+//!                                        Bytes, no BufPool, no copy, no alloc
 //! ```
 
 use std::ops::Deref;
@@ -20,9 +20,8 @@ use tracing::{info, warn};
 
 use crate::gateway::{network::Network, transport::ClientTransport};
 use crate::protocol::PacketRef;
-use crate::runtime::buf_pool::BufPool;
 use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
-use crate::runtime::crypto::{DataServerAction, noise_decrypt_data_server};
+use crate::runtime::crypto::{DataServerActionRef, noise_decrypt_data_server_into};
 use crate::runtime::state::{ClientSession, RuntimeState};
 use crate::time::{format_duration_millis, micros_since_start};
 
@@ -33,7 +32,7 @@ pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
 ) {
     let mut state_rx = state_tx.subscribe();
     let mut buf = [0u8; MAX_PACKET_SIZE];
-    let mut net_pool = BufPool::new(network.mtu() as usize + 32);
+    let mut plain_buf = [0u8; MAX_PACKET_SIZE]; // decrypt target, sent directly to network
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
     let mut is_connected = false;
@@ -92,17 +91,17 @@ pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
                                 warn!("replay/stale nonce {} from server", nonce);
                                 continue;
                             }
-                            match noise_decrypt_data_server(ciphertext, &session.noise, &mut net_pool, nonce) {
+                            match noise_decrypt_data_server_into(ciphertext, &session.noise, &mut plain_buf, nonce) {
                                 Err(e) => warn!("decrypt failed: {}", e),
-                                Ok(DataServerAction::Forward(bytes)) => {
-                                    if let Err(e) = network.send(&bytes).await {
+                                Ok(DataServerActionRef::Forward(packet)) => {
+                                    if let Err(e) = network.send(packet).await {
                                         warn!("network send failed: {}", e);
                                     }
                                 }
-                                Ok(DataServerAction::KeepAlive(ts)) => {
+                                Ok(DataServerActionRef::KeepAlive(ts)) => {
                                     info!("keepalive rtt: {}", format_duration_millis(ts, micros_since_start()));
                                 }
-                                Ok(DataServerAction::Disconnect(code)) => {
+                                Ok(DataServerActionRef::Disconnect(code)) => {
                                     warn!("server disconnect code {}", code);
                                     if state_tx.send(RuntimeState::Connecting).is_err() { break; }
                                 }

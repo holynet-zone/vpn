@@ -24,7 +24,6 @@ use bytes::Bytes;
 use snow::StatelessTransportState;
 
 use crate::protocol::{DataClientBodyRef, DataServerBodyRef, EncryptedData};
-use crate::runtime::buf_pool::BufPool;
 
 thread_local! {
     /// Intermediate plaintext buffer: used for bincode encode (encrypt) or
@@ -200,65 +199,75 @@ pub(crate) fn encode_data_client_packet(
 }
 
 /// Result of decrypting a DataClientBody (server receives this from clients).
-pub(crate) enum DataClientAction {
-    /// IP packet to forward to TUN. `Bytes` is backed by the caller's BufPool.
-    Forward(Bytes),
+///
+/// `Forward` borrows the caller's plaintext buffer directly — no copy, no
+/// allocation. The borrow lives as long as the `plain` buffer passed to the
+/// decrypt function.
+pub(crate) enum DataClientActionRef<'p> {
+    /// IP packet to forward to TUN, borrowed from the caller's plaintext buffer.
+    Forward(&'p [u8]),
     /// Keepalive timestamp (microseconds since client process start).
     KeepAlive(u128),
 }
 
 /// Result of decrypting a DataServerBody (client receives this from server).
-pub(crate) enum DataServerAction {
-    /// IP packet to forward to network/TUN.
-    Forward(Bytes),
+///
+/// `Forward` borrows the caller's plaintext buffer directly — see
+/// [`DataClientActionRef`].
+pub(crate) enum DataServerActionRef<'p> {
+    /// IP packet to forward to network/TUN, borrowed from the plaintext buffer.
+    Forward(&'p [u8]),
     /// Keepalive echo timestamp.
     KeepAlive(u128),
     /// Server-initiated disconnect code.
     Disconnect(u8),
 }
 
-/// Decrypt a DataClientBody from raw ciphertext without any heap allocation.
+/// Decrypt a DataClientBody from raw ciphertext directly into `plain`.
+///
+/// The decrypted IP packet is returned as a `&[u8]` slice borrowing `plain`,
+/// so it can be handed straight to `network.send()` with **zero copies and
+/// zero allocations** — no intermediate `Bytes`/`BufPool` hop.
+///
+/// `plain` must be large enough to hold the decrypted plaintext
+/// (`ciphertext.len() - 16` bytes); a 64 KiB task-owned buffer always suffices.
 ///
 /// `nonce` is taken from the packet header; the replay window check must be
 /// performed by the caller before calling this function.
 #[inline]
-pub(crate) fn noise_decrypt_data_client(
+pub(crate) fn noise_decrypt_data_client_into<'p>(
     ciphertext: &[u8],
     state: &StatelessTransportState,
-    pool: &mut BufPool,
+    plain: &'p mut [u8],
     nonce: u64,
-) -> anyhow::Result<DataClientAction> {
-    PLAIN_BUF.with_borrow_mut(|plain| {
-        let len = state.read_message(nonce, ciphertext, plain)?;
-        let body = DataClientBodyRef::from_plain_buf(&plain[..len])
-            .ok_or_else(|| anyhow::anyhow!("malformed DataClientBody"))?;
-        Ok(match body {
-            DataClientBodyRef::Packet(data) => DataClientAction::Forward(pool.copy_to_bytes(data)),
-            DataClientBodyRef::KeepAlive(ts) => DataClientAction::KeepAlive(ts),
-        })
+) -> anyhow::Result<DataClientActionRef<'p>> {
+    let len = state.read_message(nonce, ciphertext, plain)?;
+    let body = DataClientBodyRef::from_plain_buf(&plain[..len])
+        .ok_or_else(|| anyhow::anyhow!("malformed DataClientBody"))?;
+    Ok(match body {
+        DataClientBodyRef::Packet(data) => DataClientActionRef::Forward(data),
+        DataClientBodyRef::KeepAlive(ts) => DataClientActionRef::KeepAlive(ts),
     })
 }
 
-/// Decrypt a DataServerBody from raw ciphertext without any heap allocation.
+/// Decrypt a DataServerBody from raw ciphertext directly into `plain`.
 ///
-/// `nonce` is taken from the packet header; the replay window check must be
-/// performed by the caller before calling this function.
+/// See [`noise_decrypt_data_client_into`] — same zero-copy, zero-allocation
+/// contract; the returned `Forward` slice borrows `plain`.
 #[inline]
-pub(crate) fn noise_decrypt_data_server(
+pub(crate) fn noise_decrypt_data_server_into<'p>(
     ciphertext: &[u8],
     state: &StatelessTransportState,
-    pool: &mut BufPool,
+    plain: &'p mut [u8],
     nonce: u64,
-) -> anyhow::Result<DataServerAction> {
-    PLAIN_BUF.with_borrow_mut(|plain| {
-        let len = state.read_message(nonce, ciphertext, plain)?;
-        let body = DataServerBodyRef::from_plain_buf(&plain[..len])
-            .ok_or_else(|| anyhow::anyhow!("malformed DataServerBody"))?;
-        Ok(match body {
-            DataServerBodyRef::Packet(data) => DataServerAction::Forward(pool.copy_to_bytes(data)),
-            DataServerBodyRef::KeepAlive(ts) => DataServerAction::KeepAlive(ts),
-            DataServerBodyRef::Disconnect(code) => DataServerAction::Disconnect(code),
-        })
+) -> anyhow::Result<DataServerActionRef<'p>> {
+    let len = state.read_message(nonce, ciphertext, plain)?;
+    let body = DataServerBodyRef::from_plain_buf(&plain[..len])
+        .ok_or_else(|| anyhow::anyhow!("malformed DataServerBody"))?;
+    Ok(match body {
+        DataServerBodyRef::Packet(data) => DataServerActionRef::Forward(data),
+        DataServerBodyRef::KeepAlive(ts) => DataServerActionRef::KeepAlive(ts),
+        DataServerBodyRef::Disconnect(code) => DataServerActionRef::Disconnect(code),
     })
 }
 
@@ -396,13 +405,12 @@ mod tests {
     // --- encode_data_server/client_packet tests ---
 
     /// encode_data_server_packet produces wire bytes that PacketRef parses correctly
-    /// and that noise_decrypt_data_server recovers the original payload from.
+    /// and that noise_decrypt_data_server_into recovers the original payload from.
     #[test]
     fn test_encode_data_server_packet_roundtrip() {
         use crate::protocol::PacketRef;
-        use crate::runtime::buf_pool::BufPool;
         use crate::runtime::crypto::{
-            DataServerAction, encode_data_server_packet, noise_decrypt_data_server,
+            DataServerActionRef, encode_data_server_packet, noise_decrypt_data_server_into,
         };
 
         let (tx, rx) = make_noise_pair_for_test();
@@ -421,9 +429,9 @@ mod tests {
             } => {
                 assert_eq!(pkt_nonce, nonce);
                 // Decrypt
-                let mut pool = BufPool::new(65536);
-                match noise_decrypt_data_server(ciphertext, &rx, &mut pool, nonce).unwrap() {
-                    DataServerAction::Forward(data) => assert_eq!(&data[..], &payload[..]),
+                let mut plain = [0u8; 65536];
+                match noise_decrypt_data_server_into(ciphertext, &rx, &mut plain, nonce).unwrap() {
+                    DataServerActionRef::Forward(data) => assert_eq!(data, &payload[..]),
                     _ => panic!("expected Forward"),
                 }
             }
@@ -431,13 +439,12 @@ mod tests {
         }
     }
 
-    /// encode_data_client_packet round-trip via PacketRef + noise_decrypt_data_client.
+    /// encode_data_client_packet round-trip via PacketRef + noise_decrypt_data_client_into.
     #[test]
     fn test_encode_data_client_packet_roundtrip() {
         use crate::protocol::PacketRef;
-        use crate::runtime::buf_pool::BufPool;
         use crate::runtime::crypto::{
-            DataClientAction, encode_data_client_packet, noise_decrypt_data_client,
+            DataClientActionRef, encode_data_client_packet, noise_decrypt_data_client_into,
         };
 
         let (tx, rx) = make_noise_pair_for_test();
@@ -457,9 +464,9 @@ mod tests {
             } => {
                 assert_eq!(pkt_sid, sid);
                 assert_eq!(pkt_nonce, nonce);
-                let mut pool = BufPool::new(65536);
-                match noise_decrypt_data_client(ciphertext, &rx, &mut pool, nonce).unwrap() {
-                    DataClientAction::Forward(data) => assert_eq!(&data[..], &payload[..]),
+                let mut plain = [0u8; 65536];
+                match noise_decrypt_data_client_into(ciphertext, &rx, &mut plain, nonce).unwrap() {
+                    DataClientActionRef::Forward(data) => assert_eq!(data, &payload[..]),
                     _ => panic!("expected Forward"),
                 }
             }

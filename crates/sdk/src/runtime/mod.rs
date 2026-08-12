@@ -1,4 +1,3 @@
-pub(crate) mod buf_pool;
 pub mod client;
 pub mod cred;
 pub(crate) mod crypto;

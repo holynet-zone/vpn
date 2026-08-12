@@ -9,7 +9,6 @@ default = ["udp-reuse-port"]
 # transport features
 udp = ["socket2"]
 udp-reuse-port = ["udp"]
-udp-uring = ["udp", "io-uring"]
 ws = ["socket2", "tokio-tungstenite"]
 ws-reuse-port = ["ws"]
 
@@ -21,12 +20,10 @@ snow = "0.10"
 tokio = { workspace = true }
 tun-rs = { workspace = true }
 tracing = { workspace = true }
-libc = "0.2"
 
 # transport
 socket2 = { version = "0.6", optional = true }
 tokio-tungstenite = { version = "0.28", optional = true }
-io-uring = { version = "0.7", optional = true }
 # > sessions / concurrency
 dashmap = "6"
 rand = "0.9"
