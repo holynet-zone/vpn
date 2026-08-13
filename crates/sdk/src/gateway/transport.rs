@@ -2,7 +2,7 @@
 pub mod udp;
 
 #[cfg(test)]
-mod mock;
+pub(crate) mod mock;
 #[cfg(feature = "ws")]
 pub mod ws;
 

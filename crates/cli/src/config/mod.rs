@@ -43,6 +43,10 @@ pub struct SessionConfig {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RuntimeConfig {
     pub workers: usize,
+    /// Parallel decrypt workers per receive socket (server only). `0`/`1` keeps
+    /// the single-task path; `>= 2` enables the WireGuard-style decrypt pool.
+    #[serde(default)]
+    pub decrypt_workers: usize,
     pub so_rcvbuf: usize,
     pub so_sndbuf: usize,
     pub out_udp_buf: usize,
@@ -126,6 +130,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             workers: 0,
+            decrypt_workers: 0,
             so_rcvbuf: 1024 * 1024 * 1024,
             so_sndbuf: 1024 * 1024 * 1024,
             out_udp_buf: 1000,

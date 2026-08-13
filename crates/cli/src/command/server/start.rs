@@ -126,7 +126,8 @@ impl StartCmd {
             .ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)
-            .handshake_buf(runtime.handshake_buf);
+            .handshake_buf(runtime.handshake_buf)
+            .decrypt_workers(runtime.decrypt_workers);
 
         let server = match builder.build() {
             Ok(s) => s,
