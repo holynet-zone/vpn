@@ -1,6 +1,7 @@
 mod connector;
 mod keepalive;
 mod network;
+mod network_pool;
 mod recv;
 
 use std::{sync::Arc, time::Duration};
@@ -33,6 +34,7 @@ pub struct ClientBuilder<T: ClientTransport + 'static, N: Network + 'static> {
     handshake_timeout: Duration,
     reconnect_delay: Duration,
     cred: Option<Cred>,
+    encrypt_workers: usize,
 }
 
 impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
@@ -45,6 +47,7 @@ impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
             handshake_timeout: Duration::from_secs(5),
             reconnect_delay: Duration::from_secs(3),
             cred: None,
+            encrypt_workers: 0,
         }
     }
 
@@ -75,6 +78,14 @@ impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
         self
     }
 
+    /// Number of parallel encrypt workers on the send path. `0`/`1` keeps the
+    /// single-task path; `>= 2` enables the WireGuard-style pool that spreads
+    /// one flow's encryption across cores with in-order (nonce-order) sends.
+    pub fn encrypt_workers(mut self, count: usize) -> Self {
+        self.encrypt_workers = count;
+        self
+    }
+
     pub fn build(self) -> Result<Client<T, N>, BuildError> {
         let (state, _) = watch::channel(RuntimeState::Connecting);
         Ok(Client {
@@ -85,6 +96,7 @@ impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
             handshake_timeout: self.handshake_timeout,
             reconnect_delay: self.reconnect_delay,
             cred: self.cred.ok_or(BuildError::MissingRequiredField("cred"))?,
+            encrypt_workers: self.encrypt_workers,
             state,
         })
     }
@@ -98,6 +110,7 @@ pub struct Client<T: ClientTransport + 'static, N: Network + 'static> {
     handshake_timeout: Duration,
     reconnect_delay: Duration,
     cred: Cred,
+    encrypt_workers: usize,
     state: watch::Sender<RuntimeState>,
 }
 
@@ -116,12 +129,22 @@ impl<T: ClientTransport + 'static, N: Network + 'static> Client<T, N> {
             self.network.clone(),
         ));
 
-        // Hot path 2: network → encrypt → UDP
-        set.spawn(encrypt_forward(
-            self.state.clone(),
-            self.network.clone(),
-            self.transport.clone(),
-        ));
+        // Hot path 2: network → encrypt → UDP. With >= 2 encrypt workers, spread
+        // one flow's encryption across cores via the pool; else single-task.
+        if self.encrypt_workers >= 2 {
+            set.spawn(network_pool::encrypt_forward_pool(
+                self.state.clone(),
+                self.network.clone(),
+                self.transport.clone(),
+                self.encrypt_workers,
+            ));
+        } else {
+            set.spawn(encrypt_forward(
+                self.state.clone(),
+                self.network.clone(),
+                self.transport.clone(),
+            ));
+        }
 
         // Keepalive (optional)
         if let Some(duration) = self.keepalive {

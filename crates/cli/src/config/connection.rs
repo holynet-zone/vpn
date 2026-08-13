@@ -38,6 +38,10 @@ pub struct InterfaceConfig {
 pub struct RuntimeConfig {
     pub handshake_timeout: u64,
     pub keepalive: Option<u64>,
+    /// Parallel encrypt workers on the send path. `0`/`1` keeps the single-task
+    /// path; `>= 2` enables the WireGuard-style encrypt pool.
+    #[serde(default)]
+    pub encrypt_workers: usize,
     pub so_rcvbuf: usize,
     pub so_sndbuf: usize,
     pub out_udp_buf: usize,
@@ -90,6 +94,7 @@ impl Default for RuntimeConfig {
         Self {
             handshake_timeout: 3000,
             keepalive: Some(5),
+            encrypt_workers: 0,
             so_rcvbuf: 1024 * 1024 * 1024,
             so_sndbuf: 1024 * 1024 * 1024,
             out_udp_buf: 1000,

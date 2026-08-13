@@ -137,6 +137,7 @@ impl ConnectCmd {
             .keepalive(runtime.keepalive.map(Duration::from_secs))
             .handshake_timeout(Duration::from_millis(runtime.handshake_timeout))
             .cred(cred)
+            .encrypt_workers(runtime.encrypt_workers)
             .build()
         {
             Ok(c) => c,
