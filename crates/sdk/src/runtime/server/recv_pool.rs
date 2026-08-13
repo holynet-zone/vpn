@@ -8,37 +8,48 @@
 //! decryption across a worker pool while preserving on-wire order:
 //!
 //! ```text
-//!   reader ──seq 0,1,2,3,4,5…──▶ worker[seq % W] ──▶ writer (reads
-//!   (one socket, assigns a       (W tasks decrypt   done[expected % W] in
-//!    monotonic seq, round-        in parallel)       strict rotation → global
-//!    robins to workers)                              order restored) ──▶ TUN
+//!   reader ──batch 0,1,2,3…──▶ worker[batch % W] ──▶ writer (reads
+//!   (one socket, one recvmmsg  (W tasks decrypt a    done[expected % W] in
+//!    = one batch of up to       whole batch each)     strict rotation → global
+//!    MMSG_BATCH datagrams)                            order restored) ──▶ TUN
 //! ```
+//!
+//! ## Batch-granular handoffs (why a whole batch travels per channel message)
+//!
+//! Every `reader → worker` and `worker → writer` message is a whole [`Batch`] of
+//! up to [`MMSG_BATCH`] datagrams, **not** one datagram. A per-datagram handoff
+//! costs ~one task wakeup per packet (tokio work-stealing wakes the consumer on
+//! another core: IPI + cache-miss, a few µs). At a few hundred k pps that alone
+//! caps the pipeline's drain rate — with no core saturated — which is exactly
+//! what capped this pool at ~3.3 Gbit/s. Carrying ~32 packets per message
+//! amortises the wakeup ~32×, cutting the per-packet pipeline latency (and the
+//! standing TCP queue it builds) roughly in half, the way wireguard-go passes
+//! arrays of packets between its stages.
 //!
 //! ## Why the rotation restores order without a reorder buffer
 //!
-//! The reader assigns a strictly increasing `seq` and sends `seq` to
-//! `work[seq % W]`. Each worker's input and output channels are FIFO, so
-//! `done[k]` yields exactly the sub-sequence `k, k+W, k+2W, …` in increasing
-//! order. The writer consumes `done[0], done[1], …, done[W-1], done[0], …`,
-//! i.e. `seq` `0, 1, 2, …` — the exact order the datagrams were received (which
-//! is the order the sender put them on the wire). No per-packet reorder buffer,
-//! no sequence heap.
+//! The reader assigns a strictly increasing batch `seq` and sends batch `seq` to
+//! `work[seq % W]`. Each worker's channels are FIFO, so `done[k]` yields exactly
+//! the sub-sequence of batches `k, k+W, k+2W, …` in increasing order. The writer
+//! consumes `done[0], done[1], …, done[W-1], done[0], …`, i.e. batches
+//! `0, 1, 2, …`; within each batch the datagrams keep their recvmmsg order (=
+//! wire order). No per-packet reorder buffer, no sequence heap.
 //!
 //! ## Replay check lives in the writer
 //!
-//! The anti-replay window is checked in the single-threaded writer, in `seq`
-//! order — never in the parallel workers. That keeps the per-session replay
-//! `Mutex` uncontended (a hot single flow would otherwise have all W workers
-//! hammering one lock every packet). A replayed datagram is still decrypted
-//! (wasted AEAD work) but then dropped; replays are attack/dup-only and rare,
-//! so this matches WireGuard-go's design.
+//! The anti-replay window is checked in the single-threaded writer, in order —
+//! never in the parallel workers. That keeps the per-session replay `Mutex`
+//! uncontended (a hot single flow would otherwise have all W workers hammering
+//! one lock every packet). A replayed datagram is still decrypted (wasted AEAD
+//! work) but then dropped; replays are attack/dup-only and rare, so this matches
+//! WireGuard-go's design.
 //!
 //! ## Zero-allocation steady state
 //!
-//! A fixed pool of [`Slot`] buffers circulates: `free → reader (recv into it) →
-//! worker (decrypt) → writer (write to TUN) → free`. The writer swaps a slot's
-//! decrypted buffer into its contiguous TUN batch (tun-rs wants `&mut
-//! [Vec<u8>]`) and hands the swapped-out buffer back with the recycled slot, so
+//! A fixed pool of [`Batch`] buffers circulates: `free → reader (recv into it) →
+//! worker (decrypt) → writer (write to TUN) → free`. The writer swaps each
+//! decrypted slot's buffer into its contiguous TUN batch (tun-rs wants `&mut
+//! [Vec<u8>]`) and the swapped-out buffer rides back with the recycled batch, so
 //! the buffer count is conserved with no per-packet heap traffic.
 
 use std::net::SocketAddr;
@@ -58,15 +69,15 @@ use crate::runtime::crypto::{
 };
 use crate::time::sec_since_start;
 
-/// In-flight slots per worker. Bounds memory (each slot ≈ MTU + a TUN buffer)
-/// while leaving enough depth to keep every worker and the writer busy.
-const SLOTS_PER_WORKER: usize = 8;
-/// Depth of each `reader → worker` and `worker → writer` channel.
-const CHAN_CAP: usize = 4;
-/// Datagrams the reader gathers per `recvmmsg` call (<= transport's `MAX_MMSG`).
+/// Datagrams the reader gathers per `recvmmsg` call and carries as one [`Batch`]
+/// through the pipeline (<= transport's `MAX_MMSG`). This is the amortisation
+/// unit: one channel message + one task wakeup covers up to this many packets.
 const MMSG_BATCH: usize = 32;
+/// Depth (in batches) of each `reader → worker` and `worker → writer` channel.
+const CHAN_CAP: usize = 2;
 
 /// What the writer should do with a processed slot.
+#[derive(Clone, Copy)]
 enum SlotAction {
     /// Decrypted IP packet sits in `plain[TUN_SEND_OFFSET..]`; write it to TUN
     /// after an in-order replay check.
@@ -76,9 +87,8 @@ enum SlotAction {
     Skip,
 }
 
-/// One recyclable unit of work travelling reader → worker → writer → free.
+/// One datagram's worth of work inside a [`Batch`].
 struct Slot {
-    seq: u64,
     addr: SocketAddr,
     /// Raw datagram bytes received from the socket (`[..cipher_len]` valid).
     cipher: Vec<u8>,
@@ -95,7 +105,6 @@ struct Slot {
 impl Slot {
     fn new(cipher_cap: usize, seg: usize) -> Self {
         Self {
-            seq: 0,
             addr: SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0),
             cipher: vec![0u8; cipher_cap],
             cipher_len: 0,
@@ -103,6 +112,25 @@ impl Slot {
             session: None,
             plain: vec![0u8; seg],
             action: SlotAction::Skip,
+        }
+    }
+}
+
+/// A recyclable burst of up to [`MMSG_BATCH`] datagrams travelling
+/// reader → worker → writer → free as a single unit. `slots[..len]` are valid.
+struct Batch {
+    /// Monotonic batch sequence; the writer consumes batches in `seq` order.
+    seq: u64,
+    len: usize,
+    slots: Vec<Slot>,
+}
+
+impl Batch {
+    fn new(cipher_cap: usize, seg: usize) -> Self {
+        Self {
+            seq: 0,
+            len: 0,
+            slots: (0..MMSG_BATCH).map(|_| Slot::new(cipher_cap, seg)).collect(),
         }
     }
 }
@@ -122,14 +150,15 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
     let mtu = network.mtu() as usize;
     let seg = mtu + 128 + TUN_SEND_OFFSET;
     let cipher_cap = mtu + 128;
-    // Enough slots to absorb a full recvmmsg burst plus in-flight depth.
-    let slots_total = (workers * SLOTS_PER_WORKER).max(MMSG_BATCH * 2);
+    // Enough batches to keep every worker fed plus the channel depth on both
+    // sides, so the reader rarely blocks on the freelist.
+    let batches_total = (workers * (2 * CHAN_CAP + 2)).max(16);
 
-    // Freelist, prefilled with every slot the pipeline owns.
-    let (free_tx, free_rx) = mpsc::channel::<Box<Slot>>(slots_total);
-    for _ in 0..slots_total {
+    // Freelist, prefilled with every batch the pipeline owns.
+    let (free_tx, free_rx) = mpsc::channel::<Box<Batch>>(batches_total);
+    for _ in 0..batches_total {
         free_tx
-            .try_send(Box::new(Slot::new(cipher_cap, seg)))
+            .try_send(Box::new(Batch::new(cipher_cap, seg)))
             .expect("freelist prefill fits its own capacity");
     }
 
@@ -138,8 +167,8 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
     let mut set: JoinSet<()> = JoinSet::new();
 
     for _ in 0..workers {
-        let (wtx, wrx) = mpsc::channel::<Box<Slot>>(CHAN_CAP);
-        let (dtx, drx) = mpsc::channel::<Box<Slot>>(CHAN_CAP);
+        let (wtx, wrx) = mpsc::channel::<Box<Batch>>(CHAN_CAP);
+        let (dtx, drx) = mpsc::channel::<Box<Batch>>(CHAN_CAP);
         work_tx.push(wtx);
         done_rx.push(drx);
         set.spawn(worker(
@@ -161,14 +190,7 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
         free_rx,
         work_tx,
     ));
-    set.spawn(writer(
-        stop.clone(),
-        network.clone(),
-        workers,
-        done_rx,
-        free_tx.clone(),
-        seg,
-    ));
+    set.spawn(writer(stop.clone(), network.clone(), workers, done_rx, free_tx.clone()));
     drop(free_tx);
 
     while let Some(res) = set.join_next().await {
@@ -179,24 +201,25 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
     debug!("recv_decrypt_forward_pool stopped");
 }
 
-/// Owns the socket. Gathers a burst of datagrams per `recvmmsg`, then swaps each
-/// received buffer into a free slot (zero-copy), tags it with a monotonic `seq`,
-/// and round-robins it to `work[seq % workers]`. Batching the receive syscall is
-/// what unblocks the pool: a single reader would otherwise pay one `recv_from`
-/// per datagram and cap the whole flow at its syscall rate.
+/// Owns the socket. Gathers a burst of datagrams per `recvmmsg` into one free
+/// [`Batch`] (zero-copy: each received buffer is swapped into a slot), tags the
+/// batch with a monotonic `seq`, and round-robins the whole batch to
+/// `work[seq % workers]`. Batching both the receive syscall and the handoff is
+/// what unblocks the pool.
 async fn reader<T: Transport>(
     mut stop: watch::Receiver<bool>,
     transport: Arc<T>,
     workers: usize,
     cipher_cap: usize,
-    mut free_rx: mpsc::Receiver<Box<Slot>>,
-    work_tx: Vec<mpsc::Sender<Box<Slot>>>,
+    mut free_rx: mpsc::Receiver<Box<Batch>>,
+    work_tx: Vec<mpsc::Sender<Box<Batch>>>,
 ) {
     let w = workers as u64;
     let mut seq: u64 = 0;
 
-    // Reusable receive batch. Received data is swapped into slots (O(1)), so the
-    // buffers here and in the slots just trade places — no per-packet copy.
+    // Reusable receive scratch. Received data is swapped into a batch's slots
+    // (O(1)), so these buffers and the slots just trade places — no per-packet
+    // copy.
     let unspec = SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0);
     let mut rbufs: Vec<Vec<u8>> = (0..MMSG_BATCH).map(|_| vec![0u8; cipher_cap]).collect();
     let mut lens = vec![0usize; MMSG_BATCH];
@@ -215,34 +238,36 @@ async fn reader<T: Transport>(
             }
         };
 
+        // Grab a free batch. The data sits safely in `rbufs` until swapped, so
+        // blocking here only applies backpressure.
+        let mut batch = tokio::select! {
+            _ = stop.changed() => return,
+            b = free_rx.recv() => match b { Some(b) => b, None => return },
+        };
+
         for i in 0..count {
-            // Grab a slot to hand the datagram off in. The data sits safely in
-            // `rbufs[i]` until swapped, so blocking here only applies backpressure.
-            let mut slot = tokio::select! {
-                _ = stop.changed() => return,
-                s = free_rx.recv() => match s { Some(s) => s, None => return },
-            };
-            std::mem::swap(&mut slot.cipher, &mut rbufs[i]);
-            slot.cipher_len = lens[i];
-            slot.addr = addrs[i];
-            slot.seq = seq;
-            let k = (seq % w) as usize;
-            seq = seq.wrapping_add(1);
-            if work_tx[k].send(slot).await.is_err() {
-                return;
-            }
+            std::mem::swap(&mut batch.slots[i].cipher, &mut rbufs[i]);
+            batch.slots[i].cipher_len = lens[i];
+            batch.slots[i].addr = addrs[i];
+        }
+        batch.len = count;
+        batch.seq = seq;
+        let k = (seq % w) as usize;
+        seq = seq.wrapping_add(1);
+        if work_tx[k].send(batch).await.is_err() {
+            return;
         }
     }
     debug!("decrypt pool reader stopped");
 }
 
-/// Decrypts one slot at a time. Data packets are decrypted straight into the
-/// slot's `plain` buffer; keepalives are answered inline; handshakes are
-/// forwarded out of band. Every slot (including skipped ones) is passed to the
-/// writer to keep the writer's rotation count in lockstep with `seq`.
+/// Decrypts every slot in each incoming batch, then forwards the whole batch to
+/// the writer (skipped slots included, so the writer's rotation stays in lockstep
+/// with the batch `seq`). Data packets decrypt straight into the slot's `plain`
+/// buffer; keepalives are answered inline; handshakes go out of band.
 async fn worker<T: Transport>(
-    mut work_rx: mpsc::Receiver<Box<Slot>>,
-    done_tx: mpsc::Sender<Box<Slot>>,
+    mut work_rx: mpsc::Receiver<Box<Batch>>,
+    done_tx: mpsc::Sender<Box<Batch>>,
     transport: Arc<T>,
     sessions: Sessions,
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
@@ -254,208 +279,223 @@ async fn worker<T: Transport>(
     let mut cached: Option<(SessionId, Arc<Session>)> = None;
     let mut encode_buf = [0u8; 65600]; // keepalive response scratch
 
-    while let Some(mut slot) = work_rx.recv().await {
-        slot.action = SlotAction::Skip;
-        slot.session = None;
-
-        if slot.cipher_len == 0 || slot.cipher_len >= slot.cipher.len() {
-            warn!("dropping datagram from {} (size {})", slot.addr, slot.cipher_len);
-            if done_tx.send(slot).await.is_err() {
-                break;
-            }
-            continue;
+    while let Some(mut batch) = work_rx.recv().await {
+        for si in 0..batch.len {
+            decrypt_one(
+                &mut batch.slots[si],
+                &transport,
+                &sessions,
+                &handshake_tx,
+                inf_sessions_timeout,
+                seg,
+                &mut cached,
+                &mut encode_buf,
+            )
+            .await;
         }
-
-        match PacketRef::from_bytes(&slot.cipher[..slot.cipher_len]) {
-            None => warn!("failed to parse packet from {}", slot.addr),
-
-            Some(PacketRef::DataClient { sid, nonce, ciphertext }) => {
-                let session = match &cached {
-                    Some((cs, s)) if *cs == sid => Some(s.clone()),
-                    _ => match sessions.get_by_sid(&sid) {
-                        Some(s) => {
-                            cached = Some((sid, s.clone()));
-                            Some(s)
-                        }
-                        None => {
-                            warn!("[{}] data for unknown session {}", slot.addr, sid);
-                            None
-                        }
-                    },
-                };
-
-                if let Some(session) = session {
-                    if !inf_sessions_timeout {
-                        session.last_seen.store(sec_since_start(), Ordering::Relaxed);
-                    }
-                    // Decrypt into the slot's plain buffer at the reserved offset.
-                    slot.plain.resize(seg, 0);
-                    let base = slot.plain.as_ptr() as usize;
-                    let dec = noise_decrypt_data_client_into(
-                        ciphertext,
-                        &session.state,
-                        &mut slot.plain[TUN_SEND_OFFSET..],
-                        nonce,
-                    );
-                    match dec {
-                        Err(e) => warn!("[{}] decrypt failed (sid {}): {}", slot.addr, sid, e),
-                        Ok(DataClientActionRef::Forward(packet)) => {
-                            let start = packet.as_ptr() as usize - base;
-                            let len = packet.len();
-                            slot.plain.copy_within(start..start + len, TUN_SEND_OFFSET);
-                            slot.plain.truncate(TUN_SEND_OFFSET + len);
-                            if session.sock_addr() != slot.addr {
-                                debug!("[{}] addr changed for sid {}", slot.addr, sid);
-                                session.set_sock_addr(slot.addr);
-                            }
-                            slot.nonce = nonce;
-                            slot.session = Some(session);
-                            slot.action = SlotAction::Forward;
-                        }
-                        Ok(DataClientActionRef::KeepAlive(client_ts)) => {
-                            if session.sock_addr() != slot.addr {
-                                session.set_sock_addr(slot.addr);
-                            }
-                            let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
-                            match noise_encrypt(
-                                &DataServerBody::KeepAlive(client_ts),
-                                &session.state,
-                                send_nonce,
-                            ) {
-                                Err(e) => error!("[{}] keepalive encrypt failed: {}", slot.addr, e),
-                                Ok(encrypted) => {
-                                    let m = encode_data_server_frame(
-                                        send_nonce,
-                                        &encrypted,
-                                        &mut encode_buf,
-                                    );
-                                    if let Err(e) =
-                                        transport.send_to(&encode_buf[..m], &slot.addr).await
-                                    {
-                                        error!("[{}] keepalive send failed: {}", slot.addr, e);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Some(PacketRef::HandshakeInitial(hs_data)) => {
-                let hs = hs_data.to_vec().into();
-                if let Err(e) = handshake_tx.send((hs, slot.addr)).await {
-                    error!("handshake_tx closed: {}", e);
-                }
-            }
-
-            Some(_) => warn!("[{}] unexpected packet variant", slot.addr),
-        }
-
-        if done_tx.send(slot).await.is_err() {
+        if done_tx.send(batch).await.is_err() {
             break;
         }
     }
     debug!("decrypt pool worker stopped");
 }
 
-/// Reassembles the decrypted stream in `seq` order by reading `done[expected %
-/// workers]` in strict rotation, batches `Forward` packets, and flushes them to
-/// the TUN in one GRO-merged `send_multiple`. The anti-replay check runs here,
-/// single-threaded and in order.
+/// Decrypt/dispatch a single slot in place, setting its `action` for the writer.
+#[allow(clippy::too_many_arguments)]
+async fn decrypt_one<T: Transport>(
+    slot: &mut Slot,
+    transport: &Arc<T>,
+    sessions: &Sessions,
+    handshake_tx: &mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
+    inf_sessions_timeout: bool,
+    seg: usize,
+    cached: &mut Option<(SessionId, Arc<Session>)>,
+    encode_buf: &mut [u8],
+) {
+    slot.action = SlotAction::Skip;
+    slot.session = None;
+
+    if slot.cipher_len == 0 || slot.cipher_len >= slot.cipher.len() {
+        warn!("dropping datagram from {} (size {})", slot.addr, slot.cipher_len);
+        return;
+    }
+
+    match PacketRef::from_bytes(&slot.cipher[..slot.cipher_len]) {
+        None => warn!("failed to parse packet from {}", slot.addr),
+
+        Some(PacketRef::DataClient { sid, nonce, ciphertext }) => {
+            let session = match &*cached {
+                Some((cs, s)) if *cs == sid => Some(s.clone()),
+                _ => match sessions.get_by_sid(&sid) {
+                    Some(s) => {
+                        *cached = Some((sid, s.clone()));
+                        Some(s)
+                    }
+                    None => {
+                        warn!("[{}] data for unknown session {}", slot.addr, sid);
+                        None
+                    }
+                },
+            };
+
+            if let Some(session) = session {
+                if !inf_sessions_timeout {
+                    session.last_seen.store(sec_since_start(), Ordering::Relaxed);
+                }
+                // Decrypt into the slot's plain buffer at the reserved offset.
+                slot.plain.resize(seg, 0);
+                let base = slot.plain.as_ptr() as usize;
+                let dec = noise_decrypt_data_client_into(
+                    ciphertext,
+                    &session.state,
+                    &mut slot.plain[TUN_SEND_OFFSET..],
+                    nonce,
+                );
+                match dec {
+                    Err(e) => warn!("[{}] decrypt failed (sid {}): {}", slot.addr, sid, e),
+                    Ok(DataClientActionRef::Forward(packet)) => {
+                        let start = packet.as_ptr() as usize - base;
+                        let len = packet.len();
+                        slot.plain.copy_within(start..start + len, TUN_SEND_OFFSET);
+                        slot.plain.truncate(TUN_SEND_OFFSET + len);
+                        if session.sock_addr() != slot.addr {
+                            debug!("[{}] addr changed for sid {}", slot.addr, sid);
+                            session.set_sock_addr(slot.addr);
+                        }
+                        slot.nonce = nonce;
+                        slot.session = Some(session);
+                        slot.action = SlotAction::Forward;
+                    }
+                    Ok(DataClientActionRef::KeepAlive(client_ts)) => {
+                        if session.sock_addr() != slot.addr {
+                            session.set_sock_addr(slot.addr);
+                        }
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match noise_encrypt(
+                            &DataServerBody::KeepAlive(client_ts),
+                            &session.state,
+                            send_nonce,
+                        ) {
+                            Err(e) => error!("[{}] keepalive encrypt failed: {}", slot.addr, e),
+                            Ok(encrypted) => {
+                                let m =
+                                    encode_data_server_frame(send_nonce, &encrypted, encode_buf);
+                                if let Err(e) = transport.send_to(&encode_buf[..m], &slot.addr).await
+                                {
+                                    error!("[{}] keepalive send failed: {}", slot.addr, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(PacketRef::HandshakeInitial(hs_data)) => {
+            let hs = hs_data.to_vec().into();
+            if let Err(e) = handshake_tx.send((hs, slot.addr)).await {
+                error!("handshake_tx closed: {}", e);
+            }
+        }
+
+        Some(_) => warn!("[{}] unexpected packet variant", slot.addr),
+    }
+}
+
+/// Reassembles the decrypted stream in batch `seq` order by reading `done[expected
+/// % workers]` in strict rotation, batches `Forward` packets across incoming
+/// batches, and flushes them to the TUN in one GRO-merged `send_multiple`. The
+/// anti-replay check runs here, single-threaded and in order.
 async fn writer<N: Network>(
     mut stop: watch::Receiver<bool>,
     network: Arc<N>,
     workers: usize,
-    mut done_rx: Vec<mpsc::Receiver<Box<Slot>>>,
-    free_tx: mpsc::Sender<Box<Slot>>,
-    seg: usize,
+    mut done_rx: Vec<mpsc::Receiver<Box<Batch>>>,
+    free_tx: mpsc::Sender<Box<Batch>>,
 ) {
     let w = workers as u64;
     let mut gro = GroState::new();
     // Contiguous batch handed to tun-rs; each entry gets a slot's plain buffer
-    // swapped in on Forward.
-    let mut batch: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; seg]).collect();
-    // Slots whose buffers are currently swapped into `batch`, recycled on flush.
-    // Boxed because they are returned to the freelist channel as `Box<Slot>`.
-    #[allow(clippy::vec_box)]
-    let mut in_batch: Vec<Box<Slot>> = Vec::with_capacity(TUN_BATCH_SIZE);
-    let mut batch_len = 0usize;
+    // swapped in on Forward. Sized lazily from the first real batch's slot
+    // capacity (all slots share the same seg), so we never hard-code it here.
+    let mut tun_batch: Vec<Vec<u8>> = Vec::new();
+    let mut tun_len = 0usize;
     let mut expected: u64 = 0;
 
     loop {
         let k = (expected % w) as usize;
 
-        // Non-blocking first, so a run of ready packets coalesces into one write.
-        let slot = match done_rx[k].try_recv() {
-            Ok(s) => s,
+        // Non-blocking first, so a run of ready batches coalesces into one write.
+        let mut batch = match done_rx[k].try_recv() {
+            Ok(b) => b,
             Err(mpsc::error::TryRecvError::Disconnected) => break,
             Err(mpsc::error::TryRecvError::Empty) => {
                 // Nothing ready in order: flush what we have, then wait for it.
-                if batch_len > 0 {
-                    flush(&network, &mut gro, &mut batch, batch_len, &mut in_batch, &free_tx).await;
-                    batch_len = 0;
+                if tun_len > 0 {
+                    flush(&network, &mut gro, &mut tun_batch, tun_len).await;
+                    tun_len = 0;
                 }
                 tokio::select! {
                     _ = stop.changed() => break,
-                    r = done_rx[k].recv() => match r { Some(s) => s, None => break },
+                    r = done_rx[k].recv() => match r { Some(b) => b, None => break },
                 }
             }
         };
         expected = expected.wrapping_add(1);
 
-        match slot.action {
-            SlotAction::Forward => {
-                let mut slot = slot;
-                let ok = match &slot.session {
-                    Some(session) => {
-                        session.recv_window.lock().unwrap().check_and_update(slot.nonce)
-                    }
-                    None => false,
-                };
-                if ok {
-                    std::mem::swap(&mut batch[batch_len], &mut slot.plain);
-                    in_batch.push(slot);
-                    batch_len += 1;
-                    if batch_len == TUN_BATCH_SIZE {
-                        flush(&network, &mut gro, &mut batch, batch_len, &mut in_batch, &free_tx)
-                            .await;
-                        batch_len = 0;
-                    }
-                } else {
-                    warn!("replay/stale nonce {} dropped", slot.nonce);
-                    let _ = free_tx.try_send(slot);
-                }
-            }
-            SlotAction::Skip => {
-                let _ = free_tx.try_send(slot);
-            }
+        // Lazily size the TUN batch from the first real slot's buffer capacity.
+        if tun_batch.is_empty() && batch.len > 0 {
+            let cap = batch.slots[0].plain.capacity().max(1);
+            tun_batch = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; cap]).collect();
         }
+
+        for si in 0..batch.len {
+            match batch.slots[si].action {
+                SlotAction::Forward => {
+                    let ok = match &batch.slots[si].session {
+                        Some(session) => {
+                            session.recv_window.lock().unwrap().check_and_update(batch.slots[si].nonce)
+                        }
+                        None => false,
+                    };
+                    if ok {
+                        std::mem::swap(&mut batch.slots[si].plain, &mut tun_batch[tun_len]);
+                        tun_len += 1;
+                        if tun_len == TUN_BATCH_SIZE {
+                            flush(&network, &mut gro, &mut tun_batch, tun_len).await;
+                            tun_len = 0;
+                        }
+                    } else {
+                        warn!("replay/stale nonce {} dropped", batch.slots[si].nonce);
+                    }
+                }
+                SlotAction::Skip => {}
+            }
+            // Drop the session Arc so a recycled batch doesn't pin sessions.
+            batch.slots[si].session = None;
+        }
+
+        let _ = free_tx.try_send(batch);
     }
 
-    if batch_len > 0 {
-        flush(&network, &mut gro, &mut batch, batch_len, &mut in_batch, &free_tx).await;
+    if tun_len > 0 {
+        flush(&network, &mut gro, &mut tun_batch, tun_len).await;
     }
     debug!("decrypt pool writer stopped");
 }
 
-/// Write `batch[..batch_len]` to the TUN and recycle the slots that fed it.
-#[allow(clippy::vec_box)] // slots are recycled back to the freelist as Box<Slot>
+/// Write `tun_batch[..len]` to the TUN in one GRO-merged `send_multiple`.
 async fn flush<N: Network>(
     network: &Arc<N>,
     gro: &mut GroState,
-    batch: &mut [Vec<u8>],
-    batch_len: usize,
-    in_batch: &mut Vec<Box<Slot>>,
-    free_tx: &mpsc::Sender<Box<Slot>>,
+    tun_batch: &mut [Vec<u8>],
+    len: usize,
 ) {
     if let Err(e) = network
-        .send_multiple(gro, &mut batch[..batch_len], TUN_SEND_OFFSET)
+        .send_multiple(gro, &mut tun_batch[..len], TUN_SEND_OFFSET)
         .await
     {
         error!("network send_multiple error: {}", e);
-    }
-    for slot in in_batch.drain(..) {
-        let _ = free_tx.try_send(slot);
     }
 }
 
