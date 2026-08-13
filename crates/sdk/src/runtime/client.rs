@@ -3,6 +3,7 @@ mod keepalive;
 mod network;
 mod network_pool;
 mod recv;
+mod recv_pool;
 
 use std::{sync::Arc, time::Duration};
 
@@ -35,6 +36,7 @@ pub struct ClientBuilder<T: ClientTransport + 'static, N: Network + 'static> {
     reconnect_delay: Duration,
     cred: Option<Cred>,
     encrypt_workers: usize,
+    decrypt_workers: usize,
 }
 
 impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
@@ -48,6 +50,7 @@ impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
             reconnect_delay: Duration::from_secs(3),
             cred: None,
             encrypt_workers: 0,
+            decrypt_workers: 0,
         }
     }
 
@@ -86,6 +89,16 @@ impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
         self
     }
 
+    /// Number of parallel decrypt workers on the receive path. `0`/`1` keeps the
+    /// single-task path; `>= 2` enables the WireGuard-style pool that spreads
+    /// one flow's decryption across cores with in-order TUN writes. This is the
+    /// lever for the reverse (download) direction, which is per-byte single-core
+    /// bound.
+    pub fn decrypt_workers(mut self, count: usize) -> Self {
+        self.decrypt_workers = count;
+        self
+    }
+
     pub fn build(self) -> Result<Client<T, N>, BuildError> {
         let (state, _) = watch::channel(RuntimeState::Connecting);
         Ok(Client {
@@ -97,6 +110,7 @@ impl<T: ClientTransport + 'static, N: Network + 'static> ClientBuilder<T, N> {
             reconnect_delay: self.reconnect_delay,
             cred: self.cred.ok_or(BuildError::MissingRequiredField("cred"))?,
             encrypt_workers: self.encrypt_workers,
+            decrypt_workers: self.decrypt_workers,
             state,
         })
     }
@@ -111,6 +125,7 @@ pub struct Client<T: ClientTransport + 'static, N: Network + 'static> {
     reconnect_delay: Duration,
     cred: Cred,
     encrypt_workers: usize,
+    decrypt_workers: usize,
     state: watch::Sender<RuntimeState>,
 }
 
@@ -122,12 +137,22 @@ impl<T: ClientTransport + 'static, N: Network + 'static> Client<T, N> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
         let mut set: JoinSet<()> = JoinSet::new();
 
-        // Hot path 1: UDP → decrypt → network
-        set.spawn(recv_decrypt_forward(
-            self.state.clone(),
-            self.transport.clone(),
-            self.network.clone(),
-        ));
+        // Hot path 1: UDP → decrypt → network. With >= 2 decrypt workers, spread
+        // one flow's decryption across cores via the pool; else single-task.
+        if self.decrypt_workers >= 2 {
+            set.spawn(recv_pool::recv_decrypt_forward_pool(
+                self.state.clone(),
+                self.transport.clone(),
+                self.network.clone(),
+                self.decrypt_workers,
+            ));
+        } else {
+            set.spawn(recv_decrypt_forward(
+                self.state.clone(),
+                self.transport.clone(),
+                self.network.clone(),
+            ));
+        }
 
         // Hot path 2: network → encrypt → UDP. With >= 2 encrypt workers, spread
         // one flow's encryption across cores via the pool; else single-task.
