@@ -101,6 +101,26 @@ pub trait TransportReceiver: Send + Sync {
     fn try_recv(&self, _buffer: &mut [u8]) -> io::Result<usize> {
         Err(io::Error::new(io::ErrorKind::WouldBlock, "try_recv unsupported"))
     }
+
+    /// Receive up to `bufs.len()` datagrams in one call, blocking until at least
+    /// one arrives. Datagram `i` lands in `bufs[i]` with length `lens[i]` and
+    /// source `addrs[i]`; returns the count. Lets a single reader amortise the
+    /// per-datagram syscall over a whole burst (`recvmmsg` on Linux).
+    ///
+    /// Default: fall back to a single [`Self::recv_from`] into `bufs[0]`.
+    fn recv_mmsg<'a>(
+        &'a self,
+        bufs: &'a mut [Vec<u8>],
+        lens: &'a mut [usize],
+        addrs: &'a mut [SocketAddr],
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            let (n, addr) = self.recv_from(&mut bufs[0]).await?;
+            lens[0] = n;
+            addrs[0] = addr;
+            Ok(1)
+        }
+    }
 }
 
 /// Base transport — shared by server and client.

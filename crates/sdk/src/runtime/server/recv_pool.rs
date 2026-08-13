@@ -63,6 +63,8 @@ use crate::time::sec_since_start;
 const SLOTS_PER_WORKER: usize = 8;
 /// Depth of each `reader → worker` and `worker → writer` channel.
 const CHAN_CAP: usize = 4;
+/// Datagrams the reader gathers per `recvmmsg` call (<= transport's `MAX_MMSG`).
+const MMSG_BATCH: usize = 32;
 
 /// What the writer should do with a processed slot.
 enum SlotAction {
@@ -120,7 +122,8 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
     let mtu = network.mtu() as usize;
     let seg = mtu + 128 + TUN_SEND_OFFSET;
     let cipher_cap = mtu + 128;
-    let slots_total = workers * SLOTS_PER_WORKER;
+    // Enough slots to absorb a full recvmmsg burst plus in-flight depth.
+    let slots_total = (workers * SLOTS_PER_WORKER).max(MMSG_BATCH * 2);
 
     // Freelist, prefilled with every slot the pipeline owns.
     let (free_tx, free_rx) = mpsc::channel::<Box<Slot>>(slots_total);
@@ -154,8 +157,8 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
         stop.clone(),
         transport.clone(),
         workers,
+        cipher_cap,
         free_rx,
-        free_tx.clone(),
         work_tx,
     ));
     set.spawn(writer(
@@ -176,71 +179,57 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
     debug!("recv_decrypt_forward_pool stopped");
 }
 
-/// Owns the socket. Receives datagrams directly into free slots, tags each with
-/// a monotonic `seq`, and round-robins them to `work[seq % workers]`. Draining
-/// pulls already-queued datagrams without blocking, exactly like the single
-/// task path, so a lone packet adds no latency.
+/// Owns the socket. Gathers a burst of datagrams per `recvmmsg`, then swaps each
+/// received buffer into a free slot (zero-copy), tags it with a monotonic `seq`,
+/// and round-robins it to `work[seq % workers]`. Batching the receive syscall is
+/// what unblocks the pool: a single reader would otherwise pay one `recv_from`
+/// per datagram and cap the whole flow at its syscall rate.
 async fn reader<T: Transport>(
     mut stop: watch::Receiver<bool>,
     transport: Arc<T>,
     workers: usize,
+    cipher_cap: usize,
     mut free_rx: mpsc::Receiver<Box<Slot>>,
-    free_tx: mpsc::Sender<Box<Slot>>,
     work_tx: Vec<mpsc::Sender<Box<Slot>>>,
 ) {
     let w = workers as u64;
     let mut seq: u64 = 0;
 
-    loop {
-        // Grab a buffer to receive into (backpressure: block if the pool is
-        // saturated, letting the socket queue absorb the burst).
-        let mut slot = tokio::select! {
-            _ = stop.changed() => break,
-            s = free_rx.recv() => match s { Some(s) => s, None => break },
-        };
+    // Reusable receive batch. Received data is swapped into slots (O(1)), so the
+    // buffers here and in the slots just trade places — no per-packet copy.
+    let unspec = SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0);
+    let mut rbufs: Vec<Vec<u8>> = (0..MMSG_BATCH).map(|_| vec![0u8; cipher_cap]).collect();
+    let mut lens = vec![0usize; MMSG_BATCH];
+    let mut addrs = vec![unspec; MMSG_BATCH];
 
-        let (n, addr) = tokio::select! {
+    loop {
+        let count = tokio::select! {
             _ = stop.changed() => break,
-            r = transport.recv_from(&mut slot.cipher) => match r {
-                Ok(v) => v,
+            r = transport.recv_mmsg(&mut rbufs, &mut lens, &mut addrs) => match r {
+                Ok(0) => continue,
+                Ok(c) => c,
                 Err(e) => {
-                    warn!("transport recv error: {}", e);
-                    let _ = free_tx.try_send(slot);
+                    warn!("transport recv_mmsg error: {}", e);
                     continue;
                 }
             }
         };
 
-        slot.cipher_len = n;
-        slot.addr = addr;
-        slot.seq = seq;
-        let k = (seq % w) as usize;
-        seq = seq.wrapping_add(1);
-        if work_tx[k].send(slot).await.is_err() {
-            break;
-        }
-
-        // Drain the socket's already-queued datagrams (never wait).
-        loop {
-            let mut slot = match free_rx.try_recv() {
-                Ok(s) => s,
-                Err(_) => break, // no free buffer: let the writer catch up
+        for i in 0..count {
+            // Grab a slot to hand the datagram off in. The data sits safely in
+            // `rbufs[i]` until swapped, so blocking here only applies backpressure.
+            let mut slot = tokio::select! {
+                _ = stop.changed() => return,
+                s = free_rx.recv() => match s { Some(s) => s, None => return },
             };
-            match transport.try_recv_from(&mut slot.cipher) {
-                Ok((n, addr)) => {
-                    slot.cipher_len = n;
-                    slot.addr = addr;
-                    slot.seq = seq;
-                    let k = (seq % w) as usize;
-                    seq = seq.wrapping_add(1);
-                    if work_tx[k].send(slot).await.is_err() {
-                        return;
-                    }
-                }
-                Err(_) => {
-                    let _ = free_tx.try_send(slot);
-                    break;
-                }
+            std::mem::swap(&mut slot.cipher, &mut rbufs[i]);
+            slot.cipher_len = lens[i];
+            slot.addr = addrs[i];
+            slot.seq = seq;
+            let k = (seq % w) as usize;
+            seq = seq.wrapping_add(1);
+            if work_tx[k].send(slot).await.is_err() {
+                return;
             }
         }
     }
