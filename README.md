@@ -188,12 +188,12 @@ sequenceDiagram
 
 #### DataClient
 ```text
-0      8      40                   104    120                              N  bit
-┌──────┬───────┬────────────────────┬──────┬──────────────────────────────────┐
-│ TYPE │  SID  │       NONCE        │ LEN  │   DATA PAYLOAD + NOISE METADATA  │
-│ 0x02 │       │                    │  N   │           (ENCRYPTED)            │
-│(8bit)│(32bit)│      (64bit)       │(16bit)            (N-120bit)            │
-└──────┴───────┴────────────────────┴──────┴──────────────────────────────────┘
+0      8      40                   104                                     N  bit
+┌──────┬───────┬────────────────────┬──────────────────────────────────────────┐
+│ TYPE │  SID  │       NONCE        │      DATA PAYLOAD + NOISE METADATA        │
+│ 0x02 │       │                    │              (ENCRYPTED)                  │
+│(8bit)│(32bit)│      (64bit)       │              (N-104bit)                   │
+└──────┴───────┴────────────────────┴──────────────────────────────────────────┘
                                            0        8      24                  
                                            ┌────────┬───────┬───────────────┐  
                                            │  TYPE  │  LEN  │      IP       │  
@@ -211,15 +211,20 @@ sequenceDiagram
 > NONCE is a monotonically increasing counter controlled by the sender.
 > Used as the nonce for AEAD (Noise `StatelessTransportState`).
 > The receiver checks it against a sliding anti-replay window (2048 bits) before decrypting.
+>
+> Data frames carry a **fixed-size header and no length field**: the encrypted
+> payload runs to the end of the UDP datagram (like WireGuard). Fixed size keeps
+> a batch of equal-size packets byte-uniform, so they can be sent in a single
+> `sendmsg` with UDP GSO (`UDP_SEGMENT`) and split by the kernel.
 
 #### DataServer
 ```text
-0      8                    72     88                                     N  bit
-┌──────┬─────────────────────┬──────┬──────────────────────────────────────────┐
-│ TYPE │        NONCE        │ LEN  │       DATA PAYLOAD + NOISE METADATA      │
-│ 0x03 │                     │  N   │               (ENCRYPTED)               │
-│(8bit)│       (64bit)       │(16bit)                (N-88bit)                │
-└──────┴─────────────────────┴──────┴──────────────────────────────────────────┘
+0      8                    72                                           N  bit
+┌──────┬─────────────────────┬──────────────────────────────────────────────────┐
+│ TYPE │        NONCE        │        DATA PAYLOAD + NOISE METADATA             │
+│ 0x03 │                     │                (ENCRYPTED)                      │
+│(8bit)│       (64bit)       │                 (N-72bit)                       │
+└──────┴─────────────────────┴──────────────────────────────────────────────────┘
                                     0        8      24                          
                                     ┌────────┬───────┬───────────────────────┐  
                                     │  TYPE  │  LEN  │          IP           │  
