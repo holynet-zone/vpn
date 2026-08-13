@@ -102,6 +102,65 @@ impl TransportSender for UdpTransport {
     async fn send(&self, data: &[u8]) -> std::io::Result<usize> {
         self.socket.send(data).await
     }
+
+    /// One `sendmsg` with a `UDP_SEGMENT` control message: the kernel slices
+    /// `buf` into `segment_size`-byte datagrams. Falls back to a plain send when
+    /// there is a single segment.
+    #[cfg(target_os = "linux")]
+    async fn send_gso(
+        &self,
+        buf: &[u8],
+        segment_size: usize,
+        addr: Option<&SocketAddr>,
+    ) -> std::io::Result<usize> {
+        use tokio::io::Interest;
+
+        // Single datagram: skip the GSO cmsg entirely.
+        if segment_size == 0 || buf.len() <= segment_size {
+            return match addr {
+                Some(a) => self.socket.send_to(buf, *a).await,
+                None => self.socket.send(buf).await,
+            };
+        }
+
+        let seg = segment_size.min(u16::MAX as usize) as u16;
+        loop {
+            self.socket.writable().await?;
+            match self
+                .socket
+                .try_io(Interest::WRITABLE, || sendmsg_gso(&self.socket, buf, seg, addr))
+            {
+                Ok(n) => return Ok(n),
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
+/// Perform a single non-blocking `sendmsg` carrying a `UDP_SEGMENT` cmsg.
+#[cfg(target_os = "linux")]
+fn sendmsg_gso(
+    socket: &UdpSocket,
+    buf: &[u8],
+    seg: u16,
+    addr: Option<&SocketAddr>,
+) -> std::io::Result<usize> {
+    use nix::sys::socket::{ControlMessage, MsgFlags, SockaddrStorage, sendmsg};
+    use std::io::IoSlice;
+    use std::os::fd::AsRawFd;
+
+    let fd = socket.as_raw_fd();
+    let iov = [IoSlice::new(buf)];
+    let cmsgs = [ControlMessage::UdpGsoSegments(&seg)];
+    let res = match addr {
+        Some(a) => {
+            let sa = SockaddrStorage::from(*a);
+            sendmsg(fd, &iov, &cmsgs, MsgFlags::MSG_DONTWAIT, Some(&sa))
+        }
+        None => sendmsg::<SockaddrStorage>(fd, &iov, &cmsgs, MsgFlags::MSG_DONTWAIT, None),
+    };
+    res.map_err(|e| std::io::Error::from_raw_os_error(e as i32))
 }
 
 impl Transport for UdpTransport {}

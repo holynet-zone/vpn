@@ -18,6 +18,62 @@ pub trait TransportSender: Send + Sync {
         addr: &'a SocketAddr,
     ) -> impl Future<Output = io::Result<usize>> + Send + 'a;
     fn send<'a>(&'a self, data: &'a [u8]) -> impl Future<Output = io::Result<usize>> + Send + 'a;
+
+    /// Send `buf` as consecutive UDP datagrams of `segment_size` bytes each (the
+    /// last may be smaller) in a single syscall via UDP GSO (`UDP_SEGMENT`).
+    ///
+    /// `addr` is `Some(_)` for unconnected sockets (server side) and `None` for
+    /// connected ones (client side). All segments go to the same destination.
+    ///
+    /// Default impl performs **no** GSO — it splits `buf` and sends each segment
+    /// individually, so non-UDP transports and non-Linux targets stay correct.
+    fn send_gso<'a>(
+        &'a self,
+        buf: &'a [u8],
+        segment_size: usize,
+        addr: Option<&'a SocketAddr>,
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            if segment_size == 0 {
+                return Ok(0);
+            }
+            let mut off = 0;
+            while off < buf.len() {
+                let end = (off + segment_size).min(buf.len());
+                match addr {
+                    Some(a) => self.send_to(&buf[off..end], a).await?,
+                    None => self.send(&buf[off..end]).await?,
+                };
+                off = end;
+            }
+            Ok(buf.len())
+        }
+    }
+
+    /// Send a run of equal-`segment_size` frames via UDP GSO, chunked to respect
+    /// kernel limits: at most 64 segments and 65535 bytes per `sendmsg`. All
+    /// frames must be `segment_size` bytes except possibly the very last.
+    fn send_gso_chunked<'a>(
+        &'a self,
+        buf: &'a [u8],
+        segment_size: usize,
+        addr: Option<&'a SocketAddr>,
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            if segment_size == 0 {
+                return Ok(0);
+            }
+            let max_segs = (65535 / segment_size).clamp(1, 64);
+            let chunk = segment_size * max_segs;
+            let mut off = 0;
+            while off < buf.len() {
+                let end = (off + chunk).min(buf.len());
+                self.send_gso(&buf[off..end], segment_size, addr).await?;
+                off = end;
+            }
+            Ok(buf.len())
+        }
+    }
 }
 
 /// Receive half — implemented by both server and client transports.

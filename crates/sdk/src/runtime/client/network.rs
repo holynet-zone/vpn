@@ -28,6 +28,33 @@ use crate::runtime::crypto::encode_data_client_packet;
 use crate::runtime::error::RuntimeError;
 use crate::runtime::state::{ClientSession, RuntimeState};
 
+/// Send a batch of encrypted frames (contiguous in `gso_buf`) to the connected
+/// server. GSO-uniform runs go out as one chunked `sendmsg`; otherwise each
+/// frame is sent individually. `frames` is `(offset, len)` per frame.
+async fn send_batch<T: ClientTransport>(
+    transport: &T,
+    gso_buf: &[u8],
+    frames: &[(usize, usize)],
+) -> std::io::Result<()> {
+    let Some(&(start, seg)) = frames.first() else {
+        return Ok(());
+    };
+    let last = frames.len() - 1;
+    let uniform =
+        frames[..last].iter().all(|&(_, l)| l == seg) && frames[last].1 <= seg;
+    if uniform {
+        let (o, l) = frames[last];
+        transport
+            .send_gso_chunked(&gso_buf[start..o + l], seg, None)
+            .await?;
+    } else {
+        for &(o, l) in frames {
+            transport.send(&gso_buf[o..o + l]).await?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn encrypt_forward<T: ClientTransport, N: Network>(
     state_tx: watch::Sender<RuntimeState>,
     network: Arc<N>,
@@ -36,10 +63,12 @@ pub(super) async fn encrypt_forward<T: ClientTransport, N: Network>(
     let mut state_rx = state_tx.subscribe();
     // Batched TUN read buffers (reused each iteration — zero alloc in steady state).
     let mut orig = vec![0u8; 10 + 65535];
-    let seg = network.mtu() as usize + 128;
-    let mut bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; seg]).collect();
+    let seg_buf = network.mtu() as usize + 128;
+    let mut bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; seg_buf]).collect();
     let mut sizes = vec![0usize; TUN_BATCH_SIZE];
-    let mut encode_buf = [0u8; 65600];
+    // Contiguous batch buffer for one UDP GSO sendmsg + per-frame (offset, len).
+    let mut gso_buf = vec![0u8; TUN_BATCH_SIZE * (network.mtu() as usize + 64)];
+    let mut frames: Vec<(usize, usize)> = Vec::with_capacity(TUN_BATCH_SIZE);
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
     let mut is_connected = false;
@@ -87,25 +116,29 @@ pub(super) async fn encrypt_forward<T: ClientTransport, N: Network>(
                         warn!("received network packet before connected state, dropping");
                         continue;
                     };
+                    frames.clear();
+                    let mut off = 0usize;
                     for i in 0..count {
                         let pkt = &bufs[i][..sizes[i]];
                         if pkt.is_empty() {
                             continue;
                         }
                         let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
-                        match encode_data_client_packet(pkt, sid, &session.noise, nonce, &mut encode_buf) {
+                        match encode_data_client_packet(pkt, sid, &session.noise, nonce, &mut gso_buf[off..]) {
                             Err(e) => {
                                 if state_tx.send(RuntimeState::Error(
                                     RuntimeError::Unexpected(format!("failed to encrypt data: {}", e))
                                 )).is_err() { break 'main; }
                             }
-                            Ok(total) => {
-                                if let Err(e) = transport.send(&encode_buf[..total]).await {
-                                    warn!("transport send error, reconnecting: {}", e);
-                                    if state_tx.send(RuntimeState::Connecting).is_err() { break 'main; }
-                                }
+                            Ok(n) => {
+                                frames.push((off, n));
+                                off += n;
                             }
                         }
+                    }
+                    if let Err(e) = send_batch(&*transport, &gso_buf, &frames).await {
+                        warn!("transport send error, reconnecting: {}", e);
+                        if state_tx.send(RuntimeState::Connecting).is_err() { break 'main; }
                     }
                 }
             }

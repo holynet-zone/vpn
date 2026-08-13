@@ -12,19 +12,6 @@
 
 /// Encode `v` as a bincode varint into `buf`. Returns bytes written.
 #[inline]
-pub(crate) fn write_u16(buf: &mut [u8], v: u16) -> usize {
-    if v <= 250 {
-        buf[0] = v as u8;
-        1
-    } else {
-        buf[0] = 251;
-        buf[1..3].copy_from_slice(&v.to_le_bytes());
-        3
-    }
-}
-
-/// Encode `v` as a bincode varint into `buf`. Returns bytes written.
-#[inline]
 pub(crate) fn write_u32(buf: &mut [u8], v: u32) -> usize {
     if v <= 250 {
         buf[0] = v as u8;
@@ -97,28 +84,6 @@ pub(crate) fn read_u16(buf: &[u8]) -> Option<(u16, &[u8])> {
     }
 }
 
-/// Decode a varint-encoded u64 (used by bincode for nonce fields).
-#[inline]
-pub(crate) fn read_u64(buf: &[u8]) -> Option<(u64, &[u8])> {
-    let (&tag, rest) = buf.split_first()?;
-    match tag {
-        0..=250 => Some((tag as u64, rest)),
-        251 => {
-            let (b, rest) = rest.split_at_checked(2)?;
-            Some((u16::from_le_bytes(b.try_into().unwrap()) as u64, rest))
-        }
-        252 => {
-            let (b, rest) = rest.split_at_checked(4)?;
-            Some((u32::from_le_bytes(b.try_into().unwrap()) as u64, rest))
-        }
-        253 => {
-            let (b, rest) = rest.split_at_checked(8)?;
-            Some((u64::from_le_bytes(b.try_into().unwrap()), rest))
-        }
-        _ => None,
-    }
-}
-
 /// Decode a varint-encoded usize/u64 (used by bincode serde for byte-sequence lengths).
 #[inline]
 pub(crate) fn read_usize(buf: &[u8]) -> Option<(usize, &[u8])> {
@@ -178,9 +143,6 @@ mod tests {
         bincode::encode_to_vec(v, bincode::config::standard()).unwrap()
     }
     fn enc_u128(v: u128) -> Vec<u8> {
-        bincode::encode_to_vec(v, bincode::config::standard()).unwrap()
-    }
-    fn enc_u64(v: u64) -> Vec<u8> {
         bincode::encode_to_vec(v, bincode::config::standard()).unwrap()
     }
     fn enc_usize(v: usize) -> Vec<u8> {
@@ -248,45 +210,11 @@ mod tests {
     }
 
     #[test]
-    fn test_u64_values() {
-        for v in [
-            0u64,
-            1,
-            42,
-            250,
-            251,
-            1000,
-            65535,
-            65536,
-            u32::MAX as u64,
-            u64::MAX,
-        ] {
-            let enc = enc_u64(v);
-            let (dec, rest) = read_u64(&enc).unwrap();
-            assert_eq!(dec, v, "v={v}");
-            assert!(rest.is_empty());
-        }
-    }
-
-    #[test]
     fn test_usize_1400() {
         let enc = enc_usize(1400);
         let (dec, rest) = read_usize(&enc).unwrap();
         assert_eq!(dec, 1400);
         assert!(rest.is_empty());
-    }
-
-    #[test]
-    fn test_write_u16_roundtrip() {
-        for v in [0u16, 1, 42, 250, 251, 1000, 65535] {
-            let mut buf = [0u8; 4];
-            let n = write_u16(&mut buf, v);
-            let (dec, rest) = read_u16(&buf[..n]).unwrap();
-            assert_eq!(dec, v, "v={v}");
-            assert!(rest.is_empty());
-            // verify matches bincode
-            assert_eq!(&buf[..n], enc_u16(v).as_slice(), "v={v}");
-        }
     }
 
     #[test]
@@ -298,29 +226,6 @@ mod tests {
             assert_eq!(dec, v, "v={v}");
             assert!(rest.is_empty());
             assert_eq!(&buf[..n], enc_u32(v).as_slice(), "v={v}");
-        }
-    }
-
-    #[test]
-    fn test_write_u64_roundtrip() {
-        for v in [
-            0u64,
-            1,
-            42,
-            250,
-            251,
-            1000,
-            65535,
-            65536,
-            u32::MAX as u64,
-            u64::MAX,
-        ] {
-            let mut buf = [0u8; 10];
-            let n = write_u64(&mut buf, v);
-            let (dec, rest) = read_u64(&buf[..n]).unwrap();
-            assert_eq!(dec, v, "v={v}");
-            assert!(rest.is_empty());
-            assert_eq!(&buf[..n], enc_u64(v).as_slice(), "v={v}");
         }
     }
 

@@ -26,8 +26,10 @@ use tracing::{debug, error, info, warn};
 use super::session::{Session, Sessions};
 use crate::gateway::network::{GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET};
 use crate::gateway::transport::Transport;
-use crate::protocol::{DataServerBody, EncryptedHandshake, Packet, PacketRef, SessionId};
-use crate::runtime::crypto::{DataClientActionRef, noise_decrypt_data_client_into, noise_encrypt};
+use crate::protocol::{DataServerBody, EncryptedHandshake, PacketRef, SessionId};
+use crate::runtime::crypto::{
+    DataClientActionRef, encode_data_server_frame, noise_decrypt_data_client_into, noise_encrypt,
+};
 use crate::time::sec_since_start;
 
 /// Combined receive → decrypt → forward task.
@@ -163,14 +165,9 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                                         ) {
                                             Err(e) => error!("[{}] keepalive encrypt failed: {}", addr, e),
                                             Ok(encrypted) => {
-                                                let pkt = Packet::DataServer { nonce: send_nonce, encrypted };
-                                                match bincode::encode_into_slice(&pkt, &mut encode_buf, bincode::config::standard()) {
-                                                    Err(e) => error!("[{}] encode failed: {}", addr, e),
-                                                    Ok(m) => {
-                                                        if let Err(e) = transport.send_to(&encode_buf[..m], &addr).await {
-                                                            error!("[{}] keepalive send failed: {}", addr, e);
-                                                        }
-                                                    }
+                                                let m = encode_data_server_frame(send_nonce, &encrypted, &mut encode_buf);
+                                                if let Err(e) = transport.send_to(&encode_buf[..m], &addr).await {
+                                                    error!("[{}] keepalive send failed: {}", addr, e);
                                                 }
                                             }
                                         }

@@ -20,9 +20,9 @@ use tokio::sync::watch;
 use tracing::warn;
 
 use crate::gateway::transport::ClientTransport;
-use crate::protocol::{DataClientBody, Packet, SessionId};
+use crate::protocol::{DataClientBody, SessionId};
 use crate::runtime::client::{AWAIT_STATE_DELAY, MAX_PACKET_SIZE};
-use crate::runtime::crypto::noise_encrypt;
+use crate::runtime::crypto::{encode_data_client_frame, noise_encrypt};
 use crate::runtime::error::RuntimeError;
 use crate::runtime::state::{ClientSession, RuntimeState};
 use crate::time::micros_since_start;
@@ -83,19 +83,10 @@ pub(super) async fn keepalive_sender<T: ClientTransport>(
                         )).is_err() { break; }
                     }
                     Ok(encrypted) => {
-                        let pkt = Packet::DataClient { sid, nonce, encrypted };
-                        match bincode::encode_into_slice(
-                            &pkt,
-                            &mut encode_buf,
-                            bincode::config::standard(),
-                        ) {
-                            Err(e) => warn!("keepalive encode failed: {}", e),
-                            Ok(n) => {
-                                if let Err(e) = transport.send(&encode_buf[..n]).await {
-                                    warn!("keepalive send error, reconnecting: {}", e);
-                                    if state_tx.send(RuntimeState::Connecting).is_err() { break; }
-                                }
-                            }
+                        let n = encode_data_client_frame(sid, nonce, &encrypted, &mut encode_buf);
+                        if let Err(e) = transport.send(&encode_buf[..n]).await {
+                            warn!("keepalive send error, reconnecting: {}", e);
+                            if state_tx.send(RuntimeState::Connecting).is_err() { break; }
                         }
                     }
                 }
