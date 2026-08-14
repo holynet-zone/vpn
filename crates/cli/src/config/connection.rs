@@ -38,13 +38,15 @@ pub struct InterfaceConfig {
 pub struct RuntimeConfig {
     pub handshake_timeout: u64,
     pub keepalive: Option<u64>,
-    /// Parallel encrypt workers on the send path. `0`/`1` keeps the single-task
-    /// path; `>= 2` enables the WireGuard-style encrypt pool.
+    /// Parallel encrypt workers on the send path. `0` auto-sizes to one worker
+    /// per logical CPU; `1` keeps the single-task path; `>= 2` sets an explicit
+    /// WireGuard-style encrypt pool.
     #[serde(default)]
     pub encrypt_workers: usize,
-    /// Parallel decrypt workers on the receive path. `0`/`1` keeps the
-    /// single-task path; `>= 2` enables the WireGuard-style decrypt pool (the
-    /// lever for the reverse/download direction).
+    /// Parallel decrypt workers on the receive path. `0` auto-sizes to one
+    /// worker per logical CPU; `1` keeps the single-task path; `>= 2` sets an
+    /// explicit WireGuard-style decrypt pool (the lever for the reverse/download
+    /// direction).
     #[serde(default)]
     pub decrypt_workers: usize,
     pub so_rcvbuf: usize,

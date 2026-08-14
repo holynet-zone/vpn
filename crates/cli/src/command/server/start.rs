@@ -72,13 +72,7 @@ impl StartCmd {
             };
 
         let runtime = config.runtime.unwrap_or_default();
-        let workers = if runtime.workers == 0 {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1)
-        } else {
-            runtime.workers
-        };
+        let workers = crate::config::resolve_pool_workers(runtime.workers);
 
         let transports =
             match UdpTransport::new_pool(addr, runtime.so_rcvbuf, runtime.so_sndbuf, workers) {
@@ -127,7 +121,7 @@ impl StartCmd {
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)
             .handshake_buf(runtime.handshake_buf)
-            .decrypt_workers(runtime.decrypt_workers);
+            .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers));
 
         let server = match builder.build() {
             Ok(s) => s,

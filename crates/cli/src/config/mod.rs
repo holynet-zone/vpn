@@ -21,6 +21,19 @@ fn default_offload() -> bool {
     true
 }
 
+/// Resolve a worker-pool size where `0` means "auto" (one worker per logical
+/// CPU) and any other value is taken verbatim. A configured `1` therefore keeps
+/// the single-task path, so pools can still be disabled explicitly.
+pub fn resolve_pool_workers(configured: usize) -> usize {
+    if configured == 0 {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    } else {
+        configured
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct InterfaceConfig {
     pub name: String,
@@ -43,8 +56,9 @@ pub struct SessionConfig {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RuntimeConfig {
     pub workers: usize,
-    /// Parallel decrypt workers per receive socket (server only). `0`/`1` keeps
-    /// the single-task path; `>= 2` enables the WireGuard-style decrypt pool.
+    /// Parallel decrypt workers per receive socket (server only). `0` auto-sizes
+    /// to one worker per logical CPU; `1` keeps the single-task path; `>= 2`
+    /// sets an explicit WireGuard-style decrypt pool.
     #[serde(default)]
     pub decrypt_workers: usize,
     pub so_rcvbuf: usize,
