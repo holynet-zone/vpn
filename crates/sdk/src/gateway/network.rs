@@ -14,6 +14,16 @@ pub const TUN_BATCH_SIZE: usize = tun_rs::IDEAL_BATCH_SIZE;
 #[cfg(not(target_os = "linux"))]
 pub const TUN_BATCH_SIZE: usize = 1;
 
+/// Capacity to pre-reserve for every buffer handed to `send_multiple`.
+///
+/// tun-rs' GRO merge coalesces a run of same-flow packets *into* the run's first
+/// buffer (`buf_resize`/`extend`), growing it toward a full 64 KiB GSO
+/// super-frame. If that buffer only had ~MTU capacity it would reallocate
+/// repeatedly as it grows — a realloc storm that was the single TUN-writer's CPU
+/// bottleneck. Reserving the full super-frame up front removes it. Matches the
+/// device `gso_max_size` (65536).
+pub const GRO_BUF_CAP: usize = 65536;
+
 /// Byte offset reserved at the front of each TUN-write buffer for the
 /// `virtio_net_hdr` that tun-rs prepends when GRO-merging. Using this offset
 /// keeps both the offload and the per-packet fallback paths writing the packet

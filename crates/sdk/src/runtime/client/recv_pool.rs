@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
-use crate::gateway::network::{GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET};
+use crate::gateway::network::{GRO_BUF_CAP, GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET};
 use crate::gateway::transport::ClientTransport;
 use crate::protocol::PacketRef;
 use crate::runtime::crypto::{DataServerActionRef, noise_decrypt_data_server_into};
@@ -376,9 +376,10 @@ async fn writer<N: Network>(
     let w = workers as u64;
     let mut state_rx = state_tx.subscribe();
     let mut gro = GroState::new();
-    // Sized lazily from the first real batch's slot capacity (all slots share the
-    // same seg), so we never hard-code it here.
-    let mut tun_batch: Vec<Vec<u8>> = Vec::new();
+    // Pre-reserve a full GSO super-frame per entry so tun-rs' GRO merge coalesces
+    // in place without reallocating (see GRO_BUF_CAP / the server pool writer).
+    let mut tun_batch: Vec<Vec<u8>> =
+        (0..TUN_BATCH_SIZE).map(|_| Vec::with_capacity(GRO_BUF_CAP)).collect();
     let mut tun_len = 0usize;
     let mut expected: u64 = 0;
 
@@ -407,11 +408,6 @@ async fn writer<N: Network>(
         };
         expected = expected.wrapping_add(1);
 
-        if tun_batch.is_empty() && batch.len > 0 {
-            let cap = batch.slots[0].plain.capacity().max(1);
-            tun_batch = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; cap]).collect();
-        }
-
         for si in 0..batch.len {
             if let SlotAction::Forward = batch.slots[si].action {
                 let ok = match &batch.session {
@@ -421,7 +417,11 @@ async fn writer<N: Network>(
                     None => false,
                 };
                 if ok {
-                    std::mem::swap(&mut batch.slots[si].plain, &mut tun_batch[tun_len]);
+                    // Copy into the pre-reserved 64 KiB buffer (keeps its capacity,
+                    // unlike a swap) so the GRO merge never reallocs.
+                    let dst = &mut tun_batch[tun_len];
+                    dst.clear();
+                    dst.extend_from_slice(&batch.slots[si].plain);
                     tun_len += 1;
                     if tun_len == TUN_BATCH_SIZE {
                         flush(&network, &mut gro, &mut tun_batch, tun_len).await;

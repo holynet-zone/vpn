@@ -61,7 +61,7 @@ use tokio::task::JoinSet;
 use tracing::{debug, error, warn};
 
 use super::session::{Session, Sessions};
-use crate::gateway::network::{GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET};
+use crate::gateway::network::{GRO_BUF_CAP, GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET};
 use crate::gateway::transport::Transport;
 use crate::protocol::{DataServerBody, EncryptedHandshake, PacketRef, SessionId};
 use crate::runtime::crypto::{
@@ -415,10 +415,15 @@ async fn writer<N: Network>(
 ) {
     let w = workers as u64;
     let mut gro = GroState::new();
-    // Contiguous batch handed to tun-rs; each entry gets a slot's plain buffer
-    // swapped in on Forward. Sized lazily from the first real batch's slot
-    // capacity (all slots share the same seg), so we never hard-code it here.
-    let mut tun_batch: Vec<Vec<u8>> = Vec::new();
+    // Contiguous batch handed to tun-rs. Each entry is copied in (not swapped)
+    // from a slot's decrypted buffer, and pre-reserved to a full GSO super-frame
+    // (64 KiB): tun-rs' GRO merge coalesces a run of same-flow packets *into* the
+    // run's first buffer (`buf_resize`/`extend`), so if that buffer only had the
+    // ~MTU slot capacity it would reallocate repeatedly as it grows to 64 KiB —
+    // that realloc storm was the single-writer's CPU cost (the forward ceiling).
+    // The per-packet copy (~MTU) is far cheaper than the reallocations it avoids.
+    let mut tun_batch: Vec<Vec<u8>> =
+        (0..TUN_BATCH_SIZE).map(|_| Vec::with_capacity(GRO_BUF_CAP)).collect();
     let mut tun_len = 0usize;
     let mut expected: u64 = 0;
 
@@ -443,12 +448,6 @@ async fn writer<N: Network>(
         };
         expected = expected.wrapping_add(1);
 
-        // Lazily size the TUN batch from the first real slot's buffer capacity.
-        if tun_batch.is_empty() && batch.len > 0 {
-            let cap = batch.slots[0].plain.capacity().max(1);
-            tun_batch = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; cap]).collect();
-        }
-
         for si in 0..batch.len {
             match batch.slots[si].action {
                 SlotAction::Forward => {
@@ -459,7 +458,11 @@ async fn writer<N: Network>(
                         None => false,
                     };
                     if ok {
-                        std::mem::swap(&mut batch.slots[si].plain, &mut tun_batch[tun_len]);
+                        // Copy into the pre-reserved 64 KiB buffer (keeps its
+                        // capacity, unlike a swap) so the GRO merge never reallocs.
+                        let dst = &mut tun_batch[tun_len];
+                        dst.clear();
+                        dst.extend_from_slice(&batch.slots[si].plain);
                         tun_len += 1;
                         if tun_len == TUN_BATCH_SIZE {
                             flush(&network, &mut gro, &mut tun_batch, tun_len).await;

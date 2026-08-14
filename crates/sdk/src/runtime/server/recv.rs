@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
 use super::session::{Session, Sessions};
-use crate::gateway::network::{GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET};
+use crate::gateway::network::{GRO_BUF_CAP, GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET};
 use crate::gateway::transport::Transport;
 use crate::protocol::{DataServerBody, EncryptedHandshake, PacketRef, SessionId};
 use crate::runtime::crypto::{
@@ -51,7 +51,15 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
     // Batch of decrypted IP packets awaiting one GRO-merged TUN write. Each buffer
     // holds its packet at [TUN_SEND_OFFSET..]; reused every iteration.
     let seg = network.mtu() as usize + 128 + TUN_SEND_OFFSET;
-    let mut tun_bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; seg]).collect();
+    // Pre-reserve a full GSO super-frame per entry so tun-rs' GRO merge coalesces
+    // in place without reallocating (see GRO_BUF_CAP).
+    let mut tun_bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE)
+        .map(|_| {
+            let mut v = Vec::with_capacity(GRO_BUF_CAP);
+            v.resize(seg, 0);
+            v
+        })
+        .collect();
     let mut gro = GroState::new();
     // Per-task 1-entry session cache: eliminates DashMap lookup on every packet
     // when a single client dominates the worker's receive queue.

@@ -18,7 +18,7 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::gateway::{
-    network::{GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET},
+    network::{GRO_BUF_CAP, GroState, Network, TUN_BATCH_SIZE, TUN_SEND_OFFSET},
     transport::ClientTransport,
 };
 use crate::protocol::PacketRef;
@@ -36,7 +36,15 @@ pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
     let mut buf = [0u8; MAX_PACKET_SIZE];
     // Batch of decrypted IP packets awaiting one GRO-merged TUN write.
     let seg = network.mtu() as usize + 128 + TUN_SEND_OFFSET;
-    let mut tun_bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; seg]).collect();
+    // Pre-reserve a full GSO super-frame per entry so tun-rs' GRO merge coalesces
+    // in place without reallocating (see GRO_BUF_CAP).
+    let mut tun_bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE)
+        .map(|_| {
+            let mut v = Vec::with_capacity(GRO_BUF_CAP);
+            v.resize(seg, 0);
+            v
+        })
+        .collect();
     let mut gro = GroState::new();
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
