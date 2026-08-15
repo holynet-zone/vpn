@@ -20,20 +20,20 @@ debug = true
 
 [workspace.dependencies]
 # io
-tokio = { version = "1.47", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
+tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "socket2"] }
 tun-rs = { version = "2.8.8", features = ["async_tokio"] }
-ctrlc = "3.4"
+ctrlc = "3.5"
 anstyle = "1.0"
-clap = "4.5"
+clap = "4.6"
 
 # data
-bytes = { version = "1.11", features = ["serde"] }
+bytes = { version = "1.12", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 anyhow = "1.0"
 bincode = { version = "2.0", features = ["serde"] }
 base64 = "0.22"
-toml = "0.8"
+toml = "1"
 thiserror = "2.0"
 
 # logging

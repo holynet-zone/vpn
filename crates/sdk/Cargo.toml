@@ -42,4 +42,4 @@ futures = "0.3"
 
 # UDP GSO/GRO (segmentation offload) sendmsg/recvmsg + cmsg — Linux only
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.29", features = ["socket", "uio", "net"] }
+nix = { version = "0.31", features = ["socket", "uio", "net"] }
