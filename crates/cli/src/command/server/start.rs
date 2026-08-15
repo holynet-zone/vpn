@@ -15,7 +15,7 @@ use tracing::error;
 #[derive(Debug, Args)]
 pub struct StartCmd {
     /// Host to listen on (overrides config)
-    #[arg(short, long)]
+    #[arg(long)]
     host: Option<String>,
     /// Port to listen on (overrides config)
     #[arg(short, long)]
@@ -23,6 +23,10 @@ pub struct StartCmd {
     /// TUN interface name (overrides config)
     #[arg(short, long, alias = "interface")]
     iface: Option<String>,
+    /// Force-disable Linux TUN GRO/TSO offload, overriding `interface.offload`
+    /// in the config (runtime kill-switch for buggy NICs).
+    #[arg(long)]
+    no_offload: bool,
 }
 
 impl StartCmd {
@@ -39,6 +43,12 @@ impl StartCmd {
 
         if let Err(e) = config.save() {
             success_warn!("cant update configuration: {}", e);
+        }
+
+        // Runtime kill-switch: applied after save so it never persists to the
+        // config file, and only ever disables — never enables — offload.
+        if self.no_offload {
+            config.interface.offload = false;
         }
 
         let clients = match database(&config.general.storage) {

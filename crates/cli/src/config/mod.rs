@@ -42,7 +42,7 @@ pub struct InterfaceConfig {
     pub prefix: u8,
     /// Enable Linux TUN GRO/TSO offload (batched recv_multiple/send_multiple).
     /// Falls back to per-packet automatically if the kernel rejects it, or when
-    /// `HOLYNET_DISABLE_OFFLOAD=1` is set.
+    /// the `--no-offload` CLI flag is passed.
     #[serde(default = "default_offload")]
     pub offload: bool,
 }

@@ -64,17 +64,6 @@ impl MockTransport {
         (transport1, transport2)
     }
 
-    pub fn set_peer(&self, peer: &MockTransport) {
-        let peer_inner = Arc::clone(&peer.inner);
-        let mut inner_guard = futures::executor::block_on(self.inner.lock());
-
-        let _peer_guard = futures::executor::block_on(peer_inner.lock());
-        inner_guard.peer_addr = peer.local_addr;
-
-        // Note: В реальности нужно аккуратно обменяться каналами
-        // Для простоты используем создание новой пары
-    }
-
     pub fn create_sender(&self) -> MockTransportSender {
         let inner = Arc::clone(&self.inner);
         MockTransportSender { inner }
@@ -186,7 +175,6 @@ mod tests {
     async fn test_mock_transport_pair() {
         let (mut transport1, mut transport2) = MockTransport::create_pair();
 
-        // Тест отправки от transport1 к transport2
         let test_data = b"Hello from transport1";
         transport1
             .send_to(test_data, &transport2.local_addr())
@@ -199,7 +187,6 @@ mod tests {
         assert_eq!(&buffer[..size], test_data);
         assert_eq!(addr, transport1.local_addr());
 
-        // Тест отправки от transport2 к transport1
         let test_data2 = b"Hello from transport2";
         transport2
             .send_to(test_data2, &transport1.local_addr())

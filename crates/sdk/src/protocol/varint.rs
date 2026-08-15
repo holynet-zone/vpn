@@ -1,14 +1,3 @@
-//! Bincode 2.x VarintEncoding encode/decode.
-//!
-//! Bincode standard() config encodes unsigned integers as:
-//!   0..=250      → 1 byte (the value itself)
-//!   251..=65535  → [0xFB, lo, hi]          (3 bytes: tag + LE u16)
-//!   65536..=2^32 → [0xFC, b0,b1,b2,b3]    (5 bytes: tag + LE u32)
-//!   > 2^32       → [0xFD, b0..b7]          (9 bytes: tag + LE u64)
-//!   > 2^64       → [0xFE, b0..b15]         (17 bytes: tag + LE u128)
-//!
-//! Read functions return `(value, remaining_slice)` or `None` on truncation.
-//! Write functions return the number of bytes written.
 
 /// Encode `v` as a bincode varint into `buf`. Returns bytes written.
 #[inline]

@@ -15,15 +15,11 @@ use varint::{read_u16, read_u32};
 
 pub type EncryptedHandshake = VecU16<u8>;
 
-/// Zero-copy encrypted payload for the data path.
-///
+
 /// Backed by `bytes::Bytes` (Arc-counted) so that passing through channels
-/// is a cheap pointer move. Created from a thread-local cipher buffer via
-/// `Bytes::from_owner` in `noise_encrypt` — no heap allocation on the hot path
-/// once each thread's buffer pool is warmed up.
+/// is a cheap pointer move.
 ///
-/// Wire format (bincode): `u16` little-endian length followed by raw bytes —
-/// identical to the previous `VecU16<u8>` representation.
+/// Wire format (bincode): `u16` little-endian length followed by raw bytes
 #[derive(Clone, Debug)]
 pub struct EncryptedData(pub(crate) Bytes);
 
@@ -40,7 +36,7 @@ impl From<Bytes> for EncryptedData {
     }
 }
 
-/// Encode as `u16` length + raw bytes (same wire layout as `VecU16<u8>`).
+/// Encode as `u16` length + raw bytes
 impl bincode::Encode for EncryptedData {
     fn encode<E: bincode::enc::Encoder>(
         &self,
@@ -58,8 +54,7 @@ impl bincode::Encode for EncryptedData {
     }
 }
 
-/// Decode from `u16` length + raw bytes. Allocates on the receive path
-/// (unavoidable — data arrives from the wire into a fresh buffer).
+/// Decode from `u16` length + raw bytes. Allocates on the reception path
 impl<Context> bincode::Decode<Context> for EncryptedData {
     fn decode<D: bincode::de::Decoder<Context = Context>>(
         decoder: &mut D,
@@ -111,7 +106,6 @@ impl Packet {
     }
 }
 
-// Zero-copy packet view
 
 /// Zero-copy view into a raw UDP receive buffer.
 ///

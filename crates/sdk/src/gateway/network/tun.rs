@@ -4,9 +4,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tun_rs::AsyncDevice;
 
-/// Env var to force-disable TUN offload at runtime without touching config.
-const DISABLE_OFFLOAD_ENV: &str = "HOLYNET_DISABLE_OFFLOAD";
-
 #[derive(Clone)]
 pub struct TunNetwork {
     device: Arc<AsyncDevice>,
@@ -22,11 +19,8 @@ impl TunNetwork {
         ip: Option<(IpAddr, u8)>,
         offload: bool,
     ) -> io::Result<Self> {
-        // Runtime kill-switch: `HOLYNET_DISABLE_OFFLOAD=1` overrides config.
-        // tun-rs itself also silently falls back to per-packet if the kernel
-        // rejects TUNSETOFFLOAD, so this is defence-in-depth for buggy NICs.
-        let offload = offload && std::env::var_os(DISABLE_OFFLOAD_ENV).is_none();
-
+        // tun-rs silently falls back to per-packet if the kernel rejects
+        // TUNSETOFFLOAD, so a buggy NIC degrades gracefully on its own.
         let mut config = tun_rs::DeviceBuilder::default()
             .name(name)
             .mtu(mtu)

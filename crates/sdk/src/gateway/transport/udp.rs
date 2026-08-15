@@ -146,7 +146,7 @@ fn recvmmsg_batch(
         msgs[i].msg_hdr.msg_iov = &mut iovecs[i];
         msgs[i].msg_hdr.msg_iovlen = 1;
         msgs[i].msg_hdr.msg_name = &mut names[i] as *mut _ as *mut libc::c_void;
-        msgs[i].msg_hdr.msg_namelen = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+        msgs[i].msg_hdr.msg_namelen = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
     }
 
     // SAFETY: `msgs[..vlen]` are fully initialised above and outlive the call;

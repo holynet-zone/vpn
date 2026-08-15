@@ -20,8 +20,19 @@ use tokio::sync::watch;
 use tracing::{debug, error, info};
 
 #[derive(Debug, Args)]
-#[group(required = true, multiple = false)]
 pub struct ConnectCmd {
+    #[command(flatten)]
+    source: ConnectSource,
+    /// Force-disable Linux TUN GRO/TSO offload, overriding `interface.offload`
+    /// in the config (runtime kill-switch for buggy NICs).
+    #[arg(long)]
+    no_offload: bool,
+}
+
+/// Mutually-exclusive connection source: exactly one must be provided.
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+pub struct ConnectSource {
     /// Connection config file path, or base64-encoded key
     #[arg(value_name = "CONNECTION")]
     connection: Option<String>,
@@ -35,7 +46,7 @@ pub struct ConnectCmd {
 
 impl ConnectCmd {
     pub async fn exec(self) {
-        let (mut config, path) = match self.connection {
+        let (mut config, path) = match self.source.connection {
             Some(ref conn) => match ConnectionConfig::from_base64(conn) {
                 Ok(cfg) => (cfg, None),
                 Err(_) => match ConnectionConfig::load(&PathBuf::from(conn)) {
@@ -46,7 +57,7 @@ impl ConnectCmd {
                     }
                 },
             },
-            None => match self.key {
+            None => match self.source.key {
                 Some(key) => match ConnectionConfig::from_base64(&key) {
                     Ok(cfg) => (cfg, None),
                     Err(e) => {
@@ -54,7 +65,7 @@ impl ConnectCmd {
                         process::exit(1);
                     }
                 },
-                None => match self.config {
+                None => match self.source.config {
                     Some(ref p) => match ConnectionConfig::load(p) {
                         Ok(cfg) => (cfg, Some(p.to_string_lossy().to_string())),
                         Err(e) => {
@@ -89,8 +100,14 @@ impl ConnectCmd {
             }
         };
 
-        let iface = config.interface.unwrap_or_default();
+        let mut iface = config.interface.unwrap_or_default();
         let runtime = config.runtime.unwrap_or_default();
+
+        // Runtime kill-switch: applied after the config save above so it never
+        // persists to disk, and only ever disables — never enables — offload.
+        if self.no_offload {
+            iface.offload = false;
+        }
 
         let tun = match TunNetwork::new(&iface.name, iface.mtu, false, None, iface.offload).await {
             Ok(t) => t,
