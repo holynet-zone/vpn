@@ -91,14 +91,12 @@ fn usize_varint_len(v: usize) -> usize {
     }
 }
 
-/// Returns the size of the Noise ciphertext for an IP packet of `payload_len` bytes.
+/// Returns the plaintext frame length for an IP packet of `payload_len` bytes.
 ///
-/// Plain frame: `varint_u32(0)` (1 B) + `varint_usize(payload_len)` + `payload_len`
-/// Cipher = plain + 16 (AEAD tag).
+/// Plain frame: `varint_u32(0)` (1 B) + `varint_usize(payload_len)` + `payload_len`.
 #[inline]
-fn ip_packet_cipher_len(payload_len: usize) -> usize {
-    let plain = 1 + usize_varint_len(payload_len) + payload_len;
-    plain + 16
+fn ip_packet_plain_len(payload_len: usize) -> usize {
+    1 + usize_varint_len(payload_len) + payload_len
 }
 
 /// Write a `DataClientBody::Packet` / `DataServerBody::Packet` plaintext frame
@@ -114,27 +112,59 @@ fn write_ip_packet_plain(plain_buf: &mut [u8], payload: &[u8]) -> usize {
     pos + payload.len()
 }
 
-/// Write the outer `Packet::DataServer { nonce, encrypted }` header into `buf`.
-/// Returns the number of header bytes written.
+// --- Fixed-size data-frame headers (network byte order) ---
+//
+// Unlike the handshake frames, data frames carry **no length field**: the
+// ciphertext runs to the end of the UDP datagram (WireGuard-style). Fixed
+// header size is what makes a batch of equal-size plaintext packets produce
+// equal-size datagrams, which is the precondition for coalescing them into one
+// `sendmsg` with UDP GSO (`UDP_SEGMENT`).
+
+/// `DataServer` wire type byte.
+pub(crate) const TYPE_DATA_SERVER: u8 = 3;
+/// `DataClient` wire type byte.
+pub(crate) const TYPE_DATA_CLIENT: u8 = 2;
+/// `DataServer` header length: `type(1) + nonce(8)`.
+pub(crate) const DATA_SERVER_HDR_LEN: usize = 1 + 8;
+/// `DataClient` header length: `type(1) + sid(4) + nonce(8)`.
+pub(crate) const DATA_CLIENT_HDR_LEN: usize = 1 + 4 + 8;
+
+/// Write the fixed `DataServer` header (`type | nonce`) into `buf`.
 #[inline]
-fn write_data_server_frame(buf: &mut [u8], nonce: u64, cipher_len: usize) -> usize {
-    use crate::protocol::varint::{write_u16, write_u32, write_u64};
-    let mut pos = write_u32(buf, 3); // Packet::DataServer = variant 3
-    pos += write_u64(&mut buf[pos..], nonce);
-    pos += write_u16(&mut buf[pos..], cipher_len as u16);
-    pos
+fn write_data_server_header(buf: &mut [u8], nonce: u64) -> usize {
+    buf[0] = TYPE_DATA_SERVER;
+    buf[1..9].copy_from_slice(&nonce.to_be_bytes());
+    DATA_SERVER_HDR_LEN
 }
 
-/// Write the outer `Packet::DataClient { sid, nonce, encrypted }` header into `buf`.
-/// Returns the number of header bytes written.
+/// Write the fixed `DataClient` header (`type | sid | nonce`) into `buf`.
 #[inline]
-fn write_data_client_frame(buf: &mut [u8], sid: u32, nonce: u64, cipher_len: usize) -> usize {
-    use crate::protocol::varint::{write_u16, write_u32, write_u64};
-    let mut pos = write_u32(buf, 2); // Packet::DataClient = variant 2
-    pos += write_u32(&mut buf[pos..], sid);
-    pos += write_u64(&mut buf[pos..], nonce);
-    pos += write_u16(&mut buf[pos..], cipher_len as u16);
-    pos
+fn write_data_client_header(buf: &mut [u8], sid: u32, nonce: u64) -> usize {
+    buf[0] = TYPE_DATA_CLIENT;
+    buf[1..5].copy_from_slice(&sid.to_be_bytes());
+    buf[5..13].copy_from_slice(&nonce.to_be_bytes());
+    DATA_CLIENT_HDR_LEN
+}
+
+/// Assemble a complete `DataServer` frame from an already-encrypted body
+/// (keepalive path). Returns the total frame length.
+pub(crate) fn encode_data_server_frame(nonce: u64, cipher: &[u8], out: &mut [u8]) -> usize {
+    let h = write_data_server_header(out, nonce);
+    out[h..h + cipher.len()].copy_from_slice(cipher);
+    h + cipher.len()
+}
+
+/// Assemble a complete `DataClient` frame from an already-encrypted body
+/// (keepalive path). Returns the total frame length.
+pub(crate) fn encode_data_client_frame(
+    sid: u32,
+    nonce: u64,
+    cipher: &[u8],
+    out: &mut [u8],
+) -> usize {
+    let h = write_data_client_header(out, sid, nonce);
+    out[h..h + cipher.len()].copy_from_slice(cipher);
+    h + cipher.len()
 }
 
 /// Encode a raw IP packet as a complete `Packet::DataServer` wire frame into `out`.
@@ -153,19 +183,17 @@ pub(crate) fn encode_data_server_packet(
     nonce: u64,
     out: &mut [u8],
 ) -> anyhow::Result<usize> {
-    let cipher_len = ip_packet_cipher_len(payload.len());
-    let plain_len = cipher_len - 16;
+    let plain_len = ip_packet_plain_len(payload.len());
     if plain_len > 65536 {
         anyhow::bail!("IP packet too large: {} payload bytes", payload.len());
     }
-    let header_len = write_data_server_frame(out, nonce, cipher_len);
+    let header_len = write_data_server_header(out, nonce);
     PLAIN_BUF.with_borrow_mut(|plain| {
         let n = write_ip_packet_plain(plain, payload);
         debug_assert_eq!(n, plain_len);
         let written = state
             .write_message(nonce, &plain[..n], &mut out[header_len..])
             .map_err(|e| anyhow::anyhow!("noise write_message: {e}"))?;
-        debug_assert_eq!(written, cipher_len);
         Ok(header_len + written)
     })
 }
@@ -181,19 +209,17 @@ pub(crate) fn encode_data_client_packet(
     nonce: u64,
     out: &mut [u8],
 ) -> anyhow::Result<usize> {
-    let cipher_len = ip_packet_cipher_len(payload.len());
-    let plain_len = cipher_len - 16;
+    let plain_len = ip_packet_plain_len(payload.len());
     if plain_len > 65536 {
         anyhow::bail!("IP packet too large: {} payload bytes", payload.len());
     }
-    let header_len = write_data_client_frame(out, sid, nonce, cipher_len);
+    let header_len = write_data_client_header(out, sid, nonce);
     PLAIN_BUF.with_borrow_mut(|plain| {
         let n = write_ip_packet_plain(plain, payload);
         debug_assert_eq!(n, plain_len);
         let written = state
             .write_message(nonce, &plain[..n], &mut out[header_len..])
             .map_err(|e| anyhow::anyhow!("noise write_message: {e}"))?;
-        debug_assert_eq!(written, cipher_len);
         Ok(header_len + written)
     })
 }
@@ -474,57 +500,41 @@ mod tests {
         }
     }
 
-    /// Verify that encode_data_server_packet produces identical bytes to the old
-    /// noise_encrypt + bincode::encode_into_slice path.
+    /// Verify the fixed-size DataServer header layout (`type=3 | nonce BE`).
     #[test]
-    fn test_encode_server_matches_old_path() {
-        use crate::protocol::{DataServerBody, Packet};
-        use bytes::Bytes;
-
+    fn test_data_server_fixed_header() {
         let (tx, _rx) = make_noise_pair_for_test();
         let payload = vec![0x55u8; 64];
-        let nonce = 3u64;
+        let nonce = 0x0102_0304_0506_0708u64;
 
-        // Old path
-        let body = DataServerBody::Packet(Bytes::from(payload.clone()));
-        let encrypted = noise_encrypt(&body, &tx, nonce).unwrap();
-        let old_frame = Packet::DataServer { nonce, encrypted }.to_bytes();
-
-        // New path
         let mut out = vec![0u8; 65600];
         let n = encode_data_server_packet(&payload, &tx, nonce, &mut out).unwrap();
-        let new_frame = &out[..n];
-
-        assert_eq!(old_frame, new_frame);
+        assert_eq!(out[0], TYPE_DATA_SERVER);
+        assert_eq!(&out[1..9], &nonce.to_be_bytes());
+        // Ciphertext runs from the fixed header to the end — no length field.
+        assert_eq!(
+            n - DATA_SERVER_HDR_LEN,
+            ip_packet_plain_len(payload.len()) + 16
+        );
     }
 
-    /// Same for DataClient.
+    /// Verify the fixed-size DataClient header layout (`type=2 | sid BE | nonce BE`).
     #[test]
-    fn test_encode_client_matches_old_path() {
-        use crate::protocol::{DataClientBody, Packet};
-        use bytes::Bytes;
-
+    fn test_data_client_fixed_header() {
         let (tx, _rx) = make_noise_pair_for_test();
         let payload = vec![0xAAu8; 128];
-        let sid: u32 = 42;
-        let nonce = 11u64;
+        let sid: u32 = 0xDEAD_BEEF;
+        let nonce = 0x1122_3344_5566_7788u64;
 
-        // Old path
-        let body = DataClientBody::Packet(Bytes::from(payload.clone()));
-        let encrypted = noise_encrypt(&body, &tx, nonce).unwrap();
-        let old_frame = Packet::DataClient {
-            sid,
-            nonce,
-            encrypted,
-        }
-        .to_bytes();
-
-        // New path
         let mut out = vec![0u8; 65600];
         let n = encode_data_client_packet(&payload, sid, &tx, nonce, &mut out).unwrap();
-        let new_frame = &out[..n];
-
-        assert_eq!(old_frame, new_frame);
+        assert_eq!(out[0], TYPE_DATA_CLIENT);
+        assert_eq!(&out[1..5], &sid.to_be_bytes());
+        assert_eq!(&out[5..13], &nonce.to_be_bytes());
+        assert_eq!(
+            n - DATA_CLIENT_HDR_LEN,
+            ip_packet_plain_len(payload.len()) + 16
+        );
     }
 
     /// Encrypt multiple packets without dropping previous results — the pool

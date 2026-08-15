@@ -15,7 +15,7 @@ use tracing::error;
 #[derive(Debug, Args)]
 pub struct StartCmd {
     /// Host to listen on (overrides config)
-    #[arg(short, long)]
+    #[arg(long)]
     host: Option<String>,
     /// Port to listen on (overrides config)
     #[arg(short, long)]
@@ -23,6 +23,10 @@ pub struct StartCmd {
     /// TUN interface name (overrides config)
     #[arg(short, long, alias = "interface")]
     iface: Option<String>,
+    /// Force-disable Linux TUN GRO/TSO offload, overriding `interface.offload`
+    /// in the config (runtime kill-switch for buggy NICs).
+    #[arg(long)]
+    no_offload: bool,
 }
 
 impl StartCmd {
@@ -39,6 +43,12 @@ impl StartCmd {
 
         if let Err(e) = config.save() {
             success_warn!("cant update configuration: {}", e);
+        }
+
+        // Runtime kill-switch: applied after save so it never persists to the
+        // config file, and only ever disables — never enables — offload.
+        if self.no_offload {
+            config.interface.offload = false;
         }
 
         let clients = match database(&config.general.storage) {
@@ -72,13 +82,7 @@ impl StartCmd {
             };
 
         let runtime = config.runtime.unwrap_or_default();
-        let workers = if runtime.workers == 0 {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1)
-        } else {
-            runtime.workers
-        };
+        let workers = crate::config::resolve_pool_workers(runtime.workers);
 
         let transports =
             match UdpTransport::new_pool(addr, runtime.so_rcvbuf, runtime.so_sndbuf, workers) {
@@ -94,6 +98,7 @@ impl StartCmd {
             config.interface.mtu,
             true,
             Some((config.interface.address, config.interface.prefix)),
+            config.interface.offload,
         )
         .await
         {
@@ -125,7 +130,8 @@ impl StartCmd {
             .ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)
-            .handshake_buf(runtime.handshake_buf);
+            .handshake_buf(runtime.handshake_buf)
+            .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers));
 
         let server = match builder.build() {
             Ok(s) => s,

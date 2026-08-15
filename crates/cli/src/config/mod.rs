@@ -17,12 +17,34 @@ pub struct GeneralConfig {
     pub storage: PathBuf,
 }
 
+fn default_offload() -> bool {
+    true
+}
+
+/// Resolve a worker-pool size where `0` means "auto" (one worker per logical
+/// CPU) and any other value is taken verbatim. A configured `1` therefore keeps
+/// the single-task path, so pools can still be disabled explicitly.
+pub fn resolve_pool_workers(configured: usize) -> usize {
+    if configured == 0 {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    } else {
+        configured
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct InterfaceConfig {
     pub name: String,
     pub mtu: u16,
     pub address: IpAddr,
     pub prefix: u8,
+    /// Enable Linux TUN GRO/TSO offload (batched recv_multiple/send_multiple).
+    /// Falls back to per-packet automatically if the kernel rejects it, or when
+    /// the `--no-offload` CLI flag is passed.
+    #[serde(default = "default_offload")]
+    pub offload: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -34,6 +56,11 @@ pub struct SessionConfig {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RuntimeConfig {
     pub workers: usize,
+    /// Parallel decrypt workers per receive socket (server only). `0` auto-sizes
+    /// to one worker per logical CPU; `1` keeps the single-task path; `>= 2`
+    /// sets an explicit WireGuard-style decrypt pool.
+    #[serde(default)]
+    pub decrypt_workers: usize,
     pub so_rcvbuf: usize,
     pub so_sndbuf: usize,
     pub out_udp_buf: usize,
@@ -99,6 +126,7 @@ impl Default for InterfaceConfig {
             mtu: 1420,
             address: IpAddr::from([10, 8, 0, 0]),
             prefix: 24,
+            offload: true,
         }
     }
 }
@@ -116,6 +144,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             workers: 0,
+            decrypt_workers: 0,
             so_rcvbuf: 1024 * 1024 * 1024,
             so_sndbuf: 1024 * 1024 * 1024,
             out_udp_buf: 1000,

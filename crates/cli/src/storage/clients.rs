@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use fjall::{Keyspace, PartitionCreateOptions, PartitionHandle};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions};
 use holynet_sdk::crypto::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use tokio::task;
@@ -13,12 +13,12 @@ pub struct Client {
 
 #[derive(Clone)]
 pub struct Clients {
-    pub db: PartitionHandle,
+    pub db: Keyspace,
 }
 
 impl Clients {
-    pub fn new(db: Keyspace) -> anyhow::Result<Self> {
-        let items = db.open_partition("clients", PartitionCreateOptions::default())?;
+    pub fn new(db: Database) -> anyhow::Result<Self> {
+        let items = db.keyspace("clients", KeyspaceCreateOptions::default)?;
         Ok(Self { db: items })
     }
 
@@ -40,15 +40,12 @@ impl Clients {
         let db = self.db.clone();
         task::spawn_blocking(move || {
             db.iter()
-                .map(|result| match result {
-                    Ok((_, value)) => {
-                        match bincode::serde::decode_from_slice(&value, bincode::config::standard())
-                        {
-                            Ok((client, _)) => client,
-                            Err(err) => panic!("deserialize client from db: {}", err),
-                        }
+                .map(|guard| {
+                    let value = guard.value().expect("failed to read from the db iter");
+                    match bincode::serde::decode_from_slice(&value, bincode::config::standard()) {
+                        Ok((client, _)) => client,
+                        Err(err) => panic!("deserialize client from db: {}", err),
                     }
-                    Err(err) => panic!("failed to read from the db iter: {}", err),
                 })
                 .collect()
         })

@@ -1,0 +1,13 @@
+FROM golang:1.23-bookworm AS wgbuild
+ENV CGO_ENABLED=0
+# wireguard-go userspace implementation (module path golang.zx2c4.com/wireguard)
+RUN go install golang.zx2c4.com/wireguard@latest \
+ && (test -f /go/bin/wireguard && cp /go/bin/wireguard /wireguard-go \
+     || cp /go/bin/wireguard-go /wireguard-go)
+
+FROM archlinux:latest
+RUN pacman -Sy --noconfirm iperf3 iproute2 wireguard-tools procps-ng >/dev/null \
+ && pacman -Scc --noconfirm >/dev/null
+COPY --from=wgbuild /wireguard-go /usr/local/bin/wireguard-go
+RUN mkdir -p /conf /var/run/wireguard
+WORKDIR /conf

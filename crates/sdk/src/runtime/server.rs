@@ -1,6 +1,7 @@
 mod handshake;
 mod network;
 mod recv;
+mod recv_pool;
 pub mod session;
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
@@ -27,6 +28,7 @@ pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
     handshake_buf: usize,
+    decrypt_workers: usize,
 }
 
 impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
@@ -41,6 +43,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             session_timeout: Some(Duration::from_secs(60 * 5)),
             session_cleanup_interval: Duration::from_secs(60),
             handshake_buf: 1000,
+            decrypt_workers: 0,
         }
     }
 
@@ -77,6 +80,17 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
         self
     }
 
+    /// Number of parallel decrypt workers **per receive socket**.
+    ///
+    /// `0` or `1` keeps the single-task receive path (one core per flow). `>= 2`
+    /// switches to the WireGuard-style pool that spreads one flow's decryption
+    /// across that many cores with in-order TUN writes. Pair a large value with
+    /// a small reuseport `workers` count when a single bulk flow dominates.
+    pub fn decrypt_workers(mut self, count: usize) -> Self {
+        self.decrypt_workers = count;
+        self
+    }
+
     pub fn build(self) -> Result<Server<T, N>, BuildError> {
         Ok(Server {
             transports: if self.transports.is_empty() {
@@ -96,6 +110,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             session_timeout: self.session_timeout,
             session_cleanup_interval: self.session_cleanup_interval,
             handshake_buf: self.handshake_buf,
+            decrypt_workers: self.decrypt_workers,
         })
     }
 }
@@ -110,6 +125,7 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
     session_timeout: Option<Duration>,
     session_cleanup_interval: Duration,
     handshake_buf: usize,
+    decrypt_workers: usize,
 }
 
 impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
@@ -124,15 +140,30 @@ impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
             let (handshake_tx, handshake_rx) = tokio::sync::mpsc::channel(self.handshake_buf);
             let inf_timeout = self.session_timeout.is_none();
 
-            // Hot path 1: UDP → decrypt → network (+ inline keepalive responses)
-            set.spawn(recv_decrypt_forward(
-                stop_rx.clone(),
-                transport.clone(),
-                network.clone(),
-                sessions.clone(),
-                handshake_tx,
-                inf_timeout,
-            ));
+            // Hot path 1: UDP → decrypt → network (+ inline keepalive responses).
+            // With >= 2 decrypt workers, spread one flow's decryption across
+            // cores via the WireGuard-style pool; otherwise keep the single-task
+            // path (one core per flow).
+            if self.decrypt_workers >= 2 {
+                set.spawn(recv_pool::recv_decrypt_forward_pool(
+                    stop_rx.clone(),
+                    transport.clone(),
+                    network.clone(),
+                    sessions.clone(),
+                    handshake_tx,
+                    inf_timeout,
+                    self.decrypt_workers,
+                ));
+            } else {
+                set.spawn(recv_decrypt_forward(
+                    stop_rx.clone(),
+                    transport.clone(),
+                    network.clone(),
+                    sessions.clone(),
+                    handshake_tx,
+                    inf_timeout,
+                ));
+            }
 
             // Hot path 2: network → encrypt → UDP
             set.spawn(encrypt_forward(

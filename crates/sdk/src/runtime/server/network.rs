@@ -1,25 +1,66 @@
 //! Merged network-read + encrypt + UDP-send task (server side).
 //!
-//! ## Zero-allocation hot path
+//! ## Batched, zero-allocation hot path
 //!
 //! ```text
-//! network.recv → net_buf (stack)
-//!   → write_ip_packet_plain  — PLAIN_BUF (thread-local), Copy 1
-//!   → noise write_message    — AEAD encrypt into encode_buf (stack), Copy 2
-//!   → transport.send_to      — direct UDP write, no intermediate buffers
+//! network.recv_multiple → up to TUN_BATCH_SIZE IP packets from one 64 KiB
+//!                         GSO super-frame (TUN GRO split, one syscall)
+//!   for each packet:
+//!     → write_ip_packet_plain  — PLAIN_BUF (thread-local), Copy 1
+//!     → noise write_message    — AEAD encrypt into encode_buf (stack), Copy 2
+//!     → transport.send_to      — direct UDP write, no intermediate buffers
 //! ```
+//!
+//! A single bulk TCP stream produces one destination client per batch, so the
+//! 1-entry session cache turns the per-packet DashMap lookup into a pointer
+//! compare.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use tokio::sync::watch;
 use tracing::{debug, error, warn};
 
-use super::session::{HolyIp, Sessions};
-use crate::gateway::network::Network;
+use super::session::{HolyIp, Session, Sessions};
+use crate::gateway::network::{Network, TUN_BATCH_SIZE};
 use crate::gateway::transport::Transport;
 use crate::runtime::crypto::encode_data_server_packet;
+
+/// Send a batch of encrypted frames laid out contiguously in `gso_buf`.
+///
+/// When the frames form a GSO-uniform run — one destination, every frame but the
+/// last exactly `seg` bytes — they go out as one chunked `sendmsg` with
+/// `UDP_SEGMENT`. Otherwise (mixed sizes/destinations, which a single TUN GRO
+/// super-frame cannot produce) each frame is sent individually.
+async fn send_batch<T: Transport>(
+    transport: &T,
+    gso_buf: &[u8],
+    frames: &[(usize, usize, SocketAddr)],
+) {
+    let Some(&(start, seg, addr)) = frames.first() else {
+        return;
+    };
+    let last = frames.len() - 1;
+    let uniform = frames.iter().all(|&(_, _, a)| a == addr)
+        && frames[..last].iter().all(|&(_, l, _)| l == seg)
+        && frames[last].1 <= seg;
+    if uniform {
+        let (o, l, _) = frames[last];
+        if let Err(e) = transport
+            .send_gso_chunked(&gso_buf[start..o + l], seg, Some(&addr))
+            .await
+        {
+            error!("UDP GSO send failed: {}", e);
+        }
+    } else {
+        for &(o, l, a) in frames {
+            if let Err(e) = transport.send_to(&gso_buf[o..o + l], &a).await {
+                error!("[{}] UDP send failed: {}", a, e);
+            }
+        }
+    }
+}
 
 /// Extract the destination IP address from a raw IP packet without parsing
 /// all layers. Only IPv4 is supported; IPv6 returns an error.
@@ -63,35 +104,58 @@ pub(super) async fn encrypt_forward<T: Transport, N: Network>(
     transport: Arc<T>,
     sessions: Sessions,
 ) {
-    let mut net_buf = [0u8; 65536];
-    let mut encode_buf = [0u8; 65600];
+    // Batched TUN read buffers (reused each iteration — zero alloc in steady state).
+    let mut orig = vec![0u8; 10 + 65535]; // raw GSO super-frame + virtio hdr
+    let seg_buf = network.mtu() as usize + 128;
+    let mut bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE).map(|_| vec![0u8; seg_buf]).collect();
+    let mut sizes = vec![0usize; TUN_BATCH_SIZE];
+    // Contiguous buffer holding a whole batch of encrypted frames back-to-back
+    // for one UDP GSO sendmsg (worst case: all MTU-sized frames).
+    let mut gso_buf = vec![0u8; TUN_BATCH_SIZE * (network.mtu() as usize + 64)];
+    // (offset, len, dest) of each encrypted frame in gso_buf; reused each batch.
+    let mut frames: Vec<(usize, usize, SocketAddr)> = Vec::with_capacity(TUN_BATCH_SIZE);
+    // Per-task 1-entry destination cache: batch of a bulk stream shares one client.
+    let mut cached: Option<(HolyIp, Arc<Session>)> = None;
 
     loop {
         tokio::select! {
             _ = stop.changed() => break,
-            result = network.recv(&mut net_buf) => match result {
+            result = network.recv_multiple(&mut orig, &mut bufs, &mut sizes, 0) => match result {
                 Err(e) => error!("network recv error: {}", e),
-                Ok(len) => {
-                    match parse_destination(&net_buf[..len]) {
-                        Err(e) => warn!("failed to parse network packet destination: {}", e),
-                        Ok(ip) => {
-                            let holy_ip = ip_to_holy(ip);
-                            let Some(session) = sessions.get_by_holy_ip(&holy_ip) else {
-                                warn!("[{}] no session for network packet destination", ip);
+                Ok(count) => {
+                    frames.clear();
+                    let mut off = 0usize;
+                    for i in 0..count {
+                        let pkt = &bufs[i][..sizes[i]];
+                        let ip = match parse_destination(pkt) {
+                            Err(e) => {
+                                warn!("failed to parse network packet destination: {}", e);
                                 continue;
-                            };
-                            let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
-                            match encode_data_server_packet(&net_buf[..len], &session.state, send_nonce, &mut encode_buf) {
-                                Err(e) => warn!("[{}] encrypt failed (sid {}): {}", ip, session.id, e),
-                                Ok(n) => {
-                                    let addr = session.sock_addr();
-                                    if let Err(e) = transport.send_to(&encode_buf[..n], &addr).await {
-                                        error!("[{}] UDP send failed: {}", addr, e);
-                                    }
-                                }
+                            }
+                            Ok(ip) => ip,
+                        };
+                        let holy_ip = ip_to_holy(ip);
+                        let session = match &cached {
+                            Some((cip, s)) if *cip == holy_ip => s.clone(),
+                            _ => {
+                                let Some(s) = sessions.get_by_holy_ip(&holy_ip) else {
+                                    warn!("[{}] no session for network packet destination", ip);
+                                    continue;
+                                };
+                                cached = Some((holy_ip, s.clone()));
+                                s
+                            }
+                        };
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match encode_data_server_packet(pkt, &session.state, send_nonce, &mut gso_buf[off..]) {
+                            Err(e) => warn!("[{}] encrypt failed (sid {}): {}", ip, session.id, e),
+                            Ok(n) => {
+                                frames.push((off, n, session.sock_addr()));
+                                off += n;
                             }
                         }
                     }
+                    send_batch(&*transport, &gso_buf, &frames).await;
                 }
             }
         }

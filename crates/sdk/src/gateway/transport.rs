@@ -2,7 +2,7 @@
 pub mod udp;
 
 #[cfg(test)]
-mod mock;
+pub(crate) mod mock;
 #[cfg(feature = "ws")]
 pub mod ws;
 
@@ -18,6 +18,62 @@ pub trait TransportSender: Send + Sync {
         addr: &'a SocketAddr,
     ) -> impl Future<Output = io::Result<usize>> + Send + 'a;
     fn send<'a>(&'a self, data: &'a [u8]) -> impl Future<Output = io::Result<usize>> + Send + 'a;
+
+    /// Send `buf` as consecutive UDP datagrams of `segment_size` bytes each (the
+    /// last may be smaller) in a single syscall via UDP GSO (`UDP_SEGMENT`).
+    ///
+    /// `addr` is `Some(_)` for unconnected sockets (server side) and `None` for
+    /// connected ones (client side). All segments go to the same destination.
+    ///
+    /// Default impl performs **no** GSO — it splits `buf` and sends each segment
+    /// individually, so non-UDP transports and non-Linux targets stay correct.
+    fn send_gso<'a>(
+        &'a self,
+        buf: &'a [u8],
+        segment_size: usize,
+        addr: Option<&'a SocketAddr>,
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            if segment_size == 0 {
+                return Ok(0);
+            }
+            let mut off = 0;
+            while off < buf.len() {
+                let end = (off + segment_size).min(buf.len());
+                match addr {
+                    Some(a) => self.send_to(&buf[off..end], a).await?,
+                    None => self.send(&buf[off..end]).await?,
+                };
+                off = end;
+            }
+            Ok(buf.len())
+        }
+    }
+
+    /// Send a run of equal-`segment_size` frames via UDP GSO, chunked to respect
+    /// kernel limits: at most 64 segments and 65535 bytes per `sendmsg`. All
+    /// frames must be `segment_size` bytes except possibly the very last.
+    fn send_gso_chunked<'a>(
+        &'a self,
+        buf: &'a [u8],
+        segment_size: usize,
+        addr: Option<&'a SocketAddr>,
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            if segment_size == 0 {
+                return Ok(0);
+            }
+            let max_segs = (65535 / segment_size).clamp(1, 64);
+            let chunk = segment_size * max_segs;
+            let mut off = 0;
+            while off < buf.len() {
+                let end = (off + chunk).min(buf.len());
+                self.send_gso(&buf[off..end], segment_size, addr).await?;
+                off = end;
+            }
+            Ok(buf.len())
+        }
+    }
 }
 
 /// Receive half — implemented by both server and client transports.
@@ -30,6 +86,47 @@ pub trait TransportReceiver: Send + Sync {
         &'a self,
         buffer: &'a mut [u8],
     ) -> impl Future<Output = io::Result<usize>> + Send + 'a;
+
+    /// Non-blocking drain of an already-queued datagram. Returns `WouldBlock`
+    /// when the socket buffer is empty. Used to opportunistically gather a batch
+    /// of pending datagrams for a single batched TUN write, without ever waiting
+    /// (so no latency is added to a single-packet flow).
+    ///
+    /// Default: not supported (returns `WouldBlock`), disabling drain-batching.
+    fn try_recv_from(&self, _buffer: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "try_recv_from unsupported",
+        ))
+    }
+
+    /// Connected-socket variant of [`Self::try_recv_from`].
+    fn try_recv(&self, _buffer: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "try_recv unsupported",
+        ))
+    }
+
+    /// Receive up to `bufs.len()` datagrams in one call, blocking until at least
+    /// one arrives. Datagram `i` lands in `bufs[i]` with length `lens[i]` and
+    /// source `addrs[i]`; returns the count. Lets a single reader amortise the
+    /// per-datagram syscall over a whole burst (`recvmmsg` on Linux).
+    ///
+    /// Default: fall back to a single [`Self::recv_from`] into `bufs[0]`.
+    fn recv_mmsg<'a>(
+        &'a self,
+        bufs: &'a mut [Vec<u8>],
+        lens: &'a mut [usize],
+        addrs: &'a mut [SocketAddr],
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            let (n, addr) = self.recv_from(&mut bufs[0]).await?;
+            lens[0] = n;
+            addrs[0] = addr;
+            Ok(1)
+        }
+    }
 }
 
 /// Base transport — shared by server and client.

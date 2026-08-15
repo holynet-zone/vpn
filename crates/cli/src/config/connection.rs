@@ -20,16 +20,35 @@ pub struct CredentialsConfig {
     pub server_public_key: PublicKey,
 }
 
+fn default_offload() -> bool {
+    true
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InterfaceConfig {
     pub name: String,
     pub mtu: u16,
+    /// Enable Linux TUN GRO/TSO offload. Auto-falls back to per-packet if the
+    /// kernel rejects it or the `--no-offload` CLI flag is passed.
+    #[serde(default = "default_offload")]
+    pub offload: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RuntimeConfig {
     pub handshake_timeout: u64,
     pub keepalive: Option<u64>,
+    /// Parallel encrypt workers on the send path. `0` auto-sizes to one worker
+    /// per logical CPU; `1` keeps the single-task path; `>= 2` sets an explicit
+    /// WireGuard-style encrypt pool.
+    #[serde(default)]
+    pub encrypt_workers: usize,
+    /// Parallel decrypt workers on the receive path. `0` auto-sizes to one
+    /// worker per logical CPU; `1` keeps the single-task path; `>= 2` sets an
+    /// explicit WireGuard-style decrypt pool (the lever for the reverse/download
+    /// direction).
+    #[serde(default)]
+    pub decrypt_workers: usize,
     pub so_rcvbuf: usize,
     pub so_sndbuf: usize,
     pub out_udp_buf: usize,
@@ -82,6 +101,8 @@ impl Default for RuntimeConfig {
         Self {
             handshake_timeout: 3000,
             keepalive: Some(5),
+            encrypt_workers: 0,
+            decrypt_workers: 0,
             so_rcvbuf: 1024 * 1024 * 1024,
             so_sndbuf: 1024 * 1024 * 1024,
             out_udp_buf: 1000,
@@ -97,6 +118,7 @@ impl Default for InterfaceConfig {
         Self {
             name: find_available_ifname("holynet"),
             mtu: 1420,
+            offload: true,
         }
     }
 }
