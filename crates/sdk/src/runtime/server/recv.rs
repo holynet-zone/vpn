@@ -93,7 +93,11 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                         }
                     }
 
-                    Some(PacketRef::DataClient { sid, nonce, ciphertext }) => {
+                    Some(PacketRef::DataClient {
+                        sid,
+                        nonce,
+                        ciphertext,
+                    }) => {
                         // Per-task session cache: on hit avoid DashMap entirely.
                         let session = match &cached_session {
                             Some((cs, s)) if *cs == sid => {
@@ -119,11 +123,8 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
 
                         if let Some(session) = session {
                             // Replay window check under lock, before decryption.
-                            let nonce_ok = session
-                                .recv_window
-                                .lock()
-                                .unwrap()
-                                .check_and_update(nonce);
+                            let nonce_ok =
+                                session.recv_window.lock().unwrap().check_and_update(nonce);
                             if !nonce_ok {
                                 warn!("[{}] replay/stale nonce {} for sid {}", addr, nonce, sid);
                             } else {
@@ -142,7 +143,9 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                                     nonce,
                                 );
                                 match dec {
-                                    Err(e) => warn!("[{}] decrypt failed (sid {}): {}", addr, sid, e),
+                                    Err(e) => {
+                                        warn!("[{}] decrypt failed (sid {}): {}", addr, sid, e)
+                                    }
                                     Ok(DataClientActionRef::Forward(packet)) => {
                                         // `packet` points at the IP packet inside the
                                         // decrypted frame (past the variant+len header),
@@ -150,7 +153,8 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                                         // it there — send_multiple uses one global offset.
                                         let start = packet.as_ptr() as usize - base;
                                         let len = packet.len();
-                                        tun_bufs[batch_len].copy_within(start..start + len, TUN_SEND_OFFSET);
+                                        tun_bufs[batch_len]
+                                            .copy_within(start..start + len, TUN_SEND_OFFSET);
                                         tun_bufs[batch_len].truncate(TUN_SEND_OFFSET + len);
                                         if session.sock_addr() != addr {
                                             debug!("[{}] addr changed for sid {}", addr, sid);
@@ -171,11 +175,22 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                                             &session.state,
                                             send_nonce,
                                         ) {
-                                            Err(e) => error!("[{}] keepalive encrypt failed: {}", addr, e),
+                                            Err(e) => {
+                                                error!("[{}] keepalive encrypt failed: {}", addr, e)
+                                            }
                                             Ok(encrypted) => {
-                                                let m = encode_data_server_frame(send_nonce, &encrypted, &mut encode_buf);
-                                                if let Err(e) = transport.send_to(&encode_buf[..m], &addr).await {
-                                                    error!("[{}] keepalive send failed: {}", addr, e);
+                                                let m = encode_data_server_frame(
+                                                    send_nonce,
+                                                    &encrypted,
+                                                    &mut encode_buf,
+                                                );
+                                                if let Err(e) =
+                                                    transport.send_to(&encode_buf[..m], &addr).await
+                                                {
+                                                    error!(
+                                                        "[{}] keepalive send failed: {}",
+                                                        addr, e
+                                                    );
                                                 }
                                             }
                                         }

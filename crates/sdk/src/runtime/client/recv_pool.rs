@@ -96,14 +96,19 @@ impl Batch {
             seq: 0,
             len: 0,
             session: None,
-            slots: (0..MMSG_BATCH).map(|_| Slot::new(cipher_cap, seg)).collect(),
+            slots: (0..MMSG_BATCH)
+                .map(|_| Slot::new(cipher_cap, seg))
+                .collect(),
         }
     }
 }
 
 /// Spawn the reader + `workers` decrypt tasks + writer and run until the runtime
 /// state goes to `Error` or the channels close.
-pub(super) async fn recv_decrypt_forward_pool<T: ClientTransport + 'static, N: Network + 'static>(
+pub(super) async fn recv_decrypt_forward_pool<
+    T: ClientTransport + 'static,
+    N: Network + 'static,
+>(
     state_tx: watch::Sender<RuntimeState>,
     transport: Arc<T>,
     network: Arc<N>,
@@ -142,7 +147,13 @@ pub(super) async fn recv_decrypt_forward_pool<T: ClientTransport + 'static, N: N
         free_tx.clone(),
         work_tx,
     ));
-    set.spawn(writer(state_tx.clone(), network.clone(), workers, done_rx, free_tx.clone()));
+    set.spawn(writer(
+        state_tx.clone(),
+        network.clone(),
+        workers,
+        done_rx,
+        free_tx.clone(),
+    ));
     drop(free_tx);
 
     while let Some(res) = set.join_next().await {
@@ -314,7 +325,12 @@ async fn worker(
 /// Decrypt/dispatch a single slot in place, setting its `action` for the writer.
 /// Replay is NOT checked here (the writer does it in order); a replayed datagram
 /// is decrypted and then dropped, like the server pool.
-fn decrypt_one(slot: &mut Slot, session: &ClientSession, seg: usize, state_tx: &watch::Sender<RuntimeState>) {
+fn decrypt_one(
+    slot: &mut Slot,
+    session: &ClientSession,
+    seg: usize,
+    state_tx: &watch::Sender<RuntimeState>,
+) {
     slot.action = SlotAction::Skip;
 
     if slot.cipher_len == 0 || slot.cipher_len >= slot.cipher.len() {
@@ -345,7 +361,10 @@ fn decrypt_one(slot: &mut Slot, session: &ClientSession, seg: usize, state_tx: &
                     slot.action = SlotAction::Forward;
                 }
                 Ok(DataServerActionRef::KeepAlive(ts)) => {
-                    info!("keepalive rtt: {}", format_duration_millis(ts, micros_since_start()));
+                    info!(
+                        "keepalive rtt: {}",
+                        format_duration_millis(ts, micros_since_start())
+                    );
                 }
                 Ok(DataServerActionRef::Disconnect(code)) => {
                     warn!("server disconnect code {}", code);
@@ -378,8 +397,9 @@ async fn writer<N: Network>(
     let mut gro = GroState::new();
     // Pre-reserve a full GSO super-frame per entry so tun-rs' GRO merge coalesces
     // in place without reallocating (see GRO_BUF_CAP / the server pool writer).
-    let mut tun_batch: Vec<Vec<u8>> =
-        (0..TUN_BATCH_SIZE).map(|_| Vec::with_capacity(GRO_BUF_CAP)).collect();
+    let mut tun_batch: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE)
+        .map(|_| Vec::with_capacity(GRO_BUF_CAP))
+        .collect();
     let mut tun_len = 0usize;
     let mut expected: u64 = 0;
 
@@ -411,9 +431,11 @@ async fn writer<N: Network>(
         for si in 0..batch.len {
             if let SlotAction::Forward = batch.slots[si].action {
                 let ok = match &batch.session {
-                    Some(session) => {
-                        session.recv_window.lock().unwrap().check_and_update(batch.slots[si].nonce)
-                    }
+                    Some(session) => session
+                        .recv_window
+                        .lock()
+                        .unwrap()
+                        .check_and_update(batch.slots[si].nonce),
                     None => false,
                 };
                 if ok {
@@ -445,8 +467,16 @@ async fn writer<N: Network>(
 }
 
 /// Write `tun_batch[..len]` to the TUN in one GRO-merged `send_multiple`.
-async fn flush<N: Network>(network: &Arc<N>, gro: &mut GroState, tun_batch: &mut [Vec<u8>], len: usize) {
-    if let Err(e) = network.send_multiple(gro, &mut tun_batch[..len], TUN_SEND_OFFSET).await {
+async fn flush<N: Network>(
+    network: &Arc<N>,
+    gro: &mut GroState,
+    tun_batch: &mut [Vec<u8>],
+    len: usize,
+) {
+    if let Err(e) = network
+        .send_multiple(gro, &mut tun_batch[..len], TUN_SEND_OFFSET)
+        .await
+    {
         warn!("network send failed: {}", e);
     }
 }
@@ -511,7 +541,10 @@ mod tests {
         let peer: SocketAddr = "127.0.0.1:10001".parse().unwrap();
 
         let (writes_tx, mut writes_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let network = Arc::new(RecordingNetwork { writes: writes_tx, mtu: 1420 });
+        let network = Arc::new(RecordingNetwork {
+            writes: writes_tx,
+            mtu: 1420,
+        });
 
         let (state_tx, _state_rx) = watch::channel(RuntimeState::Connecting);
 

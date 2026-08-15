@@ -40,8 +40,7 @@ async fn send_batch<T: ClientTransport>(
         return Ok(());
     };
     let last = frames.len() - 1;
-    let uniform =
-        frames[..last].iter().all(|&(_, l)| l == seg) && frames[last].1 <= seg;
+    let uniform = frames[..last].iter().all(|&(_, l)| l == seg) && frames[last].1 <= seg;
     if uniform {
         let (o, l) = frames[last];
         transport

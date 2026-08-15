@@ -34,8 +34,7 @@ impl UdpTransport {
         // `recv_from` on the same queue and reordered single-flow packets.
         let mut sockets = Vec::with_capacity(count);
         for i in 0..count {
-            let socket =
-                Socket::new(Domain::for_address(addr), Type::DGRAM, Some(Protocol::UDP))?;
+            let socket = Socket::new(Domain::for_address(addr), Type::DGRAM, Some(Protocol::UDP))?;
 
             socket.set_nonblocking(true)?;
             socket.set_reuse_port(true)?;
@@ -189,7 +188,10 @@ fn storage_to_socketaddr(ss: &nix::libc::sockaddr_storage) -> Option<SocketAddr>
             // SAFETY: ss_family == AF_INET6 => the storage holds a sockaddr_in6.
             let sin6 = unsafe { &*(ss as *const _ as *const libc::sockaddr_in6) };
             let ip = std::net::Ipv6Addr::from(sin6.sin6_addr.s6_addr);
-            Some(SocketAddr::new(IpAddr::V6(ip), u16::from_be(sin6.sin6_port)))
+            Some(SocketAddr::new(
+                IpAddr::V6(ip),
+                u16::from_be(sin6.sin6_port),
+            ))
         }
         _ => None,
     }
@@ -229,10 +231,9 @@ impl TransportSender for UdpTransport {
         let seg = segment_size.min(u16::MAX as usize) as u16;
         loop {
             self.socket.writable().await?;
-            match self
-                .socket
-                .try_io(Interest::WRITABLE, || sendmsg_gso(&self.socket, buf, seg, addr))
-            {
+            match self.socket.try_io(Interest::WRITABLE, || {
+                sendmsg_gso(&self.socket, buf, seg, addr)
+            }) {
                 Ok(n) => return Ok(n),
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
                 Err(e) => return Err(e),

@@ -107,11 +107,7 @@ pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
                 match PacketRef::from_bytes(&buf[..n]) {
                     None => warn!("failed to parse transport packet"),
                     Some(PacketRef::DataServer { nonce, ciphertext }) => {
-                        let nonce_ok = session
-                            .recv_window
-                            .lock()
-                            .unwrap()
-                            .check_and_update(nonce);
+                        let nonce_ok = session.recv_window.lock().unwrap().check_and_update(nonce);
                         if !nonce_ok {
                             warn!("replay/stale nonce {} from server", nonce);
                         } else {
@@ -133,12 +129,16 @@ pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
                                     // TUN_SEND_OFFSET for the single-offset send_multiple.
                                     let start = packet.as_ptr() as usize - base;
                                     let len = packet.len();
-                                    tun_bufs[batch_len].copy_within(start..start + len, TUN_SEND_OFFSET);
+                                    tun_bufs[batch_len]
+                                        .copy_within(start..start + len, TUN_SEND_OFFSET);
                                     tun_bufs[batch_len].truncate(TUN_SEND_OFFSET + len);
                                     batch_len += 1;
                                 }
                                 Ok(DataServerActionRef::KeepAlive(ts)) => {
-                                    info!("keepalive rtt: {}", format_duration_millis(ts, micros_since_start()));
+                                    info!(
+                                        "keepalive rtt: {}",
+                                        format_duration_millis(ts, micros_since_start())
+                                    );
                                 }
                                 Ok(DataServerActionRef::Disconnect(code)) => {
                                     warn!("server disconnect code {}", code);

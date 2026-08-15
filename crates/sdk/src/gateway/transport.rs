@@ -94,12 +94,18 @@ pub trait TransportReceiver: Send + Sync {
     ///
     /// Default: not supported (returns `WouldBlock`), disabling drain-batching.
     fn try_recv_from(&self, _buffer: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        Err(io::Error::new(io::ErrorKind::WouldBlock, "try_recv_from unsupported"))
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "try_recv_from unsupported",
+        ))
     }
 
     /// Connected-socket variant of [`Self::try_recv_from`].
     fn try_recv(&self, _buffer: &mut [u8]) -> io::Result<usize> {
-        Err(io::Error::new(io::ErrorKind::WouldBlock, "try_recv unsupported"))
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "try_recv unsupported",
+        ))
     }
 
     /// Receive up to `bufs.len()` datagrams in one call, blocking until at least

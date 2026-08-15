@@ -15,7 +15,6 @@ use varint::{read_u16, read_u32};
 
 pub type EncryptedHandshake = VecU16<u8>;
 
-
 /// Backed by `bytes::Bytes` (Arc-counted) so that passing through channels
 /// is a cheap pointer move.
 ///
@@ -105,7 +104,6 @@ impl Packet {
             .expect("unexpected error encoding packet")
     }
 }
-
 
 /// Zero-copy view into a raw UDP receive buffer.
 ///

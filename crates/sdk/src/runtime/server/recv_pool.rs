@@ -130,7 +130,9 @@ impl Batch {
         Self {
             seq: 0,
             len: 0,
-            slots: (0..MMSG_BATCH).map(|_| Slot::new(cipher_cap, seg)).collect(),
+            slots: (0..MMSG_BATCH)
+                .map(|_| Slot::new(cipher_cap, seg))
+                .collect(),
         }
     }
 }
@@ -190,7 +192,13 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
         free_rx,
         work_tx,
     ));
-    set.spawn(writer(stop.clone(), network.clone(), workers, done_rx, free_tx.clone()));
+    set.spawn(writer(
+        stop.clone(),
+        network.clone(),
+        workers,
+        done_rx,
+        free_tx.clone(),
+    ));
     drop(free_tx);
 
     while let Some(res) = set.join_next().await {
@@ -316,14 +324,21 @@ async fn decrypt_one<T: Transport>(
     slot.session = None;
 
     if slot.cipher_len == 0 || slot.cipher_len >= slot.cipher.len() {
-        warn!("dropping datagram from {} (size {})", slot.addr, slot.cipher_len);
+        warn!(
+            "dropping datagram from {} (size {})",
+            slot.addr, slot.cipher_len
+        );
         return;
     }
 
     match PacketRef::from_bytes(&slot.cipher[..slot.cipher_len]) {
         None => warn!("failed to parse packet from {}", slot.addr),
 
-        Some(PacketRef::DataClient { sid, nonce, ciphertext }) => {
+        Some(PacketRef::DataClient {
+            sid,
+            nonce,
+            ciphertext,
+        }) => {
             let session = match &*cached {
                 Some((cs, s)) if *cs == sid => Some(s.clone()),
                 _ => match sessions.get_by_sid(&sid) {
@@ -340,7 +355,9 @@ async fn decrypt_one<T: Transport>(
 
             if let Some(session) = session {
                 if !inf_sessions_timeout {
-                    session.last_seen.store(sec_since_start(), Ordering::Relaxed);
+                    session
+                        .last_seen
+                        .store(sec_since_start(), Ordering::Relaxed);
                 }
                 // Decrypt into the slot's plain buffer at the reserved offset.
                 slot.plain.resize(seg, 0);
@@ -380,7 +397,8 @@ async fn decrypt_one<T: Transport>(
                             Ok(encrypted) => {
                                 let m =
                                     encode_data_server_frame(send_nonce, &encrypted, encode_buf);
-                                if let Err(e) = transport.send_to(&encode_buf[..m], &slot.addr).await
+                                if let Err(e) =
+                                    transport.send_to(&encode_buf[..m], &slot.addr).await
                                 {
                                     error!("[{}] keepalive send failed: {}", slot.addr, e);
                                 }
@@ -422,8 +440,9 @@ async fn writer<N: Network>(
     // ~MTU slot capacity it would reallocate repeatedly as it grows to 64 KiB —
     // that realloc storm was the single-writer's CPU cost (the forward ceiling).
     // The per-packet copy (~MTU) is far cheaper than the reallocations it avoids.
-    let mut tun_batch: Vec<Vec<u8>> =
-        (0..TUN_BATCH_SIZE).map(|_| Vec::with_capacity(GRO_BUF_CAP)).collect();
+    let mut tun_batch: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE)
+        .map(|_| Vec::with_capacity(GRO_BUF_CAP))
+        .collect();
     let mut tun_len = 0usize;
     let mut expected: u64 = 0;
 
@@ -452,9 +471,11 @@ async fn writer<N: Network>(
             match batch.slots[si].action {
                 SlotAction::Forward => {
                     let ok = match &batch.slots[si].session {
-                        Some(session) => {
-                            session.recv_window.lock().unwrap().check_and_update(batch.slots[si].nonce)
-                        }
+                        Some(session) => session
+                            .recv_window
+                            .lock()
+                            .unwrap()
+                            .check_and_update(batch.slots[si].nonce),
                         None => false,
                     };
                     if ok {
@@ -564,7 +585,10 @@ mod tests {
         let server_tp = Arc::new(server_tp);
 
         let (writes_tx, mut writes_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let network = Arc::new(RecordingNetwork { writes: writes_tx, mtu: 1420 });
+        let network = Arc::new(RecordingNetwork {
+            writes: writes_tx,
+            mtu: 1420,
+        });
 
         let (handshake_tx, _handshake_rx) = mpsc::channel(16);
         let (_stop_tx, stop_rx) = watch::channel(false);
@@ -585,7 +609,8 @@ mod tests {
             let mut payload = vec![0u8; 64];
             payload[..8].copy_from_slice(&seq.to_le_bytes());
             let mut frame = vec![0u8; 65600];
-            let n = encode_data_client_packet(&payload, sid, &client_state, seq, &mut frame).unwrap();
+            let n =
+                encode_data_client_packet(&payload, sid, &client_state, seq, &mut frame).unwrap();
             client_tp.send_to(&frame[..n], &addr).await.unwrap();
         }
 

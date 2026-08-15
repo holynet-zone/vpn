@@ -1,4 +1,3 @@
-
 /// Encode `v` as a bincode varint into `buf`. Returns bytes written.
 #[inline]
 pub(crate) fn write_u32(buf: &mut [u8], v: u32) -> usize {

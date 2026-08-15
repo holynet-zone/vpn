@@ -156,7 +156,12 @@ pub(crate) fn encode_data_server_frame(nonce: u64, cipher: &[u8], out: &mut [u8]
 
 /// Assemble a complete `DataClient` frame from an already-encrypted body
 /// (keepalive path). Returns the total frame length.
-pub(crate) fn encode_data_client_frame(sid: u32, nonce: u64, cipher: &[u8], out: &mut [u8]) -> usize {
+pub(crate) fn encode_data_client_frame(
+    sid: u32,
+    nonce: u64,
+    cipher: &[u8],
+    out: &mut [u8],
+) -> usize {
     let h = write_data_client_header(out, sid, nonce);
     out[h..h + cipher.len()].copy_from_slice(cipher);
     h + cipher.len()
@@ -507,7 +512,10 @@ mod tests {
         assert_eq!(out[0], TYPE_DATA_SERVER);
         assert_eq!(&out[1..9], &nonce.to_be_bytes());
         // Ciphertext runs from the fixed header to the end — no length field.
-        assert_eq!(n - DATA_SERVER_HDR_LEN, ip_packet_plain_len(payload.len()) + 16);
+        assert_eq!(
+            n - DATA_SERVER_HDR_LEN,
+            ip_packet_plain_len(payload.len()) + 16
+        );
     }
 
     /// Verify the fixed-size DataClient header layout (`type=2 | sid BE | nonce BE`).
@@ -523,7 +531,10 @@ mod tests {
         assert_eq!(out[0], TYPE_DATA_CLIENT);
         assert_eq!(&out[1..5], &sid.to_be_bytes());
         assert_eq!(&out[5..13], &nonce.to_be_bytes());
-        assert_eq!(n - DATA_CLIENT_HDR_LEN, ip_packet_plain_len(payload.len()) + 16);
+        assert_eq!(
+            n - DATA_CLIENT_HDR_LEN,
+            ip_packet_plain_len(payload.len()) + 16
+        );
     }
 
     /// Encrypt multiple packets without dropping previous results — the pool

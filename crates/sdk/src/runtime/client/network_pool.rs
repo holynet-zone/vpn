@@ -142,8 +142,9 @@ async fn reader<N: Network>(
 
     let mut state_rx = state_tx.subscribe();
     let mut orig = vec![0u8; 10 + 65535];
-    let mut bufs: Vec<Vec<u8>> =
-        (0..TUN_BATCH_SIZE).map(|_| vec![0u8; network.mtu() as usize + 128]).collect();
+    let mut bufs: Vec<Vec<u8>> = (0..TUN_BATCH_SIZE)
+        .map(|_| vec![0u8; network.mtu() as usize + 128])
+        .collect();
     let mut sizes = vec![0usize; TUN_BATCH_SIZE];
     let mut state_wait_timer = tokio::time::interval(AWAIT_STATE_DELAY);
 
@@ -246,9 +247,10 @@ async fn worker(
                     slot.ok = true;
                 }
                 Err(e) => {
-                    let _ = state_tx.send(RuntimeState::Error(RuntimeError::Unexpected(
-                        format!("failed to encrypt data: {}", e),
-                    )));
+                    let _ = state_tx.send(RuntimeState::Error(RuntimeError::Unexpected(format!(
+                        "failed to encrypt data: {}",
+                        e
+                    ))));
                 }
             }
         }
@@ -286,7 +288,15 @@ async fn sender<T: ClientTransport>(
             Err(mpsc::error::TryRecvError::Disconnected) => break,
             Err(mpsc::error::TryRecvError::Empty) => {
                 if !frames.is_empty() {
-                    flush(&transport, &state_tx, &gso_buf, &frames, &mut pending, &free_tx).await;
+                    flush(
+                        &transport,
+                        &state_tx,
+                        &gso_buf,
+                        &frames,
+                        &mut pending,
+                        &free_tx,
+                    )
+                    .await;
                     frames.clear();
                     off = 0;
                 }
@@ -308,7 +318,15 @@ async fn sender<T: ClientTransport>(
             off += n;
             pending.push(slot);
             if frames.len() == TUN_BATCH_SIZE {
-                flush(&transport, &state_tx, &gso_buf, &frames, &mut pending, &free_tx).await;
+                flush(
+                    &transport,
+                    &state_tx,
+                    &gso_buf,
+                    &frames,
+                    &mut pending,
+                    &free_tx,
+                )
+                .await;
                 frames.clear();
                 off = 0;
             }
@@ -354,7 +372,9 @@ async fn send_batch<T: ClientTransport>(
     let uniform = frames[..last].iter().all(|&(_, l)| l == seg) && frames[last].1 <= seg;
     if uniform {
         let (o, l) = frames[last];
-        transport.send_gso_chunked(&gso_buf[start..o + l], seg, None).await?;
+        transport
+            .send_gso_chunked(&gso_buf[start..o + l], seg, None)
+            .await?;
     } else {
         for &(o, l) in frames {
             transport.send(&gso_buf[o..o + l]).await?;
