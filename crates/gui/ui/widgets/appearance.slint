@@ -1,0 +1,149 @@
+import { Theme } from "../theme.slint";
+
+export component PaletteCell inherits Rectangle {
+    in property <string> name;
+    in property <brush> sw1;
+    in property <brush> sw2;
+    in property <brush> base;
+    in property <bool> selected;
+    callback clicked();
+
+    height: 104px;
+    border-radius: 18px;
+    clip: true;
+    background: root.base;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.a1 : Theme.chipbd;
+    animate border-color { duration: 180ms; }
+
+    VerticalLayout {
+        padding: 13px;
+        spacing: 0;
+        Rectangle {
+            height: 34px;
+            border-radius: 12px;
+            background: @linear-gradient(120deg, root.sw1, root.sw2);
+            HorizontalLayout {
+                padding-left: 9px;
+                padding-right: 9px;
+                alignment: end;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle { width: 12px; height: 12px; border-radius: 6px; background: root.base; opacity: 0.55; }
+                }
+            }
+        }
+        Rectangle {}
+        Text {
+            text: root.name;
+            font-size: 13.5px;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+            color: Theme.t;
+        }
+    }
+
+    if root.selected: Rectangle {
+        x: root.width - 30px;
+        y: 10px;
+        width: 22px;
+        height: 22px;
+        border-radius: 11px;
+        background: Theme.a1;
+        Path {
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            stroke: Theme.on;
+            stroke-width: 1.8px;
+            commands: "M 2.5 6.3 L 5 8.8 L 9.5 3.4";
+        }
+    }
+
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component ModeTile inherits Rectangle {
+    in property <string> label;
+    in property <int> kind;
+    in property <bool> selected;
+    callback clicked();
+
+    height: 98px;
+    border-radius: 16px;
+    background: Theme.sf;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.a1 : Theme.chipbd;
+    clip: true;
+    animate border-color { duration: 180ms; }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 9px;
+
+        Rectangle {
+            height: 42px;
+            border-radius: 11px;
+            clip: true;
+            background: root.kind == 1 ? #f2f3f6 : #16181b;
+
+            if root.kind == 0: Rectangle {
+                x: 0;
+                width: parent.width / 2;
+                height: 100%;
+                background: #f2f3f6;
+            }
+
+            HorizontalLayout {
+                padding: 9px;
+                spacing: 8px;
+                alignment: start;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 11px;
+                        height: 11px;
+                        border-radius: 5.5px;
+                        background: @linear-gradient(150deg, Theme.a1, Theme.a2);
+                    }
+                }
+                if root.kind != 0: VerticalLayout {
+                    alignment: center;
+                    spacing: 4px;
+                    Rectangle { width: 34px; height: 4px; border-radius: 2px; background: root.kind == 1 ? #c7ccd6 : #3a3f48; }
+                    Rectangle { width: 22px; height: 4px; border-radius: 2px; background: root.kind == 1 ? #dde0e7 : #2b2f37; }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            spacing: 7px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 15px;
+                    height: 15px;
+                    border-radius: 7.5px;
+                    border-width: 1.5px;
+                    border-color: root.selected ? Theme.a1 : Theme.ln;
+                    Rectangle {
+                        width: 7px;
+                        height: 7px;
+                        border-radius: 3.5px;
+                        background: root.selected ? Theme.a1 : transparent;
+                    }
+                }
+            }
+            Text {
+                text: root.label;
+                font-size: 11.5px;
+                font-weight: 600;
+                color: root.selected ? Theme.t : Theme.t2;
+            }
+        }
+    }
+
+    TouchArea { clicked => { root.clicked(); } }
+}

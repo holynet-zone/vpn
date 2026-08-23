@@ -1,0 +1,19 @@
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { HomeView } from "../views/home.slint";
+import { NodesView } from "../views/nodes.slint";
+import { ShieldView } from "../views/shield.slint";
+import { MoreView } from "../views/more.slint";
+import { ProtoView } from "../views/proto.slint";
+import { DevicesView } from "../views/devices.slint";
+import { SettingsView } from "../views/settings.slint";
+
+export component PageHost inherits VerticalLayout {
+    if Screen.page == Page.home: HomeView {}
+    if Screen.page == Page.nodes: NodesView {}
+    if Screen.page == Page.shield: ShieldView {}
+    if Screen.page == Page.more: MoreView {}
+    if Screen.page == Page.proto: ProtoView {}
+    if Screen.page == Page.devices: DevicesView {}
+    if Screen.page == Page.settings: SettingsView {}
+}

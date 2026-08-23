@@ -1,0 +1,81 @@
+import { Theme, ThemeMode } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { PageHost } from "page_host.slint";
+import { BottomNavItem } from "nav.slint";
+import { TransportSheet } from "../widgets/transport_sheet.slint";
+import { BouncyScroll } from "../widgets/bouncy_scroll.slint";
+
+export component MobileShell inherits Rectangle {
+    background: @linear-gradient(180deg, Theme.bg 0%, Theme.page 100%);
+    property <bool> more-active: Screen.page == Page.more || Screen.page == Page.proto
+        || Screen.page == Page.devices || Screen.page == Page.settings;
+
+    VerticalLayout {
+        BouncyScroll {
+            vertical-stretch: 1;
+            show-scrollbar: !Screen.mobile-target;
+            VerticalLayout {
+                width: root.width;
+                padding-left: 20px + Screen.safe-left;
+                padding-right: 20px + Screen.safe-right;
+                padding-top: 22px + Screen.safe-top;
+                padding-bottom: 28px;
+                spacing: 20px;
+
+                PageHost {}
+            }
+        }
+
+        Rectangle {
+            // фон навигации заходит в зону жестовой навигации, но иконки
+            // остаются в верхних 74px за счёт нижнего padding.
+            height: 74px + Screen.safe-bottom;
+            background: Theme.glass;
+            Rectangle {
+                y: 0;
+                width: 100%;
+                height: 1px;
+                background: Theme.ln;
+            }
+            HorizontalLayout {
+                padding-left: 12px + Screen.safe-left;
+                padding-right: 12px + Screen.safe-right;
+                padding-bottom: Screen.safe-bottom;
+                BottomNavItem {
+                    kind: 0;
+                    label: Str.nav-home;
+                    active: Screen.page == Page.home;
+                    clicked => { Screen.go(Page.home); }
+                }
+                BottomNavItem {
+                    kind: 1;
+                    label: Str.nav-nodes;
+                    active: Screen.page == Page.nodes;
+                    clicked => { Screen.go(Page.nodes); }
+                }
+                BottomNavItem {
+                    kind: 2;
+                    label: Str.nav-shield;
+                    active: Screen.page == Page.shield;
+                    clicked => { Screen.go(Page.shield); }
+                }
+                BottomNavItem {
+                    kind: 4;
+                    label: Str.nav-settings;
+                    active: root.more-active;
+                    clicked => { Screen.go(Page.more); }
+                }
+            }
+        }
+    }
+
+    TransportSheet {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+    }
+}

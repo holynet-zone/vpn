@@ -1,0 +1,44 @@
+import { Theme } from "../theme.slint";
+
+// Вертикальный скролл на форкнутом Flickable с резиновым overscroll (rubber-band),
+// как в iOS / Amnezia. Весь родной арбитраж жеста tap/drag, инерция и клики по
+// вложенным виджетам сохранены — натяжение за край и пружинный возврат добавлены
+// в самом движке через свойство `overshoot-enabled` (см. vendor/slint,
+// internal/core/items/flickable.rs). На тач-экране тянет с сопротивлением и
+// пружинит назад; мышь/тачпад остаются с жёстким клампом.
+export component BouncyScroll inherits Rectangle {
+    clip: true;
+
+    // Показывать пассивный индикатор скролла (desktop). На мобильном — false.
+    in property <bool> show-scrollbar: false;
+
+    property <length> vh: self.height;
+    property <length> content-h: inner.preferred-height;
+    property <bool> scrollable: root.content-h > root.vh;
+    property <length> max-scroll: max(0px, root.content-h - root.vh);
+    // Позиция для индикатора (без учёта натяжения за край).
+    property <length> scroll: max(0px, min(root.max-scroll, -fl.content-y));
+
+    fl := Flickable {
+        overshoot-enabled: true;
+        // content-height задаём явно: при наполнении через `for` авто-расчёт не работает.
+        content-height: root.content-h;
+        inner := VerticalLayout {
+            width: fl.width;
+            height: root.content-h;
+            @children
+        }
+    }
+
+    // Пассивный индикатор (desktop).
+    if root.show-scrollbar && root.scrollable: Rectangle {
+        width: 4px;
+        x: root.width - self.width - 3px;
+        y: 3px + (root.vh - 6px - self.height)
+            * (root.scroll / max(1px, root.max-scroll));
+        height: max(32px, (root.vh - 6px) * (root.vh / root.content-h));
+        border-radius: 2px;
+        background: Theme.t2;
+        opacity: 0.35;
+    }
+}

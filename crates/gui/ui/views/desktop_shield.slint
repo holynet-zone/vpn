@@ -1,0 +1,146 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Card } from "../widgets/card.slint";
+import { PillToggle } from "../widgets/pill_toggle.slint";
+import { ScreenTitle, SectionLabel } from "../widgets/tiles.slint";
+import { SplitApp } from "../models.slint";
+
+component AppCard inherits Card {
+    in property <SplitApp> app;
+    in property <int> index;
+    elevated: false;
+    border-radius: 14px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        spacing: 10px;
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            border-radius: 9px;
+            background: Theme.sf2;
+            Text { text: app.letter; font-size: 12px; font-weight: 700; color: Theme.t2; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text { text: app.name; font-size: 12px; font-weight: 600; color: Theme.t; overflow: elide; }
+        }
+        Rectangle {}
+        VerticalLayout {
+            alignment: center;
+            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: app.tunneled ? Theme.ok : Theme.ln; }
+        }
+    }
+    TouchArea { clicked => { AppState.flip-app(index); } }
+}
+
+export component DesktopShieldView inherits VerticalLayout {
+    spacing: 15px;
+    alignment: start;
+
+    ScreenTitle { text: Str.protection; font-size: 23px; }
+
+    HorizontalLayout {
+        vertical-stretch: 0;
+        spacing: 14px;
+
+        Card {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 13px;
+                HorizontalLayout {
+                    Text { text: Str.privacy-index; font-size: 13.5px; font-weight: 700; color: Theme.t; }
+                    Rectangle {}
+                    Text { text: AppState.privacy-score; font-size: 22px; font-weight: 700; color: Theme.ok; font-family: "IBM Plex Mono"; }
+                }
+                Rectangle {
+                    height: 6px;
+                    border-radius: 3px;
+                    background: Theme.sf2;
+                    clip: true;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * (AppState.privacy-score / 100);
+                        border-radius: 3px;
+                        background: @linear-gradient(90deg, Theme.a2, Theme.a1);
+                        animate width { duration: 400ms; easing: ease; }
+                    }
+                }
+                Text {
+                    text: AppState.kill-on ? Str.privacy-ok : Str.privacy-bad;
+                    font-size: 12px;
+                    color: Theme.t2;
+                    wrap: word-wrap;
+                }
+                Rectangle {}
+                Rectangle {
+                    height: 42px;
+                    border-radius: 13px;
+                    border-width: 1px;
+                    border-color: Theme.wn;
+                    VerticalLayout {
+                        alignment: center;
+                        Text { text: Str.simulate; horizontal-alignment: center; font-size: 12px; font-weight: 600; color: Theme.wn; }
+                    }
+                    TouchArea { clicked => { AppState.simulate(); } }
+                }
+            }
+        }
+
+        Card {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 13px;
+                for tg in AppState.toggles: HorizontalLayout {
+                    spacing: 11px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        Text { text: tg.name; font-size: 12.5px; font-weight: 600; color: Theme.t; }
+                        Text { text: tg.hint; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+                    }
+                    Rectangle {}
+                    VerticalLayout {
+                        alignment: center;
+                        PillToggle {
+                            on: tg.on;
+                            track-width: 38px;
+                            track-height: 22px;
+                            toggled => { AppState.flip-toggle(tg.id); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        vertical-stretch: 0;
+        SectionLabel { text: Str.split-title; }
+        Rectangle {}
+        Text { text: AppState.split-summary; font-size: 11px; color: Theme.t2; }
+    }
+
+    // Трёхколоночная сетка без GridLayout (репитер нельзя класть прямо в
+    // GridLayout), карточки фиксированной высоты позиционируются вручную.
+    grid := Rectangle {
+        vertical-stretch: 0;
+        property <length> gap: 9px;
+        property <length> card-h: 50px;
+        property <length> col-w: (self.width - 2 * self.gap) / 3;
+        height: floor((AppState.apps.length + 2) / 3) * (self.card-h + self.gap) - self.gap;
+        for a[i] in AppState.apps: AppCard {
+            app: a;
+            index: i;
+            width: grid.col-w;
+            height: grid.card-h;
+            x: mod(i, 3) * (grid.col-w + grid.gap);
+            y: floor(i / 3) * (grid.card-h + grid.gap);
+        }
+    }
+}

@@ -1,0 +1,83 @@
+// Colors originally derived from design/HolyNet v3.dc.html (oklch converted to sRGB), maintained by hand.
+import { Palette } from "std-widgets.slint";
+
+export enum Accent { halo, tide, ember, iris, moss, ink }
+export enum ThemeMode { system, light, dark }
+export enum Lang { en, ru, zh, ja }
+
+export global Theme {
+    in property <Accent> accent: Accent.halo;
+    in property <ThemeMode> mode: ThemeMode.system;
+    out property <bool> dark:
+        root.mode == ThemeMode.light ? false
+        : root.mode == ThemeMode.dark ? true
+        : Palette.color-scheme == ColorScheme.dark;
+
+    out property <length> radius-sm: 12px;
+    out property <length> radius-md: 18px;
+    out property <length> radius-lg: 24px;
+    out property <length> radius-xl: 32px;
+
+    out property <brush> bg: root.dark
+            ? (root.accent == Accent.halo ? #140f08 : root.accent == Accent.tide ? #061116 : root.accent == Accent.ember ? #180c0c : root.accent == Accent.iris ? #110d18 : root.accent == Accent.moss ? #0b1109 : #0c0d10)
+            : (root.accent == Accent.halo ? #fbf7ef : root.accent == Accent.tide ? #ecf9f9 : root.accent == Accent.ember ? #fff4f0 : root.accent == Accent.iris ? #f7f4fe : root.accent == Accent.moss ? #f4f8ec : #f3f4f7);
+
+    out property <brush> sf: root.dark
+            ? (root.accent == Accent.halo ? #201911 : root.accent == Accent.tide ? #0e1b21 : root.accent == Accent.ember ? #231616 : root.accent == Accent.iris ? #1b1723 : root.accent == Accent.moss ? #141c13 : #16181b)
+            : (root.accent == Accent.halo ? #fffefa : root.accent == Accent.tide ? #faffff : root.accent == Accent.ember ? #fffdfc : root.accent == Accent.iris ? #fefdff : root.accent == Accent.moss ? #fdfefa : #feffff);
+
+    out property <brush> sf2: root.dark
+            ? (root.accent == Accent.halo ? #2d251c : root.accent == Accent.tide ? #1a2830 : root.accent == Accent.ember ? #322222 : root.accent == Accent.iris ? #282431 : root.accent == Accent.moss ? #20291f : #222528)
+            : (root.accent == Accent.halo ? #f3ece0 : root.accent == Accent.tide ? #deefef : root.accent == Accent.ember ? #f7e8e4 : root.accent == Accent.iris ? #ede9f6 : root.accent == Accent.moss ? #e8edde : #e7eaee);
+
+    out property <brush> t: root.dark
+            ? (root.accent == Accent.halo ? #f6f3ee : root.accent == Accent.tide ? #eef5f7 : root.accent == Accent.ember ? #f9f2f0 : root.accent == Accent.iris ? #f4f2f8 : root.accent == Accent.moss ? #f2f5ef : #f2f3f6)
+            : (root.accent == Accent.halo ? #2c2014 : root.accent == Accent.tide ? #0d2329 : root.accent == Accent.ember ? #311f1b : root.accent == Accent.iris ? #231f2f : root.accent == Accent.moss ? #1d2515 : #171b22);
+
+    out property <brush> t2: root.dark
+            ? (root.accent == Accent.halo ? #a19a91 : root.accent == Accent.tide ? #8f9da0 : root.accent == Accent.ember ? #a49796 : root.accent == Accent.iris ? #9b98a3 : root.accent == Accent.moss ? #969c92 : #96989d)
+            : (root.accent == Accent.halo ? #74685c : root.accent == Accent.tide ? #53676c : root.accent == Accent.ember ? #786360 : root.accent == Accent.iris ? #676374 : root.accent == Accent.moss ? #606858 : #5f636a);
+
+    out property <brush> ln: root.dark
+            ? (root.accent == Accent.halo ? #393129 : root.accent == Accent.tide ? #26343b : root.accent == Accent.ember ? #3d2f2e : root.accent == Accent.iris ? #34303d : root.accent == Accent.moss ? #2c342b : #2e3034)
+            : (root.accent == Accent.halo ? #e4dcd1 : root.accent == Accent.tide ? #cde0e1 : root.accent == Accent.ember ? #ead8d4 : root.accent == Accent.iris ? #dedae8 : root.accent == Accent.moss ? #d9dece : #d6d9de);
+
+    out property <brush> glass: root.dark
+            ? (root.accent == Accent.halo ? #201911db : root.accent == Accent.tide ? #0e1b21db : root.accent == Accent.ember ? #231616db : root.accent == Accent.iris ? #1b1723db : root.accent == Accent.moss ? #141c13db : #16181bdb)
+            : (root.accent == Accent.halo ? #fffefadb : root.accent == Accent.tide ? #faffffdb : root.accent == Accent.ember ? #fffdfcdb : root.accent == Accent.iris ? #fefdffdb : root.accent == Accent.moss ? #fdfefadb : #feffffdb);
+
+    out property <brush> a1: root.dark
+            ? (root.accent == Accent.halo ? #f1bf55 : root.accent == Accent.tide ? #57dcb4 : root.accent == Accent.ember ? #ff9977 : root.accent == Accent.iris ? #d1a8ff : root.accent == Accent.moss ? #86d489 : #f2b95a)
+            : (root.accent == Accent.halo ? #bd6f15 : root.accent == Accent.tide ? #008b76 : root.accent == Accent.ember ? #c7513c : root.accent == Accent.iris ? #825abc : root.accent == Accent.moss ? #477735 : #a26000);
+
+    out property <brush> a2: root.dark
+            ? (root.accent == Accent.halo ? #4dd3dd : root.accent == Accent.tide ? #7dc0ff : root.accent == Accent.ember ? #c4a4fe : root.accent == Accent.iris ? #7dc0ff : root.accent == Accent.moss ? #61ced4 : #b3b8bf)
+            : (root.accent == Accent.halo ? #007d9b : root.accent == Accent.tide ? #236cb5 : root.accent == Accent.ember ? #7c54ae : root.accent == Accent.iris ? #1476b6 : root.accent == Accent.moss ? #007a86 : #474d58);
+
+    out property <brush> ok: root.dark
+            ? (root.accent == Accent.halo ? #5ed99e : root.accent == Accent.tide ? #5ed99e : root.accent == Accent.ember ? #5ed99e : root.accent == Accent.iris ? #5ed99e : root.accent == Accent.moss ? #5ed99e : #6bcf9d)
+            : (root.accent == Accent.halo ? #298954 : root.accent == Accent.tide ? #008760 : root.accent == Accent.ember ? #298954 : root.accent == Accent.iris ? #1a8656 : root.accent == Accent.moss ? #21834f : #2a7449);
+
+    out property <brush> page: root.dark
+            ? (root.accent == Accent.halo ? #0b0603 : root.accent == Accent.tide ? #02080c : root.accent == Accent.ember ? #0d0505 : root.accent == Accent.iris ? #08050d : root.accent == Accent.moss ? #040803 : #050607)
+            : (root.accent == Accent.halo ? #efe8db : root.accent == Accent.tide ? #d7ebeb : root.accent == Accent.ember ? #f4e2de : root.accent == Accent.iris ? #e8e4f3 : root.accent == Accent.moss ? #e3e8d7 : #e1e3e7);
+
+    out property <brush> pt: root.dark
+            ? (root.accent == Accent.halo ? #f8f5ef : root.accent == Accent.tide ? #f0f6f9 : root.accent == Accent.ember ? #faf3f2 : root.accent == Accent.iris ? #f6f4fa : root.accent == Accent.moss ? #f3f6f1 : #f4f5f8)
+            : (root.accent == Accent.halo ? #2e2114 : root.accent == Accent.tide ? #0d2329 : root.accent == Accent.ember ? #311f1b : root.accent == Accent.iris ? #231f2f : root.accent == Accent.moss ? #1d2515 : #171b22);
+
+    out property <brush> pt2: root.dark
+            ? (root.accent == Accent.halo ? #aaa49a : root.accent == Accent.tide ? #98a6a9 : root.accent == Accent.ember ? #aea09f : root.accent == Accent.iris ? #a5a2ad : root.accent == Accent.moss ? #9fa59b : #9fa2a7)
+            : (root.accent == Accent.halo ? #635546 : root.accent == Accent.tide ? #425a5f : root.accent == Accent.ember ? #68524f : root.accent == Accent.iris ? #585466 : root.accent == Accent.moss ? #505947 : #51555d);
+
+    out property <brush> chip: root.dark
+            ? (root.accent == Accent.halo ? #261f17 : root.accent == Accent.tide ? #152228 : root.accent == Accent.ember ? #2a1d1c : root.accent == Accent.iris ? #221e2a : root.accent == Accent.moss ? #1b2219 : #1c1e21)
+            : (root.accent == Accent.halo ? #fbf7f0 : root.accent == Accent.tide ? #effafa : root.accent == Accent.ember ? #fff5f3 : root.accent == Accent.iris ? #f8f6ff : root.accent == Accent.moss ? #f6f9ee : #f5f7f9);
+
+    out property <brush> chipbd: root.dark
+            ? (root.accent == Accent.halo ? #40382e : root.accent == Accent.tide ? #2c3a42 : root.accent == Accent.ember ? #453534 : root.accent == Accent.iris ? #3b3645 : root.accent == Accent.moss ? #323b30 : #34373b)
+            : (root.accent == Accent.halo ? #dfd6c9 : root.accent == Accent.tide ? #c7dbdc : root.accent == Accent.ember ? #e5d2cd : root.accent == Accent.iris ? #d8d4e3 : root.accent == Accent.moss ? #d3d8c7 : #d1d4da);
+
+    out property <brush> on: root.dark ? #12151b : #fff;
+    out property <brush> wn: root.dark ? #ff9a5f : #b74b21;
+}

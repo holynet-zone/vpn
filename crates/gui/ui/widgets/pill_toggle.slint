@@ -1,0 +1,31 @@
+import { Theme } from "../theme.slint";
+
+export component PillToggle inherits Rectangle {
+    in property <bool> on;
+    in property <length> track-width: 44px;
+    in property <length> track-height: 26px;
+    callback toggled();
+
+    width: track-width;
+    height: track-height;
+    border-radius: track-height / 2;
+    background: on ? Theme.ok : Theme.sf2;
+    animate background { duration: 180ms; easing: ease; }
+
+    knob := Rectangle {
+        width: parent.height - 6px;
+        height: parent.height - 6px;
+        border-radius: self.height / 2;
+        background: #ffffff;
+        x: on ? parent.width - self.width - 3px : 3px;
+        y: 3px;
+        animate x { duration: 180ms; easing: ease-out; }
+        drop-shadow-blur: 3px;
+        drop-shadow-color: #00000055;
+        drop-shadow-offset-y: 1px;
+    }
+
+    TouchArea {
+        clicked => { root.toggled(); }
+    }
+}

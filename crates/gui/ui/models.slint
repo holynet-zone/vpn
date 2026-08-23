@@ -1,0 +1,68 @@
+export enum ConnStatus { off, connecting, on }
+export enum Page { home, nodes, shield, more, proto, devices, settings }
+
+export struct ServerInfo {
+    id: string,
+    code: string,
+    city: string,
+    meta: string,
+    ping: string,
+    quality: int,
+    selected: bool,
+}
+
+export struct TransportInfo {
+    id: string,
+    name: string,
+    title: string,
+    desc: string,
+    selected: bool,
+}
+
+export struct CipherInfo {
+    name: string,
+    hint: string,
+    selected: bool,
+}
+
+export struct ChainStep {
+    code: string,
+    active: bool,
+    last: bool,
+}
+
+export struct ToggleInfo {
+    id: string,
+    name: string,
+    hint: string,
+    on: bool,
+}
+
+export struct SplitApp {
+    name: string,
+    letter: string,
+    tunneled: bool,
+}
+
+export struct DeviceInfo {
+    kind: string,
+    name: string,
+    meta: string,
+    tag: string,
+    state: int,
+}
+
+export struct KeyValue {
+    key: string,
+    value: string,
+}
+
+export struct PaletteCard {
+    id: int,
+    name: string,
+    hint: string,
+    sw1: brush,
+    sw2: brush,
+    base: brush,
+    selected: bool,
+}

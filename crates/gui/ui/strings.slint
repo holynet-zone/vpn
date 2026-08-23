@@ -1,0 +1,92 @@
+import { Lang } from "theme.slint";
+
+export global Str {
+    in property <Lang> lang: Lang.en;
+    // EN=0, RU=1, ZH=2, JA=3.
+    out property <int> lang-index: root.lang == Lang.ru ? 1 : root.lang == Lang.zh ? 2 : root.lang == Lang.ja ? 3 : 0;
+
+    pure function tr(en: string, ru: string, zh: string, ja: string) -> string {
+        root.lang == Lang.ru ? ru
+            : root.lang == Lang.zh ? zh
+            : root.lang == Lang.ja ? ja
+            : en
+    }
+
+    out property <string> brand: "HolyNet";
+
+    out property <string> nav-home: root.tr("Shield", "Щит", "盾牌", "シールド");
+    out property <string> nav-nodes: root.tr("Nodes", "Узлы", "节点", "ノード");
+    out property <string> nav-shield: root.tr("Guard", "Защита", "防护", "ガード");
+    out property <string> nav-more: root.tr("More", "Ещё", "更多", "その他");
+    out property <string> nav-settings: root.tr("Settings", "Настройки", "设置", "設定");
+
+    out property <string> status-on: root.tr("PROTECTED", "ЗАЩИЩЕНО", "已保护", "保護中");
+    out property <string> status-connecting: root.tr("HANDSHAKE", "РУКОПОЖАТИЕ", "握手中", "ハンドシェイク");
+    out property <string> status-off: root.tr("EXPOSED", "ОТКРЫТО", "未保护", "無防備");
+    out property <string> title-on: root.tr("You are under the halo", "Вы под нимбом", "你在光环之下", "あなたは光の下に");
+    out property <string> title-connecting: root.tr("Building the channel", "Строим канал", "正在建立通道", "チャネルを構築中");
+    out property <string> title-off: root.tr("Connection is not protected", "Соединение не защищено", "连接未受保护", "接続は保護されていません");
+    out property <string> sub-connecting: root.tr("Exchanging keys and picking a disguise", "Обмениваемся ключами и подбираем маскировку", "正在交换密钥并选择伪装", "鍵を交換し偽装を選択中");
+    out property <string> sub-off: root.tr("Tap to raise the HolyNet Core channel", "Нажмите, чтобы поднять канал HolyNet Core", "点按以建立 HolyNet Core 通道", "タップして HolyNet Core チャネルを起動");
+    out property <string> btn-on: root.tr("DISCONNECT", "ОТКЛЮЧИТЬ", "断开连接", "切断");
+    out property <string> btn-off: root.tr("CONNECT", "ПОДКЛЮЧИТЬ", "连接", "接続");
+
+    out property <string> banner-title: root.tr("Network is jamming the transport", "Сеть глушит транспорт", "网络正在干扰传输", "ネットワークが通信を妨害しています");
+
+    out property <string> transport: root.tr("Transport", "Транспорт", "传输方式", "トランスポート");
+    out property <string> transport-desc-hdr: root.tr("The client picks the transport itself. Choose manually only if you know the network better than we do.", "Клиент сам выбирает, чем идти. Ручной выбор нужен, только если знаете сеть лучше нас.", "客户端会自动选择传输方式。仅在你比我们更了解网络时才手动选择。", "クライアントが自動で選びます。ネットワークを熟知している場合のみ手動で選択してください。");
+    out property <string> auto-pick: root.tr("AUTO", "АВТО", "自动", "自動");
+    out property <string> manual-pick: root.tr("MANUAL", "ВРУЧНУЮ", "手动", "手動");
+    out property <string> auto-title: root.tr("Auto transport", "Автовыбор транспорта", "自动选择传输", "トランスポート自動選択");
+    out property <string> auto-hint: root.tr("Walks the failover chain and switches silently", "Пробует по цепочке отказоустойчивости и переключается молча", "沿故障转移链尝试并静默切换", "フェイルオーバー連鎖を辿り静かに切り替えます");
+
+    out property <string> live-traffic: root.tr("Live traffic", "Живой трафик", "实时流量", "リアルタイム通信");
+    out property <string> session: root.tr("SESSION", "СЕССИЯ", "会话", "セッション");
+    out property <string> down: root.tr("IN", "ПРИНЯТО", "接收", "受信");
+    out property <string> up: root.tr("OUT", "ОТДАНО", "发送", "送信");
+    out property <string> no-data: root.tr("no data", "нет данных", "无数据", "データなし");
+    out property <string> speed-unit: root.tr(" Mbps", " Мбит/с", " Mbps", " Mbps");
+
+    out property <string> nodes: root.tr("Nodes", "Узлы", "节点", "ノード");
+    out property <string> search-ph: root.tr("Country or city", "Страна или город", "国家或城市", "国または都市");
+    out property <string> smart: root.tr("Smart pick", "Умный выбор", "智能选择", "スマート選択");
+    out property <string> smart-hint: root.tr("Chosen by latency, load and transport survivability", "Узел по задержке, нагрузке и живучести транспорта", "依据延迟、负载和传输存活性选择", "遅延・負荷・通信の生存性で選択");
+
+    out property <string> protection: root.tr("Protection", "Защита", "防护", "保護");
+    out property <string> privacy-index: root.tr("Privacy score", "Индекс приватности", "隐私评分", "プライバシースコア");
+    out property <string> split-title: root.tr("Split tunneling", "Раздельное туннелирование", "分应用隧道", "スプリットトンネル");
+    out property <string> privacy-ok: root.tr("Kill switch is on — no traffic leaks to the open network if the channel drops.", "Kill switch включён — при обрыве канала трафик не утечёт в открытую сеть.", "已启用断网保护 — 通道断开时流量不会泄漏到开放网络。", "キルスイッチ有効 — チャネル切断時も開放ネットワークへ通信が漏れません。");
+    out property <string> privacy-bad: root.tr("Without kill switch traffic can leak around the channel on a drop.", "Без kill switch трафик может уйти мимо канала при обрыве.", "未启用断网保护，通道断开时流量可能绕过通道泄漏。", "キルスイッチ無効の場合、切断時に通信がチャネル外へ漏れることがあります。");
+    out property <string> tunnel-in: root.tr("tunneled", "в канале", "经通道", "トンネル経由");
+    out property <string> tunnel-out: root.tr("direct", "напрямую", "直连", "直接接続");
+
+    out property <string> profile: root.tr("Profile", "Профиль", "个人资料", "プロフィール");
+    out property <string> account: root.tr("HolyNet account", "Аккаунт HolyNet", "HolyNet 账户", "HolyNet アカウント");
+    out property <string> plan: root.tr("Halo plan · until 12 Mar 2027", "Тариф Halo · до 12 марта 2027", "Halo 套餐 · 至 2027 年 3 月 12 日", "Halo プラン · 2027年3月12日まで");
+    out property <string> proto-settings: root.tr("Protocol settings", "Настройки протокола", "协议设置", "プロトコル設定");
+    out property <string> devices: root.tr("Devices", "Устройства", "设备", "デバイス");
+    out property <string> devices-hint: root.tr("Scan the code on the new device — the key never leaves this phone", "Отсканируйте код на новом устройстве, ключ не покидает телефон", "在新设备上扫描二维码 — 密钥不会离开此手机", "新しいデバイスでコードをスキャン — 鍵はこの端末から出ません");
+    out property <string> add-device: root.tr("+ Add device", "+ Добавить устройство", "+ 添加设备", "+ デバイスを追加");
+    out property <string> back: root.tr("Back", "Назад", "返回", "戻る");
+
+    out property <string> failover-chain: root.tr("Failover chain", "Цепочка отказоустойчивости", "故障转移链", "フェイルオーバー連鎖");
+    out property <string> failover-hint: root.tr("If the network kills the current transport, the client silently moves to the next one — session and IP are kept.", "Если сеть глушит текущий транспорт, клиент молча переходит к следующему — сессия и IP сохраняются.", "若网络封锁当前传输，客户端会静默切换到下一个 — 会话和 IP 保持不变。", "ネットワークが現在の通信を遮断すると、クライアントは静かに次へ切り替えます — セッションと IP は維持されます。");
+    out property <string> cipher: root.tr("Encryption", "Шифрование", "加密", "暗号化");
+    out property <string> cipher-short: root.tr("CIPHER", "ШИФР", "密码", "暗号");
+    out property <string> desktop-title: root.tr("desktop client", "десктопный клиент", "桌面客户端", "デスクトップクライアント");
+
+    out property <string> settings: root.tr("Settings", "Настройки", "设置", "設定");
+    out property <string> appearance: root.tr("Appearance", "Оформление", "外观", "外観");
+    out property <string> palette: root.tr("Palette", "Палитра", "配色", "パレット");
+    out property <string> palette-hint: root.tr("Every palette is drawn separately for light and dark", "Каждая палитра отрисована отдельно для света и темноты", "每种配色为浅色和深色分别绘制", "各パレットはライトとダークで個別に描かれています");
+    out property <string> theme-mode: root.tr("Theme", "Тема", "主题", "テーマ");
+    out property <string> mode-system: root.tr("System", "Системная", "跟随系统", "システム");
+    out property <string> mode-light: root.tr("Light", "Светлая", "浅色", "ライト");
+    out property <string> mode-dark: root.tr("Dark", "Тёмная", "深色", "ダーク");
+    out property <string> language: root.tr("Language", "Язык", "语言", "言語");
+    out property <string> diagnostics: root.tr("Diagnostics", "Диагностика", "诊断", "診断");
+    out property <string> about: root.tr("About the protocol", "О протоколе", "关于协议", "プロトコルについて");
+    out property <string> soon: root.tr("soon", "скоро", "即将推出", "近日公開");
+
+    out property <string> simulate: root.tr("Simulate blocking", "Симулировать блокировку", "模拟封锁", "ブロックをシミュレート");
+}

@@ -1,0 +1,38 @@
+import { Theme } from "../theme.slint";
+
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in property <int> selected;
+    in property <bool> mono: false;
+    callback changed(int);
+
+    background: Theme.chip;
+    border-radius: 999px;
+    border-width: 1px;
+    border-color: Theme.chipbd;
+    height: 34px;
+
+    HorizontalLayout {
+        padding: 4px;
+        spacing: 2px;
+        for opt[i] in root.options: Rectangle {
+            border-radius: 999px;
+            background: i == root.selected ? Theme.a1 : transparent;
+            animate background { duration: 150ms; }
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                alignment: center;
+                Text {
+                    text: opt;
+                    vertical-alignment: center;
+                    color: i == root.selected ? Theme.on : Theme.pt2;
+                    font-size: 12px;
+                    font-weight: 600;
+                    font-family: root.mono ? "IBM Plex Mono" : "";
+                }
+            }
+            TouchArea { clicked => { root.changed(i); } }
+        }
+    }
+}

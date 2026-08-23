@@ -1,0 +1,28 @@
+[package]
+name = "holynet-gui"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "holynet_gui"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "holynet-gui"
+path = "src/main.rs"
+
+[dependencies]
+# Pinned to slint master 1.18-dev (rev 1cd1059, slint-ui/slint#12702). The root [patch]
+# redirects this to holynet-zone/slint, which adds touch rubber-band overshoot on Flickable.
+slint = { git = "https://github.com/slint-ui/slint", rev = "1cd1059", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-skia"] }
+rand = "0.8"
+sys-locale = "0.3"
+
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { git = "https://github.com/slint-ui/slint", rev = "1cd1059", default-features = false, features = ["compat-1-2", "std", "backend-android-activity-06", "renderer-skia"] }
+jni = "0.21"
+
+[build-dependencies]
+slint-build = { git = "https://github.com/slint-ui/slint", rev = "1cd1059" }
+android-build = "0.1.2"

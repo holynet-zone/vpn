@@ -1,0 +1,104 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { Card } from "../widgets/card.slint";
+import { ScreenTitle, BackButton } from "../widgets/tiles.slint";
+
+export component DevicesView inherits VerticalLayout {
+    spacing: 18px;
+
+    if !Screen.wide: BackButton {
+        text: Str.back;
+        clicked => { Screen.go(Page.more); }
+    }
+
+    ScreenTitle { text: Str.devices; font-size: 25px; }
+
+    Card {
+        border-radius: 20px;
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 14px;
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                Text { text: AppState.dev-summary; font-size: 13.5px; font-weight: 700; color: Theme.t; }
+                Text { text: Str.devices-hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+            }
+            Rectangle {
+                width: 52px;
+                height: 52px;
+                border-radius: 12px;
+                background: @linear-gradient(45deg, Theme.sf2 0%, Theme.sf 50%, Theme.sf2 100%);
+                border-width: 1px;
+                border-color: Theme.ln;
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        for d in AppState.devices: Card {
+            elevated: false;
+            border-radius: 18px;
+            stroke: d.state == 0 ? Theme.a1 : Theme.ln;
+            HorizontalLayout {
+                padding: 14px;
+                spacing: 12px;
+                Rectangle {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 10px;
+                    background: Theme.sf2;
+                    Text { text: d.kind; font-size: 10px; font-weight: 600; color: Theme.t2; font-family: "IBM Plex Mono"; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 3px;
+                    Text { text: d.name; font-size: 13px; font-weight: 600; color: Theme.t; }
+                    Text { text: d.meta; font-size: 11.5px; color: Theme.t2; }
+                }
+                Rectangle {}
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        border-radius: 999px;
+                        border-width: 1px;
+                        border-color: d.state == 0 ? Theme.ok : Theme.ln;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            padding-top: 5px;
+                            padding-bottom: 5px;
+                            Text {
+                                text: d.tag;
+                                font-size: 10.5px;
+                                color: d.state == 0 ? Theme.ok : Theme.t2;
+                                font-family: "IBM Plex Mono";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Theme.ln;
+        opacity: 0.6;
+        VerticalLayout {
+            padding: 14px;
+            Text {
+                text: Str.add-device;
+                horizontal-alignment: center;
+                font-size: 12.5px;
+                font-weight: 600;
+                color: Theme.t2;
+            }
+        }
+    }
+}

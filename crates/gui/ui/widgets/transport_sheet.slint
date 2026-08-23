@@ -1,0 +1,172 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { PillToggle } from "pill_toggle.slint";
+
+component RadioDot inherits Rectangle {
+    in property <bool> on;
+    width: 17px;
+    height: 17px;
+    border-radius: 8.5px;
+    border-width: 1.5px;
+    border-color: on ? Theme.a1 : Theme.ln;
+    Rectangle {
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        background: on ? Theme.a1 : transparent;
+    }
+}
+
+export component TransportSheet inherits Rectangle {
+    property <bool> open: Screen.transport-sheet;
+    property <length> sheet-h: min(root.height * 0.82, 560px);
+    property <length> drag-y: 0px;
+    property <bool> dragging: false;
+    opacity: open ? 1.0 : 0.0;
+    visible: self.opacity > 0.01;
+    animate opacity { duration: 200ms; }
+
+    Rectangle {
+        background: #080a0e70;
+        opacity: min(1.0, max(0.0, 1.0 - root.drag-y / root.sheet-h));
+        TouchArea { clicked => { Screen.close-transport-sheet(); } }
+    }
+
+    sheet := Rectangle {
+        width: 100%;
+        height: root.sheet-h;
+        y: root.open ? parent.height - self.height + root.drag-y : parent.height;
+        animate y { duration: root.dragging ? 0ms : 300ms; easing: cubic-bezier(0.2, 0.85, 0.25, 1); }
+        background: Theme.sf;
+        border-top-left-radius: 28px;
+        border-top-right-radius: 28px;
+        border-width: 1px;
+        border-color: Theme.ln;
+
+        VerticalLayout {
+            padding-top: 12px;
+            padding-bottom: 16px;
+
+            HorizontalLayout {
+                alignment: center;
+                Rectangle { width: 38px; height: 4px; border-radius: 2px; background: Theme.ln; }
+            }
+
+            VerticalLayout {
+                vertical-stretch: 0;
+                padding-left: 18px;
+                padding-right: 18px;
+                padding-top: 12px;
+                padding-bottom: 10px;
+                spacing: 4px;
+                Text { text: Str.transport; font-size: 19px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; }
+                Text { text: Str.transport-desc-hdr; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+            }
+
+            Rectangle {
+                vertical-stretch: 0;
+                height: 62px;
+                border-radius: 16px;
+                background: Theme.sf2;
+                x: 14px;
+                width: parent.width - 28px;
+                HorizontalLayout {
+                    padding: 14px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        Text { text: Str.auto-title; font-size: 13px; font-weight: 600; color: Theme.t; }
+                        Text { text: Str.auto-hint; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+                    }
+                    Rectangle {}
+                    VerticalLayout {
+                        alignment: center;
+                        PillToggle {
+                            on: AppState.auto-transport;
+                            toggled => { AppState.set-auto-transport(!AppState.auto-transport); }
+                        }
+                    }
+                }
+            }
+
+            Flickable {
+                vertical-stretch: 1;
+                content-height: list.preferred-height;
+                list := VerticalLayout {
+                    padding: 14px;
+                    spacing: 7px;
+                    for tr in AppState.transports: Rectangle {
+                        border-radius: 16px;
+                        background: tr.selected ? Theme.sf2 : transparent;
+                        border-width: 1px;
+                        border-color: tr.selected ? Theme.a1 : Theme.ln;
+                        HorizontalLayout {
+                            padding: 12px;
+                            spacing: 12px;
+                            Rectangle {
+                                width: 44px;
+                                height: 30px;
+                                border-radius: 9px;
+                                background: Theme.sf2;
+                                Text {
+                                    text: tr.name;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    color: tr.selected ? Theme.a1 : Theme.t2;
+                                    font-family: "IBM Plex Mono";
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 3px;
+                                Text { text: tr.title; font-size: 12.5px; font-weight: 600; color: Theme.t; }
+                                Text { text: tr.desc; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
+                            }
+                            Rectangle {}
+                            VerticalLayout { alignment: center; RadioDot { on: tr.selected; } }
+                        }
+                        TouchArea {
+                            clicked => {
+                                AppState.select-transport(tr.id);
+                                Screen.close-transport-sheet();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Сенсор перетаскивания живёт на неподвижном оверлее (не внутри едущего
+    // sheet), чтобы mouse-y считался в стабильной системе координат и трекинг шёл
+    // 1:1. После нажатия Slint захватывает указатель и продолжает слать moved даже
+    // за пределами области. Покрывает только зону ручки/заголовка (76px сверху),
+    // не мешая тумблеру и списку.
+    grab := TouchArea {
+        enabled: root.open;
+        x: 0;
+        width: 100%;
+        y: root.height - root.sheet-h;
+        height: 76px;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) {
+                root.dragging = true;
+            }
+            if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
+                root.dragging = false;
+                if (root.drag-y > root.sheet-h * 0.28) {
+                    Screen.close-transport-sheet();
+                }
+                root.drag-y = 0px;
+            }
+        }
+        moved => {
+            if (root.dragging) {
+                root.drag-y = max(0px, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+}

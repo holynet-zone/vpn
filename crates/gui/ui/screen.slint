@@ -1,0 +1,52 @@
+import { Page } from "models.slint";
+
+export global Screen {
+    in property <bool> wide: false;
+    // true на мобильном таргете (Android): скрываем скроллбар, оставляем только
+    // touch-скролл. На desktop-сборке остаётся видимый скроллбар даже в узком окне.
+    in property <bool> mobile-target: false;
+
+    // Безопасные отступы (system bar / notch / gesture-nav), проброшены из
+    // Window.safe-area-insets. На desktop все нули.
+    in property <length> safe-top: 0px;
+    in property <length> safe-bottom: 0px;
+    in property <length> safe-left: 0px;
+    in property <length> safe-right: 0px;
+
+    in-out property <Page> page: Page.home;
+    in-out property <bool> transport-sheet: false;
+    in-out property <bool> desk-transport-open: false;
+
+    public function go(p: Page) {
+        self.page = p;
+        self.transport-sheet = false;
+    }
+    // Обработка системной кнопки/жеста «назад» (Android форвардит её как Key.Back).
+    // Возвращает true, если навигация обработана внутри приложения; false — если
+    // возвращаться некуда (мы на home) и системе можно закрыть активити.
+    public function back() -> bool {
+        if self.transport-sheet {
+            self.transport-sheet = false;
+            return true;
+        }
+        if self.desk-transport-open {
+            self.desk-transport-open = false;
+            return true;
+        }
+        if self.page == Page.proto || self.page == Page.devices || self.page == Page.settings {
+            self.page = Page.more;
+            return true;
+        }
+        if self.page != Page.home {
+            self.page = Page.home;
+            return true;
+        }
+        return false;
+    }
+    public function open-transport-sheet() {
+        self.transport-sheet = true;
+    }
+    public function close-transport-sheet() {
+        self.transport-sheet = false;
+    }
+}

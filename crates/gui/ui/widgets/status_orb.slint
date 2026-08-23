@@ -1,0 +1,197 @@
+import { Theme } from "../theme.slint";
+import { ConnStatus } from "../models.slint";
+
+component OrbitDot inherits Rectangle {
+    in property <angle> phase;
+    in property <length> ring;
+    in property <length> dot;
+    in property <brush> tint;
+    in property <float> speed;
+    width: ring;
+    height: ring;
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        transform-rotation: root.phase * root.speed;
+        Rectangle {
+            width: root.dot;
+            height: root.dot;
+            x: parent.width / 2 - self.width / 2;
+            y: -root.dot / 2;
+            border-radius: root.dot / 2;
+            background: root.tint;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: root.tint;
+        }
+    }
+}
+
+component DashedRing inherits Rectangle {
+    in property <length> ring;
+    in property <brush> tint;
+    in property <length> dash-len: 7px;
+    in property <length> dash-w: 1.2px;
+    width: ring;
+    height: ring;
+    for i in 46: Rectangle {
+        width: 100%;
+        height: 100%;
+        transform-rotation: (360deg / 46) * i;
+        Rectangle {
+            width: root.dash-len;
+            height: root.dash-w;
+            x: parent.width / 2 - self.width / 2;
+            y: -root.dash-w / 2;
+            border-radius: root.dash-w / 2;
+            background: root.tint;
+        }
+    }
+}
+
+component PulseRing inherits Rectangle {
+    in property <float> phase;
+    in property <brush> tint;
+    width: 222px;
+    height: 222px;
+    border-radius: self.width / 2;
+    border-width: 1px;
+    border-color: root.tint;
+    transform-scale: 0.82 + 0.58 * root.phase;
+    opacity: 0.6 * (1.0 - root.phase);
+}
+
+export component StatusOrb inherits Rectangle {
+    in property <ConnStatus> status;
+    in property <string> label;
+    in property <string> transport-code;
+    in property <length> button-size: 170px;
+    callback clicked();
+
+    property <bool> on: status == ConnStatus.on;
+    property <bool> connecting: status == ConnStatus.connecting;
+    property <brush> status-color: on ? Theme.ok : connecting ? Theme.a1 : Theme.t2;
+
+    property <float> ms: animation-tick() / 1ms;
+    property <angle> phase: ms * 0.03deg;
+    property <float> wave: (1 + sin(ms * 0.072deg)) / 2;
+    property <float> halo1: (ms - floor(ms / 3600) * 3600) / 3600;
+    property <float> halo2: ((ms + 1800) - floor((ms + 1800) / 3600) * 3600) / 3600;
+
+    height: 274px;
+
+    // pulse waves while connected
+    if on: PulseRing { phase: root.halo1; tint: Theme.a2; }
+    if on: PulseRing { phase: root.halo2; tint: Theme.a1; }
+
+    DashedRing {
+        ring: 242px;
+        tint: Theme.ln;
+        opacity: 0.7;
+    }
+    Rectangle {
+        width: 212px;
+        height: 212px;
+        border-radius: self.width / 2;
+        border-width: 1px;
+        border-color: Theme.ln;
+    }
+
+    // sweeping arc while connecting
+    if connecting: Rectangle {
+        width: 238px;
+        height: 238px;
+        border-radius: self.width / 2;
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: self.width / 2;
+            background: @conic-gradient(transparent 0deg, root.status-color 120deg, transparent 230deg);
+            transform-rotation: root.phase * 9;
+        }
+        // punch the centre to leave a thin ring
+        Rectangle {
+            width: 206px;
+            height: 206px;
+            border-radius: self.width / 2;
+            background: Theme.bg;
+        }
+    }
+
+    if (on || connecting): Rectangle {
+        width: 262px;
+        height: 262px;
+        border-radius: self.width / 2;
+        background: @radial-gradient(circle, root.status-color 0%, transparent 62%);
+        opacity: 0.45 + 0.4 * root.wave;
+        transform-scale: 1.0 + 0.07 * root.wave;
+    }
+
+    // orbiting dots while connected
+    if on: OrbitDot { ring: 242px; dot: 7px; tint: Theme.a1; speed: 1.0; phase: root.phase; }
+    if on: OrbitDot { ring: 212px; dot: 6px; tint: Theme.a2; speed: -1.4; phase: root.phase; }
+    if on: OrbitDot { ring: 186px; dot: 5px; tint: Theme.ok; speed: 2.1; phase: root.phase; }
+
+    // centre button
+    hub := Rectangle {
+        width: root.button-size;
+        height: root.button-size;
+        border-radius: self.width / 2;
+        background: Theme.sf;
+        border-width: 1px;
+        border-color: Theme.ln;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: Theme.dark ? #00000048 : #5a5a6614;
+        drop-shadow-offset-y: 10px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 50px;
+                    height: 50px;
+                    border-radius: self.width / 2;
+                    border-width: 2.5px;
+                    border-color: root.status-color;
+                    animate border-color { duration: 400ms; }
+                    Rectangle {
+                        width: 12px;
+                        height: 9px;
+                        y: -4.5px;
+                        background: Theme.sf;
+                    }
+                    Rectangle {
+                        width: 3px;
+                        height: 22px;
+                        y: -7px;
+                        border-radius: 1.5px;
+                        background: root.status-color;
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                Text {
+                    text: root.label;
+                    color: Theme.t2;
+                    font-size: 11.5px;
+                    font-weight: 700;
+                    letter-spacing: 0.6px;
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                Text {
+                    text: root.transport-code;
+                    color: root.status-color;
+                    font-size: 10px;
+                    font-weight: 600;
+                    letter-spacing: 1px;
+                    font-family: "IBM Plex Mono";
+                }
+            }
+        }
+        TouchArea { clicked => { root.clicked(); } }
+    }
+}

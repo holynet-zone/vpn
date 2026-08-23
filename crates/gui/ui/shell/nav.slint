@@ -1,0 +1,92 @@
+import { Theme } from "../theme.slint";
+
+export component NavIcon inherits Rectangle {
+    in property <int> kind;
+    in property <brush> tint;
+    width: 18px;
+    height: 18px;
+
+    // home: ring with center dot
+    if kind == 0: Rectangle {
+        width: 17px;
+        height: 17px;
+        border-radius: 8.5px;
+        border-width: 2px;
+        border-color: root.tint;
+        Rectangle { width: 5px; height: 5px; border-radius: 2.5px; background: root.tint; }
+    }
+    // nodes: ring with horizontal bar
+    if kind == 1: Rectangle {
+        width: 17px;
+        height: 17px;
+        border-radius: 8.5px;
+        border-width: 2px;
+        border-color: root.tint;
+        Rectangle { width: 15px; height: 2px; background: root.tint; }
+    }
+    // guard: rotated rounded square
+    if kind == 2: Rectangle {
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        border-width: 2px;
+        border-color: root.tint;
+        transform-rotation: 45deg;
+    }
+    // more: three dots
+    if kind == 3: HorizontalLayout {
+        spacing: 3px;
+        alignment: center;
+        for x in [0, 1, 2]: Rectangle { width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
+    }
+    // settings: gear-ish ring
+    if kind == 4: Rectangle {
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: root.tint;
+        Rectangle { width: 6px; height: 6px; border-radius: 3px; border-width: 2px; border-color: root.tint; }
+    }
+}
+
+export component BottomNavItem inherits Rectangle {
+    in property <int> kind;
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    horizontal-stretch: 1;
+    property <brush> tint: active ? Theme.a1 : Theme.t2;
+    VerticalLayout {
+        spacing: 6px;
+        alignment: center;
+        HorizontalLayout { alignment: center; NavIcon { kind: root.kind; tint: root.tint; } }
+        HorizontalLayout {
+            alignment: center;
+            Text { text: root.label; font-size: 9.5px; font-weight: 600; color: root.tint; }
+        }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component SideNavItem inherits Rectangle {
+    in property <int> kind;
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    height: 40px;
+    border-radius: 11px;
+    background: active ? Theme.sf2 : transparent;
+    property <brush> tint: active ? Theme.t : Theme.t2;
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 11px;
+        spacing: 11px;
+        VerticalLayout { alignment: center; NavIcon { kind: root.kind; tint: root.tint; } }
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.label; font-size: 13px; font-weight: 600; color: root.tint; }
+        }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}

@@ -1,0 +1,5 @@
+icon: ../../docs/icons/icon.png
+android:
+  manifest:
+    application:
+      label: Holynet VPN

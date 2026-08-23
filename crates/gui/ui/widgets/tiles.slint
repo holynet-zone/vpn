@@ -1,0 +1,132 @@
+import { Theme } from "../theme.slint";
+import { Card, Chevron } from "card.slint";
+import { PillToggle } from "pill_toggle.slint";
+
+export component ScreenTitle inherits Text {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.8px;
+    color: Theme.t;
+}
+
+export component SectionLabel inherits Text {
+    font-size: 12px;
+    font-weight: 600;
+    color: Theme.t2;
+}
+
+export component LinkRow inherits Card {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> enabled: true;
+    callback clicked();
+    opacity: enabled ? 1.0 : 0.5;
+    HorizontalLayout {
+        padding: 16px;
+        spacing: 13px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 3px;
+            Text { text: root.title; font-size: 13.5px; font-weight: 600; color: Theme.t; overflow: elide; }
+            if root.subtitle != "": Text { text: root.subtitle; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+        }
+        VerticalLayout { alignment: center; horizontal-stretch: 0; Chevron {} }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ToggleRow inherits Card {
+    in property <string> title;
+    in property <string> hint;
+    in property <bool> on;
+    callback toggled();
+    HorizontalLayout {
+        padding: 15px;
+        spacing: 13px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            Text { text: root.title; font-size: 13.5px; font-weight: 600; color: Theme.t; }
+            if root.hint != "": Text { text: root.hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+        }
+        Rectangle {}
+        VerticalLayout {
+            alignment: center;
+            PillToggle { on: root.on; toggled => { root.toggled(); } }
+        }
+    }
+    TouchArea { clicked => { root.toggled(); } }
+}
+
+export component BackButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    horizontal-stretch: 0;
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 7px;
+                height: 12px;
+                viewbox-width: 7;
+                viewbox-height: 12;
+                stroke: Theme.t2;
+                stroke-width: 1.5px;
+                commands: "M 5.5 1.5 L 1.5 6 L 5.5 10.5";
+            }
+        }
+        Text { text: root.text; font-size: 12px; font-weight: 600; color: Theme.t2; vertical-alignment: center; }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component StatBox inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <length> value-size: 15px;
+    background: Theme.sf2;
+    border-radius: 14px;
+    horizontal-stretch: 1;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+        Text {
+            text: root.label;
+            font-size: 9.5px;
+            font-weight: 500;
+            letter-spacing: 1px;
+            color: Theme.t2;
+            font-family: "IBM Plex Mono";
+        }
+        Text {
+            text: root.value;
+            font-size: root.value-size;
+            font-weight: 600;
+            color: Theme.t;
+            font-family: "IBM Plex Mono";
+            overflow: elide;
+        }
+    }
+}
+
+export component IconTag inherits Rectangle {
+    in property <string> text;
+    in property <brush> fg: Theme.t2;
+    width: 40px;
+    height: 40px;
+    border-radius: self.width / 2;
+    background: Theme.sf2;
+    Text {
+        text: root.text;
+        color: root.fg;
+        font-size: 11px;
+        font-weight: 600;
+        font-family: "IBM Plex Mono";
+    }
+}

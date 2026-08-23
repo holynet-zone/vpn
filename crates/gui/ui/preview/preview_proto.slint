@@ -1,0 +1,13 @@
+import { Theme } from "../theme.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { MobileShell } from "../shell/mobile_shell.slint";
+import { SampleData } from "sample.slint";
+
+export component PreviewProto inherits Window {
+    width: 430px;
+    height: 880px;
+    background: Theme.page;
+    SampleData { init => { Screen.wide = false; Screen.page = Page.proto; } }
+    MobileShell { width: 100%; height: 100%; }
+}

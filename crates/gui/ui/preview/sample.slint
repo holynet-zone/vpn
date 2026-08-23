@@ -1,0 +1,80 @@
+import { AppState } from "../state.slint";
+import { ConnStatus } from "../models.slint";
+
+export component SampleData inherits Rectangle {
+    width: 0;
+    height: 0;
+    init => {
+        AppState.status = ConnStatus.on;
+        AppState.server-code = "FI";
+        AppState.server-city = "Хельсинки";
+        AppState.server-meta = "Финляндия · 22%";
+        AppState.server-ping = "18 мс";
+        AppState.transport-code = "UDP";
+        AppState.transport-title = "UDP — прямой канал";
+        AppState.transport-desc = "Минимальная задержка. Первый выбор, пока сеть его пропускает.";
+        AppState.auto-transport = true;
+        AppState.status-sub = "Трафик идёт через Хельсинки, транспорт UDP";
+        AppState.session-time = "04:12";
+        AppState.down-text = "512,3 МБ";
+        AppState.up-text = "88,1 МБ";
+        AppState.speed-now = "47 Мбит/с";
+        AppState.spark = [0.2, 0.35, 0.5, 0.42, 0.7, 0.55, 0.8, 0.62, 0.9, 0.5, 0.66, 0.78, 0.4, 0.58, 0.72, 0.85, 0.6, 0.44, 0.68, 0.9, 0.52, 0.74, 0.6, 0.48, 0.82, 0.66, 0.9, 0.55, 0.7, 0.6, 0.78, 0.5, 0.64, 0.72];
+        AppState.privacy-score = 85;
+        AppState.kill-on = true;
+        AppState.proto-summary = "UDP · ChaCha20";
+        AppState.cipher-name = "ChaCha20";
+        AppState.dev-summary = "3 из 6 устройств";
+        AppState.split-summary = "3 в канале";
+
+        AppState.servers = [
+            { id: "fi", code: "FI", city: "Хельсинки", meta: "Финляндия · 22%", ping: "18 мс", quality: 4, selected: true },
+            { id: "nl", code: "NL", city: "Амстердам", meta: "Нидерланды · 31%", ping: "24 мс", quality: 4, selected: false },
+            { id: "de", code: "DE", city: "Франкфурт", meta: "Германия · 44%", ping: "31 мс", quality: 3, selected: false },
+            { id: "us", code: "US", city: "Нью-Йорк", meta: "США · 39%", ping: "92 мс", quality: 2, selected: false },
+        ];
+        AppState.transports = [
+            { id: "udp", name: "UDP", title: "UDP — прямой канал", desc: "Минимальная задержка.", selected: true },
+            { id: "ws", name: "WS", title: "WebSocket поверх TLS", desc: "Неотличим от веб-трафика.", selected: false },
+            { id: "vk", name: "VK", title: "Тоннель через VK-звонки", desc: "Прячется в медиапоток.", selected: false },
+        ];
+        AppState.ciphers = [
+            { name: "ChaCha20-Poly1305", hint: "быстрее на телефонах без AES-NI", selected: true },
+            { name: "AES-256-GCM", hint: "аппаратное ускорение на ПК", selected: false },
+        ];
+        AppState.chain = [
+            { code: "UDP", active: true, last: false },
+            { code: "WS", active: false, last: false },
+            { code: "VK", active: false, last: true },
+        ];
+        AppState.toggles = [
+            { id: "kill", name: "Kill switch", hint: "Обрубить трафик, если канал упал", on: true },
+            { id: "auto", name: "Автоподключение", hint: "В незнакомых Wi-Fi сетях", on: true },
+            { id: "blocker", name: "Блокировка трекеров", hint: "Фильтр на уровне DNS", on: true },
+            { id: "lan", name: "Локальная сеть", hint: "Принтеры и NAS в обход канала", on: false },
+        ];
+        AppState.apps = [
+            { name: "Браузер", letter: "Б", tunneled: true },
+            { name: "Мессенджер", letter: "М", tunneled: true },
+            { name: "Банк", letter: "Б", tunneled: false },
+            { name: "Стриминг", letter: "С", tunneled: true },
+        ];
+        AppState.devices = [
+            { kind: "PHONE", name: "Pixel 8", meta: "Android · Москва", tag: "сейчас", state: 0 },
+            { kind: "LAPTOP", name: "MacBook Air", meta: "macOS · Москва", tag: "online", state: 1 },
+            { kind: "TAB", name: "iPad", meta: "iPadOS · офлайн 3 дня", tag: "офлайн", state: 2 },
+        ];
+        AppState.proto-rows = [
+            { key: "Обмен ключами", value: "X25519" },
+            { key: "Шифр", value: "ChaCha20-Poly1305" },
+            { key: "MTU", value: "1380" },
+            { key: "Keepalive", value: "15 с" },
+        ];
+        AppState.palettes = [
+            { id: 0, name: "Halo", hint: "тёплая бумага, золото и сигнал", sw1: #f1bf55, sw2: #4dd3dd, base: #140f08, selected: true },
+            { id: 1, name: "Tide", hint: "морская мята и индиго", sw1: #57dcb4, sw2: #7dc0ff, base: #061116, selected: false },
+            { id: 2, name: "Ember", hint: "розовая глина, коралл и слива", sw1: #ff9977, sw2: #c4a4fe, base: #180c0c, selected: false },
+            { id: 3, name: "Iris", hint: "лаванда и лазурь", sw1: #d1a8ff, sw2: #7dc0ff, base: #110d18, selected: false },
+        ];
+    }
+}

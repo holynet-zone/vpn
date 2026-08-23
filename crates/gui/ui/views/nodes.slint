@@ -1,0 +1,119 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { Card } from "../widgets/card.slint";
+import { SignalBars } from "../widgets/signal_bars.slint";
+import { ScreenTitle, IconTag } from "../widgets/tiles.slint";
+
+export component NodesView inherits VerticalLayout {
+    spacing: 18px;
+
+    ScreenTitle { text: Str.nodes; }
+
+    Card {
+        elevated: false;
+        border-radius: 16px;
+        height: 48px;
+        HorizontalLayout {
+            padding-left: 15px;
+            padding-right: 15px;
+            spacing: 10px;
+            alignment: stretch;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 13px;
+                    height: 13px;
+                    border-radius: 6.5px;
+                    border-width: 1.5px;
+                    border-color: Theme.t2;
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                clip: true;
+                if AppState.query == "": Text {
+                    text: Str.search-ph;
+                    color: Theme.t2;
+                    font-size: 14px;
+                    x: 0;
+                    vertical-alignment: center;
+                }
+                input := TextInput {
+                    text <=> AppState.query;
+                    vertical-alignment: center;
+                    horizontal-alignment: left;
+                    font-size: 14px;
+                    color: Theme.t;
+                    single-line: true;
+                    width: 100%;
+                    height: 100%;
+                    edited => { AppState.query-changed(self.text); }
+                }
+            }
+        }
+    }
+
+    // smart pick
+    Rectangle {
+        border-radius: Theme.radius-lg;
+        background: @linear-gradient(135deg, Theme.a1, Theme.a2);
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 13px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 38px;
+                    height: 38px;
+                    border-radius: 19px;
+                    background: #00000030;
+                    Rectangle { width: 13px; height: 13px; background: #ffffff; border-radius: 3px; transform-rotation: 45deg; }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                Text { text: Str.smart; font-size: 14px; font-weight: 700; color: Theme.on; }
+                Text { text: Str.smart-hint; font-size: 11.5px; color: Theme.on; opacity: 0.82; wrap: word-wrap; }
+            }
+        }
+        TouchArea { clicked => { AppState.smart-pick(); Screen.go(Page.home); } }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        for s in AppState.servers: Card {
+            elevated: false;
+            border-radius: 18px;
+            stroke: s.selected ? Theme.a1 : Theme.ln;
+            HorizontalLayout {
+                padding: 14px;
+                spacing: 12px;
+                IconTag { text: s.code; width: 36px; height: 36px; }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text { text: s.city; font-size: 13.5px; font-weight: 600; color: Theme.t; }
+                    Text { text: s.meta; font-size: 11.5px; color: Theme.t2; }
+                }
+                Rectangle {}
+                VerticalLayout { alignment: center; SignalBars { quality: s.quality; } }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: s.ping;
+                        width: 46px;
+                        horizontal-alignment: right;
+                        font-size: 11px;
+                        color: Theme.t2;
+                        font-family: "IBM Plex Mono";
+                    }
+                }
+            }
+            TouchArea { clicked => { AppState.select-server(s.id); Screen.go(Page.home); } }
+        }
+    }
+}

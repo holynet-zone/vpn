@@ -1,0 +1,111 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { DesktopPageHost } from "page_host_desktop.slint";
+import { SideNavItem } from "nav.slint";
+
+export component DesktopShell inherits Rectangle {
+    background: @linear-gradient(180deg, Theme.bg 0%, Theme.page 100%);
+    property <bool> settings-active: Screen.page == Page.more || Screen.page == Page.proto
+        || Screen.page == Page.devices || Screen.page == Page.settings;
+
+    HorizontalLayout {
+        Rectangle {
+            width: 214px;
+            background: Theme.sf;
+            // right divider only
+            Rectangle { x: parent.width - 1px; width: 1px; background: Theme.ln; }
+            VerticalLayout {
+                padding: 12px;
+                padding-top: 18px;
+                spacing: 6px;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-bottom: 16px;
+                    spacing: 9px;
+                    Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        border-radius: 11px;
+                        background: @conic-gradient(Theme.a1 0deg, Theme.a2 180deg, Theme.a1 360deg);
+                        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.sf; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Text { text: Str.brand; font-size: 15px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; }
+                    }
+                }
+
+                SideNavItem {
+                    kind: 0;
+                    label: Str.nav-home;
+                    active: Screen.page == Page.home;
+                    clicked => { Screen.go(Page.home); }
+                }
+                SideNavItem {
+                    kind: 1;
+                    label: Str.nav-nodes;
+                    active: Screen.page == Page.nodes;
+                    clicked => { Screen.go(Page.nodes); }
+                }
+                SideNavItem {
+                    kind: 2;
+                    label: Str.nav-shield;
+                    active: Screen.page == Page.shield;
+                    clicked => { Screen.go(Page.shield); }
+                }
+                SideNavItem {
+                    kind: 4;
+                    label: Str.nav-settings;
+                    active: root.settings-active;
+                    clicked => { Screen.go(Page.more); }
+                }
+
+                Rectangle {}
+
+                Rectangle {
+                    height: 64px;
+                    border-radius: 13px;
+                    background: Theme.sf2;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 6px;
+                        Text {
+                            text: Str.session;
+                            font-size: 9.5px;
+                            font-weight: 500;
+                            letter-spacing: 1px;
+                            color: Theme.t2;
+                            font-family: "IBM Plex Mono";
+                        }
+                        Text {
+                            text: AppState.session-time;
+                            font-size: 15px;
+                            font-weight: 600;
+                            color: Theme.t;
+                            font-family: "IBM Plex Mono";
+                        }
+                    }
+                }
+            }
+        }
+
+        ScrollView {
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                width: root.width - 214px;
+                padding-top: 26px;
+                padding-bottom: 40px;
+                alignment: center;
+                VerticalLayout {
+                    width: min(1080px, parent.width - 52px);
+                    DesktopPageHost {}
+                }
+            }
+        }
+    }
+}

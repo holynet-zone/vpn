@@ -1,0 +1,15 @@
+import { Theme } from "../theme.slint";
+
+export component SignalBars inherits Rectangle {
+    in property <int> quality;
+    width: 18px;
+    height: 14px;
+    for h[i] in [5px, 8px, 11px, 14px]: Rectangle {
+        width: 3px;
+        height: h;
+        x: i * 5px;
+        y: parent.height - self.height;
+        border-radius: 1px;
+        background: i < root.quality ? Theme.ok : Theme.sf2;
+    }
+}

@@ -1,0 +1,60 @@
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitApp, DeviceInfo, KeyValue, PaletteCard } from "models.slint";
+import { ThemeMode, Lang } from "theme.slint";
+
+export global AppState {
+    in property <ConnStatus> status: ConnStatus.off;
+
+    in property <string> server-code;
+    in property <string> server-city;
+    in property <string> server-meta;
+    in property <string> server-ping;
+
+    in property <string> transport-code;
+    in property <string> transport-title;
+    in property <string> transport-desc;
+    in property <bool> auto-transport: true;
+
+    in property <string> status-sub;
+    in property <bool> banner-visible: false;
+    in property <string> banner-text;
+
+    in property <string> session-time: "—";
+    in property <string> down-text: "—";
+    in property <string> up-text: "—";
+    in property <string> speed-now;
+    in property <[float]> spark: [0.1, 0.1, 0.1];
+
+    in property <int> privacy-score: 40;
+    in property <bool> kill-on: true;
+    in property <string> proto-summary;
+    in property <string> cipher-name;
+    in property <string> dev-summary;
+    in property <string> split-summary;
+
+    in property <[ServerInfo]> servers;
+    in property <[TransportInfo]> transports;
+    in property <[CipherInfo]> ciphers;
+    in property <[ChainStep]> chain;
+    in property <[ToggleInfo]> toggles;
+    in property <[SplitApp]> apps;
+    in property <[DeviceInfo]> devices;
+    in property <[KeyValue]> proto-rows;
+    in property <[PaletteCard]> palettes;
+
+    in-out property <string> query;
+
+    callback toggle-connect();
+    callback select-server(string);
+    callback select-transport(string);
+    callback select-cipher(int);
+    callback flip-toggle(string);
+    callback flip-app(int);
+    callback set-auto-transport(bool);
+    callback query-changed(string);
+    callback smart-pick();
+    callback simulate();
+
+    callback select-palette(int);
+    callback set-mode(ThemeMode);
+    callback set-lang(Lang);
+}

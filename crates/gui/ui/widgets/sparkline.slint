@@ -1,0 +1,21 @@
+import { Theme } from "../theme.slint";
+
+export component Sparkline inherits Rectangle {
+    in property <[float]> values;
+    in property <bool> active;
+
+    HorizontalLayout {
+        spacing: 2px;
+        for v in root.values: Rectangle {
+            background: transparent;
+            bar := Rectangle {
+                width: parent.width;
+                height: max(2px, parent.height * clamp(v, 0.02, 1.0));
+                y: parent.height - self.height;
+                border-radius: 2px;
+                background: root.active ? Theme.a2 : Theme.sf2;
+                animate height { duration: 220ms; easing: ease; }
+            }
+        }
+    }
+}

@@ -1,0 +1,19 @@
+import { Theme, ThemeMode } from "../theme.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { MobileShell } from "../shell/mobile_shell.slint";
+import { SampleData } from "sample.slint";
+
+export component PreviewSettings inherits Window {
+    width: 430px;
+    height: 880px;
+    background: Theme.page;
+    SampleData {
+        init => {
+            Screen.wide = false;
+            Screen.page = Page.settings;
+            Theme.mode = ThemeMode.dark;
+        }
+    }
+    MobileShell { width: 100%; height: 100%; }
+}

@@ -1,0 +1,13 @@
+import { Theme } from "../theme.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { DesktopShell } from "../shell/desktop_shell.slint";
+import { SampleData } from "sample.slint";
+
+export component PreviewDesktopShield inherits Window {
+    width: 1180px;
+    height: 820px;
+    background: Theme.page;
+    SampleData { init => { Screen.wide = true; Screen.page = Page.shield; } }
+    DesktopShell { width: 100%; height: 100%; }
+}

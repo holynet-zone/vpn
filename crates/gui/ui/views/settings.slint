@@ -1,0 +1,81 @@
+import { Theme, ThemeMode, Lang } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
+import { Segmented } from "../widgets/segmented.slint";
+import { ScreenTitle, SectionLabel, BackButton } from "../widgets/tiles.slint";
+import { PaletteCell, ModeTile } from "../widgets/appearance.slint";
+
+export component SettingsView inherits VerticalLayout {
+    property <int> mode-index: Theme.mode == ThemeMode.system ? 0 : Theme.mode == ThemeMode.light ? 1 : 2;
+    spacing: 20px;
+
+    if !Screen.wide: BackButton {
+        text: Str.back;
+        clicked => { Screen.go(Page.more); }
+    }
+
+    ScreenTitle { text: Str.appearance; }
+
+    VerticalLayout {
+        spacing: 4px;
+        SectionLabel { text: Str.palette; }
+        Text { text: Str.palette-hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+    }
+
+    GridLayout {
+        spacing: 10px;
+        for p[i] in AppState.palettes: PaletteCell {
+            row: floor(i / 2);
+            col: mod(i, 2);
+            name: p.name;
+            sw1: p.sw1;
+            sw2: p.sw2;
+            base: p.base;
+            selected: p.selected;
+            clicked => { AppState.select-palette(p.id); }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        SectionLabel { text: Str.theme-mode; }
+        HorizontalLayout {
+            spacing: 10px;
+            ModeTile {
+                horizontal-stretch: 1;
+                kind: 0;
+                label: Str.mode-system;
+                selected: root.mode-index == 0;
+                clicked => { AppState.set-mode(ThemeMode.system); }
+            }
+            ModeTile {
+                horizontal-stretch: 1;
+                kind: 1;
+                label: Str.mode-light;
+                selected: root.mode-index == 1;
+                clicked => { AppState.set-mode(ThemeMode.light); }
+            }
+            ModeTile {
+                horizontal-stretch: 1;
+                kind: 2;
+                label: Str.mode-dark;
+                selected: root.mode-index == 2;
+                clicked => { AppState.set-mode(ThemeMode.dark); }
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        SectionLabel { text: Str.language; }
+        Segmented {
+            options: ["EN", "RU", "中文", "日本語"];
+            selected: Str.lang-index;
+            changed(i) => {
+                AppState.set-lang(i == 1 ? Lang.ru : i == 2 ? Lang.zh : i == 3 ? Lang.ja : Lang.en);
+            }
+        }
+    }
+}

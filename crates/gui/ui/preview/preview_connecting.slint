@@ -1,0 +1,15 @@
+import { Theme } from "../theme.slint";
+import { Screen } from "../screen.slint";
+import { AppState } from "../state.slint";
+import { Page, ConnStatus } from "../models.slint";
+import { MobileShell } from "../shell/mobile_shell.slint";
+import { SampleData } from "sample.slint";
+
+export component PreviewConnecting inherits Window {
+    width: 430px;
+    height: 880px;
+    background: Theme.page;
+    SampleData { init => { Screen.wide = false; Screen.page = Page.home; } }
+    Rectangle { init => { AppState.status = ConnStatus.connecting; } }
+    MobileShell { width: 100%; height: 100%; }
+}

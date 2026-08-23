@@ -1,0 +1,58 @@
+import { Theme, Accent, ThemeMode, Lang } from "theme.slint";
+import { Str } from "strings.slint";
+import { AppState } from "state.slint";
+import { Screen } from "screen.slint";
+import { ConnStatus, Page, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitApp, DeviceInfo, KeyValue, PaletteCard } from "models.slint";
+import { MobileShell } from "shell/mobile_shell.slint";
+import { DesktopShell } from "shell/desktop_shell.slint";
+
+export { Theme, Str, AppState, Screen, Accent, ThemeMode, Lang, ConnStatus, Page }
+
+export component AppWindow inherits Window {
+    title: "HolyNet";
+    default-font-family: "Manrope";
+    min-width: 360px;
+    min-height: 620px;
+    preferred-width: 430px;
+    preferred-height: 880px;
+    background: Theme.page;
+
+    property <bool> wide: self.width >= 900px;
+
+    function push-insets() {
+        Screen.safe-top = self.safe-area-insets.top;
+        Screen.safe-bottom = self.safe-area-insets.bottom;
+        Screen.safe-left = self.safe-area-insets.left;
+        Screen.safe-right = self.safe-area-insets.right;
+    }
+
+    init => {
+        Screen.wide = self.wide;
+        root.push-insets();
+    }
+    changed wide => { Screen.wide = self.wide; }
+    changed safe-area-insets => { root.push-insets(); }
+
+    forward-focus: scope;
+
+    scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Back) {
+                Screen.back() ? EventResult.accept : EventResult.reject
+            } else {
+                EventResult.reject
+            }
+        }
+
+        if root.wide: DesktopShell {
+            width: 100%;
+            height: 100%;
+        }
+        if !root.wide: MobileShell {
+            width: 100%;
+            height: 100%;
+        }
+    }
+}

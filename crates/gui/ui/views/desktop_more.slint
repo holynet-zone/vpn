@@ -1,0 +1,227 @@
+import { Theme, ThemeMode, Lang } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Card, Chip } from "../widgets/card.slint";
+import { Segmented } from "../widgets/segmented.slint";
+import { ScreenTitle, SectionLabel } from "../widgets/tiles.slint";
+import { PaletteCell, ModeTile } from "../widgets/appearance.slint";
+
+export component DesktopMoreView inherits VerticalLayout {
+    property <int> mode-index: Theme.mode == ThemeMode.system ? 0 : Theme.mode == ThemeMode.light ? 1 : 2;
+    spacing: 14px;
+    alignment: start;
+
+    ScreenTitle { text: Str.settings; font-size: 23px; }
+
+    Card {
+        vertical-stretch: 0;
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 14px;
+            Rectangle {
+                width: 44px;
+                height: 44px;
+                border-radius: 22px;
+                background: @conic-gradient(Theme.a1 0deg, Theme.a2 180deg, Theme.a1 360deg);
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                Text { text: Str.account; font-size: 14.5px; font-weight: 700; color: Theme.t; }
+                Text { text: Str.plan; font-size: 12px; color: Theme.t2; }
+            }
+            Rectangle {}
+            VerticalLayout {
+                alignment: center;
+                Chip { text: AppState.proto-summary; }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        vertical-stretch: 0;
+        spacing: 14px;
+
+        Card {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                padding: 17px;
+                spacing: 13px;
+                Text { text: Str.proto-settings; font-size: 13px; font-weight: 700; color: Theme.t; }
+                SectionLabel { text: Str.failover-chain; }
+                HorizontalLayout {
+                    spacing: 5px;
+                    alignment: start;
+                    for c in AppState.chain: HorizontalLayout {
+                        spacing: 5px;
+                        Rectangle {
+                            border-radius: 11px;
+                            background: c.active ? Theme.sf2 : transparent;
+                            border-width: 1px;
+                            border-color: c.active ? Theme.a1 : Theme.ln;
+                            VerticalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+                                Text { text: c.code; font-size: 10.5px; font-weight: 700; color: c.active ? Theme.t : Theme.t2; font-family: "IBM Plex Mono"; }
+                            }
+                        }
+                        if !c.last: VerticalLayout {
+                            alignment: center;
+                            Rectangle { width: 11px; height: 2px; border-radius: 1px; background: Theme.ln; }
+                        }
+                    }
+                }
+                Text { text: Str.failover-hint; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    for c[i] in AppState.ciphers: Card {
+                        elevated: false;
+                        border-radius: 13px;
+                        horizontal-stretch: 1;
+                        stroke: c.selected ? Theme.a1 : Theme.ln;
+                        background: c.selected ? Theme.sf2 : Theme.sf;
+                        VerticalLayout {
+                            padding: 11px;
+                            spacing: 4px;
+                            Text { text: c.name; font-size: 10.5px; font-weight: 600; color: c.selected ? Theme.t : Theme.t2; font-family: "IBM Plex Mono"; }
+                            Text { text: c.hint; font-size: 10px; color: Theme.t2; wrap: word-wrap; }
+                        }
+                        TouchArea { clicked => { AppState.select-cipher(i); } }
+                    }
+                }
+                for p in AppState.proto-rows: HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: p.key; font-size: 11.5px; color: Theme.t2; }
+                    Rectangle {}
+                    Text { text: p.value; font-size: 11px; color: Theme.t; font-family: "IBM Plex Mono"; }
+                }
+            }
+        }
+
+        Card {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                padding: 17px;
+                spacing: 11px;
+                Text { text: AppState.dev-summary; font-size: 13px; font-weight: 700; color: Theme.t; }
+                Text { text: Str.devices-hint; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+                for d in AppState.devices: Rectangle {
+                    border-radius: 14px;
+                    background: Theme.sf2;
+                    border-width: 1px;
+                    border-color: d.state == 0 ? Theme.a1 : Theme.ln;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        padding-top: 11px;
+                        padding-bottom: 11px;
+                        spacing: 11px;
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 9px;
+                            background: Theme.sf;
+                            Text { text: d.kind; font-size: 9.5px; font-weight: 600; color: Theme.t2; font-family: "IBM Plex Mono"; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: d.name; font-size: 12px; font-weight: 600; color: Theme.t; }
+                            Text { text: d.meta; font-size: 10.5px; color: Theme.t2; }
+                        }
+                        Rectangle {}
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                border-radius: 999px;
+                                border-width: 1px;
+                                border-color: d.state == 0 ? Theme.ok : Theme.ln;
+                                HorizontalLayout {
+                                    padding-left: 7px;
+                                    padding-right: 7px;
+                                    padding-top: 5px;
+                                    padding-bottom: 5px;
+                                    Text { text: d.tag; font-size: 9.5px; color: d.state == 0 ? Theme.ok : Theme.t2; font-family: "IBM Plex Mono"; }
+                                }
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 40px;
+                    border-radius: 13px;
+                    border-width: 1px;
+                    border-color: Theme.ln;
+                    opacity: 0.6;
+                    VerticalLayout {
+                        alignment: center;
+                        Text { text: Str.add-device; horizontal-alignment: center; font-size: 11.5px; font-weight: 600; color: Theme.t2; }
+                    }
+                }
+            }
+        }
+    }
+
+    Card {
+        vertical-stretch: 0;
+        VerticalLayout {
+            padding: 17px;
+            spacing: 14px;
+            SectionLabel { text: Str.appearance; }
+            GridLayout {
+                spacing: 10px;
+                for p[i] in AppState.palettes: PaletteCell {
+                    row: floor(i / 3);
+                    col: mod(i, 3);
+                    name: p.name;
+                    sw1: p.sw1;
+                    sw2: p.sw2;
+                    base: p.base;
+                    selected: p.selected;
+                    clicked => { AppState.select-palette(p.id); }
+                }
+            }
+            VerticalLayout {
+                spacing: 8px;
+                SectionLabel { text: Str.theme-mode; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    ModeTile {
+                        horizontal-stretch: 1;
+                        kind: 0;
+                        label: Str.mode-system;
+                        selected: root.mode-index == 0;
+                        clicked => { AppState.set-mode(ThemeMode.system); }
+                    }
+                    ModeTile {
+                        horizontal-stretch: 1;
+                        kind: 1;
+                        label: Str.mode-light;
+                        selected: root.mode-index == 1;
+                        clicked => { AppState.set-mode(ThemeMode.light); }
+                    }
+                    ModeTile {
+                        horizontal-stretch: 1;
+                        kind: 2;
+                        label: Str.mode-dark;
+                        selected: root.mode-index == 2;
+                        clicked => { AppState.set-mode(ThemeMode.dark); }
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 8px;
+                SectionLabel { text: Str.language; }
+                Segmented {
+                    options: ["EN", "RU", "中文", "日本語"];
+                    selected: Str.lang-index;
+                    changed(idx) => {
+                        AppState.set-lang(idx == 1 ? Lang.ru : idx == 2 ? Lang.zh : idx == 3 ? Lang.ja : Lang.en);
+                    }
+                }
+            }
+        }
+    }
+}

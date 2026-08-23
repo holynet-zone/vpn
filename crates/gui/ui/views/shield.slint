@@ -1,0 +1,113 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Card } from "../widgets/card.slint";
+import { ScreenTitle, SectionLabel, ToggleRow } from "../widgets/tiles.slint";
+
+export component ShieldView inherits VerticalLayout {
+    spacing: 18px;
+
+    ScreenTitle { text: Str.protection; }
+
+    Card {
+        border-radius: 22px;
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+            HorizontalLayout {
+                Text { text: Str.privacy-index; font-size: 14px; font-weight: 700; color: Theme.t; }
+                Rectangle {}
+                Text {
+                    text: AppState.privacy-score;
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: Theme.ok;
+                    font-family: "IBM Plex Mono";
+                }
+            }
+            Rectangle {
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.sf2;
+                clip: true;
+                Rectangle {
+                    x: 0;
+                    width: parent.width * (AppState.privacy-score / 100);
+                    border-radius: 3px;
+                    background: @linear-gradient(90deg, Theme.a2, Theme.a1);
+                    animate width { duration: 400ms; easing: ease; }
+                }
+            }
+            Text {
+                text: AppState.kill-on ? Str.privacy-ok : Str.privacy-bad;
+                font-size: 12px;
+                color: Theme.t2;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        for tg in AppState.toggles: ToggleRow {
+            title: tg.name;
+            hint: tg.hint;
+            on: tg.on;
+            toggled => { AppState.flip-toggle(tg.id); }
+        }
+    }
+
+    HorizontalLayout {
+        SectionLabel { text: Str.split-title; }
+        Rectangle {}
+        Text { text: AppState.split-summary; font-size: 11px; color: Theme.t2; }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        for a[i] in AppState.apps: Card {
+            elevated: false;
+            border-radius: 16px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 12px;
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 10px;
+                    background: Theme.sf2;
+                    Text { text: a.letter; font-size: 13px; font-weight: 700; color: Theme.t2; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text { text: a.name; font-size: 13px; font-weight: 600; color: Theme.t; }
+                }
+                Rectangle {}
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        border-radius: 999px;
+                        border-width: 1px;
+                        border-color: a.tunneled ? Theme.ok : Theme.ln;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            padding-top: 5px;
+                            padding-bottom: 5px;
+                            Text {
+                                text: a.tunneled ? Str.tunnel-in : Str.tunnel-out;
+                                font-size: 10.5px;
+                                color: a.tunneled ? Theme.ok : Theme.t2;
+                                font-family: "IBM Plex Mono";
+                            }
+                        }
+                    }
+                }
+            }
+            TouchArea { clicked => { AppState.flip-app(i); } }
+        }
+    }
+}

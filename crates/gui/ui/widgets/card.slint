@@ -1,0 +1,48 @@
+import { Theme } from "../theme.slint";
+
+export component Card inherits Rectangle {
+    in property <bool> elevated: true;
+    in property <brush> stroke: Theme.ln;
+    background: Theme.sf;
+    border-radius: Theme.radius-md;
+    border-width: 1px;
+    border-color: stroke;
+    drop-shadow-blur: elevated ? 26px : 0;
+    drop-shadow-color: elevated ? (Theme.dark ? #00000048 : #5a5a6614) : transparent;
+    drop-shadow-offset-y: elevated ? 10px : 0;
+}
+
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <brush> text-color: Theme.t2;
+    in property <brush> stroke: Theme.chipbd;
+    background: transparent;
+    border-radius: 999px;
+    border-width: 1px;
+    border-color: stroke;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        Text {
+            text: root.text;
+            color: text-color;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.8px;
+            font-family: "IBM Plex Mono";
+        }
+    }
+}
+
+export component Chevron inherits Path {
+    in property <brush> tint: Theme.t2;
+    width: 7px;
+    height: 12px;
+    viewbox-width: 7;
+    viewbox-height: 12;
+    stroke: root.tint;
+    stroke-width: 1.5px;
+    commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
+}
