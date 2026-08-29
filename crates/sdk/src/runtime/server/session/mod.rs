@@ -17,6 +17,7 @@ use dashmap::DashMap;
 use snow::StatelessTransportState;
 use tracing::debug;
 
+use crate::crypto::PublicKey;
 use crate::protocol::{Alg, SessionId};
 use crate::runtime::replay::ReplayWindow;
 use crate::time::sec_since_start;
@@ -94,6 +95,7 @@ pub struct Sessions {
     holy_ip_gen: Arc<IpAddressGenerator>,
     map: Arc<DashMap<SessionId, Arc<Session>>>,
     holy_ip_map: Arc<DashMap<HolyIp, SessionId>>,
+    sticky: Arc<DashMap<PublicKey, HolyIp>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -110,6 +112,7 @@ impl Sessions {
             holy_ip_gen: Arc::new(IpAddressGenerator::new(increment_ip(*network), prefix)),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new()),
+            sticky: Arc::new(DashMap::new()),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
     }
@@ -120,6 +123,17 @@ impl Sessions {
 
     pub fn next_holy_ip(&self) -> Option<HolyIp> {
         self.holy_ip_gen.next()
+    }
+
+    pub fn next_holy_ip_sticky(&self, pk: &PublicKey) -> Option<HolyIp> {
+        if let Some(prev) = self.sticky.get(pk).map(|e| *e.value()) {
+            if self.holy_ip_gen.try_take(&prev) {
+                return Some(prev);
+            }
+        }
+        let ip = self.holy_ip_gen.next()?;
+        self.sticky.insert(pk.clone(), ip);
+        Some(ip)
     }
 
     /// Only call if the SessionId was allocated via `next_session_id` but never passed to `add`.
@@ -310,6 +324,7 @@ mod tests {
     use snow::StatelessTransportState;
 
     use super::*;
+    use crate::crypto::PublicKey;
     use crate::protocol::Alg;
     use crate::runtime::crypto::make_noise_pair_for_test;
     use crate::time::sec_since_start;
@@ -356,6 +371,27 @@ mod tests {
     fn test_unknown_sid_returns_none() {
         let sessions = make_sessions();
         assert!(sessions.get_by_sid(&0xDEAD_BEEF).is_none());
+    }
+
+    // ── sticky allocation ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sticky_reassigns_same_ip_after_release() {
+        let sessions = make_sessions();
+        let pk = PublicKey::try_from([7u8; 32].as_slice()).unwrap();
+        let ip1 = sessions.next_holy_ip_sticky(&pk).unwrap();
+        sessions.release_holy_ip(&ip1);
+        let ip2 = sessions.next_holy_ip_sticky(&pk).unwrap();
+        assert_eq!(ip1, ip2, "reconnect must reuse the same address");
+    }
+
+    #[test]
+    fn test_sticky_does_not_hand_out_held_ip_twice() {
+        let sessions = make_sessions();
+        let pk = PublicKey::try_from([7u8; 32].as_slice()).unwrap();
+        let ip1 = sessions.next_holy_ip_sticky(&pk).unwrap();
+        let ip2 = sessions.next_holy_ip_sticky(&pk).unwrap();
+        assert_ne!(ip1, ip2, "held address must not be handed out twice");
     }
 
     // ── release ────────────────────────────────────────────────────────────────

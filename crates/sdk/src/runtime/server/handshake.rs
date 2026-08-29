@@ -62,7 +62,7 @@ async fn complete(
     let _len = responder.read_message(noise_msg, &mut buffer)?;
 
     let (body, keys) = match sessions.next_session_id() {
-        Some(sid) => match sessions.next_holy_ip() {
+        Some(sid) => match sessions.next_holy_ip_sticky(&cred.peer_pk) {
             Some(ipaddr) => {
                 info!("[{}] session created with sid: {}", addr, sid);
                 (

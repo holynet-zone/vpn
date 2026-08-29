@@ -62,6 +62,13 @@ impl IpAddressGenerator {
         }
     }
 
+    pub fn try_take(&self, address: &IpAddr) -> bool {
+        match self.ip_to_offset(address) {
+            Some(offset) => self.borrowed.insert(offset),
+            None => false,
+        }
+    }
+
     fn offset_to_ip(&self, offset: u64) -> IpAddr {
         let addr = self.start + offset as u128;
         if self.is_v4 {
@@ -129,6 +136,17 @@ mod tests {
             generator.next(),
             Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)))
         );
+    }
+
+    #[test]
+    fn test_try_take() {
+        let g = IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 24);
+        let target = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+        assert!(g.try_take(&target));
+        assert!(!g.try_take(&target));
+        g.release(&target);
+        assert!(g.try_take(&target));
+        assert!(!g.try_take(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 5))));
     }
 
     #[test]
