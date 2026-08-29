@@ -234,6 +234,7 @@ pub(crate) enum DataClientActionRef<'p> {
     Forward(&'p [u8]),
     /// Keepalive timestamp (microseconds since client process start).
     KeepAlive(u128),
+    LeaseRequest,
 }
 
 /// Result of decrypting a DataServerBody (client receives this from server).
@@ -247,6 +248,7 @@ pub(crate) enum DataServerActionRef<'p> {
     KeepAlive(u128),
     /// Server-initiated disconnect code.
     Disconnect(u8),
+    LeaseGrant(std::net::IpAddr),
 }
 
 /// Decrypt a DataClientBody from raw ciphertext directly into `plain`.
@@ -273,6 +275,7 @@ pub(crate) fn noise_decrypt_data_client_into<'p>(
     Ok(match body {
         DataClientBodyRef::Packet(data) => DataClientActionRef::Forward(data),
         DataClientBodyRef::KeepAlive(ts) => DataClientActionRef::KeepAlive(ts),
+        DataClientBodyRef::LeaseRequest => DataClientActionRef::LeaseRequest,
     })
 }
 
@@ -294,6 +297,7 @@ pub(crate) fn noise_decrypt_data_server_into<'p>(
         DataServerBodyRef::Packet(data) => DataServerActionRef::Forward(data),
         DataServerBodyRef::KeepAlive(ts) => DataServerActionRef::KeepAlive(ts),
         DataServerBodyRef::Disconnect(code) => DataServerActionRef::Disconnect(code),
+        DataServerBodyRef::LeaseGrant(ip) => DataServerActionRef::LeaseGrant(ip),
     })
 }
 

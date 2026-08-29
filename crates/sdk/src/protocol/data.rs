@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,7 @@ pub enum DataServerBody {
     KeepAlive(u128),
     /// Contains the shutdown initiation code
     Disconnect(u8),
+    LeaseGrant(IpAddr),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -18,6 +21,7 @@ pub enum DataClientBody {
     Packet(Bytes),
     /// Contains timestamp (microseconds since process start)
     KeepAlive(u128),
+    LeaseRequest,
 }
 
 // Zero-copy borrowed views decoded from PLAIN_BUF
@@ -35,6 +39,7 @@ pub enum DataClientBody {
 pub(crate) enum DataClientBodyRef<'a> {
     Packet(&'a [u8]),
     KeepAlive(u128),
+    LeaseRequest,
 }
 
 impl<'a> DataClientBodyRef<'a> {
@@ -54,8 +59,25 @@ impl<'a> DataClientBodyRef<'a> {
                 let (ts, _) = read_u128(buf)?;
                 Some(DataClientBodyRef::KeepAlive(ts))
             }
+            2 => Some(DataClientBodyRef::LeaseRequest),
             _ => None,
         }
+    }
+}
+
+fn read_ip_addr(buf: &[u8]) -> Option<(IpAddr, &[u8])> {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    let (variant, buf) = read_u32(buf)?;
+    match variant {
+        0 => {
+            let octets: [u8; 4] = buf.get(..4)?.try_into().ok()?;
+            Some((IpAddr::V4(Ipv4Addr::from(octets)), &buf[4..]))
+        }
+        1 => {
+            let octets: [u8; 16] = buf.get(..16)?.try_into().ok()?;
+            Some((IpAddr::V6(Ipv6Addr::from(octets)), &buf[16..]))
+        }
+        _ => None,
     }
 }
 
@@ -64,6 +86,7 @@ pub(crate) enum DataServerBodyRef<'a> {
     Packet(&'a [u8]),
     KeepAlive(u128),
     Disconnect(u8),
+    LeaseGrant(IpAddr),
 }
 
 impl<'a> DataServerBodyRef<'a> {
@@ -85,6 +108,10 @@ impl<'a> DataServerBodyRef<'a> {
                 // Disconnect(u8) — u8 is always 1 byte in bincode
                 let (&code, _) = buf.split_first()?;
                 Some(DataServerBodyRef::Disconnect(code))
+            }
+            3 => {
+                let (ip, _) = read_ip_addr(buf)?;
+                Some(DataServerBodyRef::LeaseGrant(ip))
             }
             _ => None,
         }
@@ -157,6 +184,31 @@ mod tests {
             let dec = DataServerBodyRef::from_plain_buf(&enc).unwrap();
             match dec {
                 DataServerBodyRef::KeepAlive(v) => assert_eq!(v, ts),
+                _ => panic!("wrong variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_client_lease_request_roundtrip() {
+        let enc = encode_client(&DataClientBody::LeaseRequest);
+        match DataClientBodyRef::from_plain_buf(&enc).unwrap() {
+            DataClientBodyRef::LeaseRequest => {}
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_server_lease_grant_roundtrip() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        let cases = [
+            IpAddr::V4(Ipv4Addr::new(10, 8, 0, 7)),
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x42)),
+        ];
+        for ip in cases {
+            let enc = encode_server(&DataServerBody::LeaseGrant(ip));
+            match DataServerBodyRef::from_plain_buf(&enc).unwrap() {
+                DataServerBodyRef::LeaseGrant(got) => assert_eq!(got, ip),
                 _ => panic!("wrong variant"),
             }
         }

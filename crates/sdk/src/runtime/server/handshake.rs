@@ -61,24 +61,14 @@ async fn complete(
     let mut buffer = [0u8; 65536];
     let _len = responder.read_message(noise_msg, &mut buffer)?;
 
-    let (body, keys) = match sessions.next_session_id() {
-        Some(sid) => match sessions.next_holy_ip_sticky(&cred.peer_pk) {
-            Some(ipaddr) => {
-                info!("[{}] session created with sid: {}", addr, sid);
-                (
-                    HandshakeResponderBody::Complete(HandshakeResponderPayload { sid, ipaddr }),
-                    Some((sid, ipaddr)),
-                )
-            }
-            None => {
-                warn!("[{}] failed to create session: no holy ip available", addr);
-                sessions.release_session_id(&sid);
-                (
-                    HandshakeResponderBody::Disconnect(HandshakeError::ServerOverloaded),
-                    None,
-                )
-            }
-        },
+    let (body, new_sid) = match sessions.next_session_id() {
+        Some(sid) => {
+            info!("[{}] session created with sid: {}", addr, sid);
+            (
+                HandshakeResponderBody::Complete(HandshakeResponderPayload { sid }),
+                Some(sid),
+            )
+        }
         None => {
             warn!(
                 "[{}] failed to create session: no session id available",
@@ -96,13 +86,13 @@ async fn complete(
         &mut buffer,
     )?;
 
-    if let Some((sid, holy_ip)) = keys {
+    if let Some(sid) = new_sid {
         sessions.add(
             sid,
-            holy_ip,
             *addr,
             alg,
             responder.into_stateless_transport_mode()?,
+            cred.peer_pk.clone(),
         );
     }
 

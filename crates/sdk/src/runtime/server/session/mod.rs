@@ -3,7 +3,7 @@ pub mod worker;
 
 use std::collections::BTreeMap;
 use std::sync::{
-    Mutex, Mutex as StdMutex,
+    Mutex, Mutex as StdMutex, OnceLock,
     atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering},
 };
 use std::time::Duration;
@@ -34,7 +34,8 @@ pub struct Session {
     //
     pub last_seen: AtomicU64,
     pub created_at: Instant,
-    pub holy_ip: HolyIp,
+    pub holy_ip: OnceLock<HolyIp>,
+    pub peer_pk: PublicKey,
     pub enc: Alg,
     pub state: StatelessTransportState,
     /// Monotonically increasing nonce for packets sent by the server to this client.
@@ -136,6 +137,19 @@ impl Sessions {
         Some(ip)
     }
 
+    pub fn assign_holy_ip(&self, sid: &SessionId, ip: HolyIp) -> bool {
+        let Some(session) = self.map.get(sid) else {
+            self.holy_ip_gen.release(&ip);
+            return false;
+        };
+        if session.holy_ip.set(ip).is_err() {
+            self.holy_ip_gen.release(&ip);
+            return false;
+        }
+        self.holy_ip_map.insert(ip, *sid);
+        true
+    }
+
     /// Only call if the SessionId was allocated via `next_session_id` but never passed to `add`.
     pub fn release_session_id(&self, sid: &SessionId) {
         self.sid_gen.release(sid);
@@ -149,10 +163,10 @@ impl Sessions {
     pub fn add(
         &self,
         sid: SessionId,
-        ip: HolyIp,
         sock_addr: SocketAddr,
         enc: Alg,
         state: StatelessTransportState,
+        peer_pk: PublicKey,
     ) {
         let (ipv4_data, ipv6_data, is_ipv4) = match sock_addr {
             SocketAddr::V4(addr_v4) => {
@@ -183,7 +197,8 @@ impl Sessions {
             is_ipv4,
             last_seen: AtomicU64::from(sec_since_start()),
             created_at: Instant::now(),
-            holy_ip: ip,
+            holy_ip: OnceLock::new(),
+            peer_pk,
             enc,
             state,
             send_nonce: AtomicU64::new(0),
@@ -191,7 +206,6 @@ impl Sessions {
         });
 
         self.map.insert(sid, session);
-        self.holy_ip_map.insert(ip, sid);
         self.expiry_queue
             .lock()
             .unwrap()
@@ -233,7 +247,9 @@ impl Sessions {
                     // Truly expired.
                     drop(session);
                     if let Some((_, session)) = self.map.remove(&sid) {
-                        if let Some((holy_ip, _)) = self.holy_ip_map.remove(&session.holy_ip) {
+                        if let Some(ip) = session.holy_ip.get()
+                            && let Some((holy_ip, _)) = self.holy_ip_map.remove(ip)
+                        {
                             self.holy_ip_gen.release(&holy_ip);
                         }
                         self.sid_gen.release(&sid);
@@ -259,12 +275,11 @@ impl Sessions {
     }
 
     pub fn release_by_sid(&self, sid: SessionId) {
-        let holy_ip = self.map.remove(&sid).map(|(_, session)| {
-            self.holy_ip_map.remove(&session.holy_ip);
-            session.holy_ip
-        });
-        if let Some(holy_ip) = holy_ip {
-            self.holy_ip_gen.release(&holy_ip);
+        if let Some((_, session)) = self.map.remove(&sid)
+            && let Some(ip) = session.holy_ip.get()
+        {
+            self.holy_ip_map.remove(ip);
+            self.holy_ip_gen.release(ip);
         }
         self.sid_gen.release(&sid);
     }
@@ -339,8 +354,10 @@ mod tests {
         state: StatelessTransportState,
     ) -> (SessionId, HolyIp) {
         let sid = sessions.next_session_id().unwrap();
+        let pk = PublicKey::try_from([0u8; 32].as_slice()).unwrap();
+        sessions.add(sid, addr, Alg::ChaCha20Poly1305, state, pk);
         let ip = sessions.next_holy_ip().unwrap();
-        sessions.add(sid, ip, addr, Alg::ChaCha20Poly1305, state);
+        sessions.assign_holy_ip(&sid, ip);
         (sid, ip)
     }
 
@@ -354,7 +371,7 @@ mod tests {
 
         let session = sessions.get_by_sid(&sid).unwrap();
         assert_eq!(session.id, sid);
-        assert_eq!(session.holy_ip, ip);
+        assert_eq!(session.holy_ip.get(), Some(&ip));
     }
 
     #[test]

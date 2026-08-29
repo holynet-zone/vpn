@@ -2,7 +2,6 @@ use super::Alg;
 use super::session::SessionId;
 use serde::{Deserialize, Serialize};
 use snow::params::NoiseParams;
-use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -47,7 +46,6 @@ pub enum HandshakeResponderBody {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HandshakeResponderPayload {
     pub sid: SessionId,
-    pub ipaddr: IpAddr,
 }
 
 #[derive(Serialize, Deserialize)]

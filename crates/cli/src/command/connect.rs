@@ -4,11 +4,10 @@ use crate::success_err;
 use clap::Args;
 use holynet_sdk::gateway::network::tun::TunNetwork;
 use holynet_sdk::gateway::transport::udp::UdpTransport;
-use holynet_sdk::protocol::handshake::HandshakeResponderPayload;
 use holynet_sdk::runtime::client::ClientBuilder;
 use holynet_sdk::runtime::cred::Cred;
 use holynet_sdk::runtime::error::RuntimeError;
-use holynet_sdk::runtime::state::RuntimeState;
+use holynet_sdk::runtime::state::{RuntimeState, SessionInfo};
 use ipnetwork::IpNetwork;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -201,7 +200,7 @@ async fn tun_service(mut state_rx: watch::Receiver<RuntimeState>, tun: Arc<TunNe
     }
 }
 
-async fn configure_tun(tun: &TunNetwork, payload: &HandshakeResponderPayload) {
+async fn configure_tun(tun: &TunNetwork, payload: &SessionInfo) {
     let prefix = match payload.ipaddr {
         IpAddr::V4(_) => 32,
         IpAddr::V6(_) => 128,

@@ -32,6 +32,22 @@ use crate::runtime::crypto::{
 };
 use crate::time::sec_since_start;
 
+const LEASE_UNAVAILABLE: u8 = 1;
+
+pub(super) fn lease_reply(sessions: &Sessions, session: &Session, sid: SessionId) -> DataServerBody {
+    let ip = match session.holy_ip.get() {
+        Some(ip) => Some(*ip),
+        None => match sessions.next_holy_ip_sticky(&session.peer_pk) {
+            Some(ip) if sessions.assign_holy_ip(&sid, ip) => Some(ip),
+            _ => None,
+        },
+    };
+    match ip {
+        Some(ip) => DataServerBody::LeaseGrant(ip),
+        None => DataServerBody::Disconnect(LEASE_UNAVAILABLE),
+    }
+}
+
 /// Combined receive → decrypt → forward task.
 ///
 /// Reads encrypted UDP datagrams, decrypts them, and:
@@ -195,6 +211,31 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                                             }
                                         }
                                     }
+                                    Ok(DataClientActionRef::LeaseRequest) => {
+                                        if session.sock_addr() != addr {
+                                            session.set_sock_addr(addr);
+                                        }
+                                        let reply = lease_reply(&sessions, &session, sid);
+                                        let send_nonce =
+                                            session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                                            Err(e) => {
+                                                error!("[{}] lease encrypt failed: {}", addr, e)
+                                            }
+                                            Ok(encrypted) => {
+                                                let m = encode_data_server_frame(
+                                                    send_nonce,
+                                                    &encrypted,
+                                                    &mut encode_buf,
+                                                );
+                                                if let Err(e) =
+                                                    transport.send_to(&encode_buf[..m], &addr).await
+                                                {
+                                                    error!("[{}] lease send failed: {}", addr, e);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -228,4 +269,35 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
         }
     }
     debug!("recv_decrypt_forward stopped");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::PublicKey;
+    use crate::protocol::Alg;
+    use crate::runtime::crypto::make_noise_pair_for_test;
+
+    #[test]
+    fn lease_reply_assigns_and_is_idempotent() {
+        let sessions = Sessions::new(&"10.0.0.0".parse().unwrap(), 24);
+        let (_client, server_state) = make_noise_pair_for_test();
+        let addr = "127.0.0.1:1".parse().unwrap();
+        let sid = sessions.next_session_id().unwrap();
+        let pk = PublicKey::try_from([9u8; 32].as_slice()).unwrap();
+        sessions.add(sid, addr, Alg::ChaCha20Poly1305, server_state, pk);
+
+        let session = sessions.get_by_sid(&sid).unwrap();
+        let ip = match lease_reply(&sessions, &session, sid) {
+            DataServerBody::LeaseGrant(ip) => ip,
+            _ => panic!("expected lease grant"),
+        };
+        assert!(sessions.is_holy_ip_allocated(&ip));
+        assert_eq!(session.holy_ip.get(), Some(&ip));
+
+        match lease_reply(&sessions, &session, sid) {
+            DataServerBody::LeaseGrant(ip2) => assert_eq!(ip2, ip),
+            _ => panic!("expected lease grant"),
+        }
+    }
 }

@@ -405,6 +405,25 @@ async fn decrypt_one<T: Transport>(
                             }
                         }
                     }
+                    Ok(DataClientActionRef::LeaseRequest) => {
+                        if session.sock_addr() != slot.addr {
+                            session.set_sock_addr(slot.addr);
+                        }
+                        let reply = super::recv::lease_reply(sessions, &session, sid);
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                            Err(e) => error!("[{}] lease encrypt failed: {}", slot.addr, e),
+                            Ok(encrypted) => {
+                                let m =
+                                    encode_data_server_frame(send_nonce, &encrypted, encode_buf);
+                                if let Err(e) =
+                                    transport.send_to(&encode_buf[..m], &slot.addr).await
+                                {
+                                    error!("[{}] lease send failed: {}", slot.addr, e);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -578,8 +597,10 @@ mod tests {
         let sessions = Sessions::new(&"10.0.0.0".parse().unwrap(), 8);
         let addr: SocketAddr = "127.0.0.1:10001".parse().unwrap();
         let sid = sessions.next_session_id().unwrap();
+        let pk = crate::crypto::PublicKey::try_from([0u8; 32].as_slice()).unwrap();
+        sessions.add(sid, addr, Alg::ChaCha20Poly1305, server_state, pk);
         let ip = sessions.next_holy_ip().unwrap();
-        sessions.add(sid, ip, addr, Alg::ChaCha20Poly1305, server_state);
+        sessions.assign_holy_ip(&sid, ip);
 
         let (client_tp, server_tp) = MockTransport::create_pair();
         let server_tp = Arc::new(server_tp);
