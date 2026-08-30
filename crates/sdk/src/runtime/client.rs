@@ -13,16 +13,35 @@ use tracing::{debug, warn};
 
 use crate::{
     gateway::{network::Network, transport::ClientTransport},
-    protocol::Alg,
+    protocol::{Alg, NodeEntry},
     runtime::{
         client::{
             keepalive::keepalive_sender, network::encrypt_forward, recv::recv_decrypt_forward,
         },
         cred::Cred,
         error::{BuildError, RuntimeError},
-        state::RuntimeState,
+        handshake::{handshake_step, node_list_step},
+        state::{ClientSession, RuntimeState},
     },
 };
+
+/// One-shot control query: connect, authenticate, and fetch the node registry,
+/// then drop the session. Used by management tooling that only needs the list of
+/// nodes without standing up a data tunnel.
+pub async fn fetch_node_list<T: ClientTransport>(
+    transport: Arc<T>,
+    cred: &Cred,
+    alg: &Alg,
+    timeout: Duration,
+) -> Result<Vec<NodeEntry>, RuntimeError> {
+    transport
+        .connect()
+        .await
+        .map_err(|e| RuntimeError::IO(format!("connect: {}", e)))?;
+    let (payload, transport_state) = handshake_step(transport.clone(), cred, alg, timeout).await?;
+    let session = ClientSession::new(transport_state);
+    node_list_step(transport, &session, payload.sid, timeout).await
+}
 
 pub(super) const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
 pub(super) const MAX_PACKET_SIZE: usize = 65536;

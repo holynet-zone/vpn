@@ -15,6 +15,9 @@ pub struct GeneralConfig {
     pub port: u16,
     pub secret_key: SecretKey,
     pub storage: PathBuf,
+    /// Human label for this node in the multi-node registry (continent / site).
+    #[serde(default)]
+    pub label: String,
 }
 
 fn default_offload() -> bool {
@@ -115,6 +118,7 @@ impl Default for GeneralConfig {
             port: 26256,
             secret_key: SecretKey::generate_x25519(),
             storage: PathBuf::from("database"),
+            label: String::new(),
         }
     }
 }

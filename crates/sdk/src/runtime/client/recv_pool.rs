@@ -373,6 +373,9 @@ fn decrypt_one(
                 Ok(DataServerActionRef::LeaseGrant(_)) => {
                     warn!("unexpected lease grant in steady state");
                 }
+                Ok(DataServerActionRef::NodeList(_)) => {
+                    warn!("unexpected node list in steady state");
+                }
             }
         }
 

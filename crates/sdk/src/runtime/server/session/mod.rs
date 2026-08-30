@@ -19,7 +19,7 @@ use tracing::debug;
 
 use crate::crypto::PublicKey;
 use crate::identity::AccountPublicKey;
-use crate::protocol::{Alg, SessionId};
+use crate::protocol::{Alg, NodeEntry, SessionId};
 use crate::runtime::replay::ReplayWindow;
 use crate::time::sec_since_start;
 
@@ -103,6 +103,9 @@ pub struct Sessions {
     /// Hard pins: `(account, device_index) -> IP`. Reserved offsets are held out
     /// of the dynamic pool; the owner claims its exact address on lease.
     reservations: Arc<DashMap<(AccountPublicKey, u32), HolyIp>>,
+    /// Multi-node registry advertised to clients on `NodeListRequest`. Static for
+    /// now (this node + configured peers); gossip/anti-entropy will feed it later.
+    nodes: Arc<Vec<NodeEntry>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -122,6 +125,15 @@ impl Sessions {
         prefix: u8,
         reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
     ) -> Self {
+        Self::with_config(network, prefix, reservations, Vec::new())
+    }
+
+    pub fn with_config(
+        network: &IpAddr,
+        prefix: u8,
+        reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
+        nodes: Vec<NodeEntry>,
+    ) -> Self {
         let holy_ip_gen = IpAddressGenerator::new(increment_ip(*network), prefix);
         let res_map: DashMap<(AccountPublicKey, u32), HolyIp> = DashMap::new();
         for (key, ip) in reservations {
@@ -138,8 +150,14 @@ impl Sessions {
             holy_ip_map: Arc::new(DashMap::new()),
             sticky: Arc::new(DashMap::new()),
             reservations: Arc::new(res_map),
+            nodes: Arc::new(nodes),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
+    }
+
+    /// Snapshot of the node registry for a `NodeList` control reply.
+    pub fn node_list(&self) -> Vec<NodeEntry> {
+        self.nodes.as_ref().clone()
     }
 
     pub fn next_session_id(&self) -> Option<SessionId> {
@@ -461,6 +479,30 @@ mod tests {
         let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
         let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
         assert_ne!(ip1, ip2, "held address must not be handed out twice");
+    }
+
+    #[test]
+    fn test_node_list_snapshot() {
+        use crate::crypto::SecretKey;
+        let node = NodeEntry {
+            node_pk: PublicKey::from_secret(&SecretKey::generate_x25519()),
+            endpoint: "203.0.113.1:5000".parse().unwrap(),
+            subnet: "10.0.0.0".parse().unwrap(),
+            prefix: 24,
+            label: "ru".to_string(),
+        };
+        let sessions = Sessions::with_config(
+            &"10.0.0.0".parse().unwrap(),
+            24,
+            Vec::new(),
+            vec![node.clone()],
+        );
+        assert_eq!(sessions.node_list(), vec![node]);
+        assert!(
+            Sessions::new(&"10.0.0.0".parse().unwrap(), 24)
+                .node_list()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -28,6 +28,7 @@ async fn main() {
 
     match opt.cmd {
         Commands::Connect(cmd) => cmd.exec().await,
+        Commands::Nodes(cmd) => cmd.exec().await,
         Commands::Server(server_cmd) => {
             let config = match server_cmd.config.exists() {
                 true => match config::Config::load(&server_cmd.config) {

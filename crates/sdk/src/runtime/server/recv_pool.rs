@@ -424,6 +424,22 @@ async fn decrypt_one<T: Transport>(
                             }
                         }
                     }
+                    Ok(DataClientActionRef::NodeListRequest) => {
+                        let reply = DataServerBody::NodeList(sessions.node_list());
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                            Err(e) => error!("[{}] node-list encrypt failed: {}", slot.addr, e),
+                            Ok(encrypted) => {
+                                let m =
+                                    encode_data_server_frame(send_nonce, &encrypted, encode_buf);
+                                if let Err(e) =
+                                    transport.send_to(&encode_buf[..m], &slot.addr).await
+                                {
+                                    error!("[{}] node-list send failed: {}", slot.addr, e);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

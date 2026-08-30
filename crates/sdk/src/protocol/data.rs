@@ -3,6 +3,7 @@ use std::net::IpAddr;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
+use super::NodeEntry;
 use super::varint::{read_u32, read_u128, read_usize};
 
 /// Bodies encrypted inside a Noise transport message.
@@ -14,6 +15,7 @@ pub enum DataServerBody {
     /// Contains the shutdown initiation code
     Disconnect(u8),
     LeaseGrant(IpAddr),
+    NodeList(Vec<NodeEntry>),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -22,6 +24,7 @@ pub enum DataClientBody {
     /// Contains timestamp (microseconds since process start)
     KeepAlive(u128),
     LeaseRequest,
+    NodeListRequest,
 }
 
 // Zero-copy borrowed views decoded from PLAIN_BUF
@@ -40,6 +43,7 @@ pub(crate) enum DataClientBodyRef<'a> {
     Packet(&'a [u8]),
     KeepAlive(u128),
     LeaseRequest,
+    NodeListRequest,
 }
 
 impl<'a> DataClientBodyRef<'a> {
@@ -60,6 +64,7 @@ impl<'a> DataClientBodyRef<'a> {
                 Some(DataClientBodyRef::KeepAlive(ts))
             }
             2 => Some(DataClientBodyRef::LeaseRequest),
+            3 => Some(DataClientBodyRef::NodeListRequest),
             _ => None,
         }
     }
@@ -87,6 +92,7 @@ pub(crate) enum DataServerBodyRef<'a> {
     KeepAlive(u128),
     Disconnect(u8),
     LeaseGrant(IpAddr),
+    NodeList(Vec<NodeEntry>),
 }
 
 impl<'a> DataServerBodyRef<'a> {
@@ -112,6 +118,13 @@ impl<'a> DataServerBodyRef<'a> {
             3 => {
                 let (ip, _) = read_ip_addr(buf)?;
                 Some(DataServerBodyRef::LeaseGrant(ip))
+            }
+            4 => {
+                // NodeList(Vec<NodeEntry>) is a rare control message; decode it
+                // with full bincode (not the zero-copy path) since it owns data.
+                let (nodes, _): (Vec<NodeEntry>, _) =
+                    bincode::serde::decode_from_slice(buf, bincode::config::standard()).ok()?;
+                Some(DataServerBodyRef::NodeList(nodes))
             }
             _ => None,
         }
@@ -209,6 +222,41 @@ mod tests {
             let enc = encode_server(&DataServerBody::LeaseGrant(ip));
             match DataServerBodyRef::from_plain_buf(&enc).unwrap() {
                 DataServerBodyRef::LeaseGrant(got) => assert_eq!(got, ip),
+                _ => panic!("wrong variant"),
+            }
+        }
+    }
+
+    fn sample_node(label: &str) -> NodeEntry {
+        use crate::crypto::{PublicKey, SecretKey};
+        NodeEntry {
+            node_pk: PublicKey::from_secret(&SecretKey::generate_x25519()),
+            endpoint: "203.0.113.7:51820".parse().unwrap(),
+            subnet: "10.0.64.0".parse().unwrap(),
+            prefix: 18,
+            label: label.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_client_node_list_request_roundtrip() {
+        let enc = encode_client(&DataClientBody::NodeListRequest);
+        match DataClientBodyRef::from_plain_buf(&enc).unwrap() {
+            DataClientBodyRef::NodeListRequest => {}
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_server_node_list_roundtrip() {
+        for nodes in [
+            vec![],
+            vec![sample_node("ru")],
+            vec![sample_node("ru"), sample_node("us")],
+        ] {
+            let enc = encode_server(&DataServerBody::NodeList(nodes.clone()));
+            match DataServerBodyRef::from_plain_buf(&enc).unwrap() {
+                DataServerBodyRef::NodeList(got) => assert_eq!(got, nodes),
                 _ => panic!("wrong variant"),
             }
         }

@@ -134,6 +134,7 @@ impl StartCmd {
             .secret_key(config.general.secret_key)
             .known_accounts(known_accounts)
             .reservations(reservations)
+            .advertise(addr, config.general.label.clone())
             .ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)

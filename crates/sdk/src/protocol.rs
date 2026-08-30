@@ -1,5 +1,6 @@
 mod data;
 pub mod handshake;
+mod node;
 mod primitives;
 mod session;
 pub(crate) mod varint;
@@ -9,6 +10,7 @@ use bytes::Bytes;
 pub use data::{DataClientBody, DataServerBody};
 pub(crate) use data::{DataClientBodyRef, DataServerBodyRef};
 pub use handshake::{HandshakeError, HandshakeResponderBody, HandshakeResponderPayload};
+pub use node::NodeEntry;
 use primitives::VecU16;
 pub use session::{Alg, SessionId};
 use varint::{read_u16, read_u32};

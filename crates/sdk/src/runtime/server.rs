@@ -4,7 +4,11 @@ mod recv;
 mod recv_pool;
 pub mod session;
 
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use dashmap::DashMap;
 use tokio::sync::watch;
@@ -13,10 +17,11 @@ use tracing::info;
 
 use self::session::Sessions;
 use self::{handshake::handshake_executor, network::encrypt_forward, recv::recv_decrypt_forward};
-use crate::crypto::SecretKey;
+use crate::crypto::{PublicKey, SecretKey};
 use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
 use crate::identity::AccountPublicKey;
+use crate::protocol::NodeEntry;
 use crate::runtime::error::{BuildError, RuntimeError};
 
 pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
@@ -25,6 +30,9 @@ pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     sk: Option<SecretKey>,
     known_accounts: Arc<DashMap<AccountPublicKey, SecretKey>>,
     reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
+    advertise_endpoint: Option<SocketAddr>,
+    node_label: String,
+    peer_nodes: Vec<NodeEntry>,
     ip: Option<IpAddr>,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -41,6 +49,9 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             sk: None,
             known_accounts: Arc::new(DashMap::new()),
             reservations: Vec::new(),
+            advertise_endpoint: None,
+            node_label: String::new(),
+            peer_nodes: Vec::new(),
             ip: None,
             prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
@@ -64,6 +75,21 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
     /// are held out of the dynamic pool and only ever assigned to their owner.
     pub fn reservations(mut self, reservations: Vec<((AccountPublicKey, u32), IpAddr)>) -> Self {
         self.reservations = reservations;
+        self
+    }
+
+    /// Advertise this node in the registry it hands to clients: the reachable
+    /// endpoint clients dial and a human label. The node's own subnet and pubkey
+    /// are filled from `ip`/`secret_key`.
+    pub fn advertise(mut self, endpoint: SocketAddr, label: impl Into<String>) -> Self {
+        self.advertise_endpoint = Some(endpoint);
+        self.node_label = label.into();
+        self
+    }
+
+    /// Statically-known peer nodes included in the registry alongside this node.
+    pub fn peer_nodes(mut self, nodes: Vec<NodeEntry>) -> Self {
+        self.peer_nodes = nodes;
         self
     }
 
@@ -116,6 +142,9 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
                 .ok_or(BuildError::MissingRequiredField("secret_key"))?,
             known_accounts: self.known_accounts,
             reservations: self.reservations,
+            advertise_endpoint: self.advertise_endpoint,
+            node_label: self.node_label,
+            peer_nodes: self.peer_nodes,
             ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
             prefix: self.prefix,
             session_timeout: self.session_timeout,
@@ -132,6 +161,9 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
     sk: SecretKey,
     known_accounts: Arc<DashMap<AccountPublicKey, SecretKey>>,
     reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
+    advertise_endpoint: Option<SocketAddr>,
+    node_label: String,
+    peer_nodes: Vec<NodeEntry>,
     ip: IpAddr,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -142,7 +174,18 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
 
 impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
-        let sessions = Sessions::with_reservations(&self.ip, self.prefix, self.reservations);
+        let mut nodes = Vec::new();
+        if let Some(endpoint) = self.advertise_endpoint {
+            nodes.push(NodeEntry {
+                node_pk: PublicKey::from_secret(&self.sk),
+                endpoint,
+                subnet: self.ip,
+                prefix: self.prefix,
+                label: self.node_label.clone(),
+            });
+        }
+        nodes.extend(self.peer_nodes.iter().cloned());
+        let sessions = Sessions::with_config(&self.ip, self.prefix, self.reservations, nodes);
         let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 
         let mut set: JoinSet<()> = JoinSet::new();

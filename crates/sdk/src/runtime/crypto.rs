@@ -23,7 +23,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use snow::StatelessTransportState;
 
-use crate::protocol::{DataClientBodyRef, DataServerBodyRef, EncryptedData};
+use crate::protocol::{DataClientBodyRef, DataServerBodyRef, EncryptedData, NodeEntry};
 
 thread_local! {
     /// Intermediate plaintext buffer: used for bincode encode (encrypt) or
@@ -235,6 +235,7 @@ pub(crate) enum DataClientActionRef<'p> {
     /// Keepalive timestamp (microseconds since client process start).
     KeepAlive(u128),
     LeaseRequest,
+    NodeListRequest,
 }
 
 /// Result of decrypting a DataServerBody (client receives this from server).
@@ -249,6 +250,7 @@ pub(crate) enum DataServerActionRef<'p> {
     /// Server-initiated disconnect code.
     Disconnect(u8),
     LeaseGrant(std::net::IpAddr),
+    NodeList(Vec<NodeEntry>),
 }
 
 /// Decrypt a DataClientBody from raw ciphertext directly into `plain`.
@@ -276,6 +278,7 @@ pub(crate) fn noise_decrypt_data_client_into<'p>(
         DataClientBodyRef::Packet(data) => DataClientActionRef::Forward(data),
         DataClientBodyRef::KeepAlive(ts) => DataClientActionRef::KeepAlive(ts),
         DataClientBodyRef::LeaseRequest => DataClientActionRef::LeaseRequest,
+        DataClientBodyRef::NodeListRequest => DataClientActionRef::NodeListRequest,
     })
 }
 
@@ -298,6 +301,7 @@ pub(crate) fn noise_decrypt_data_server_into<'p>(
         DataServerBodyRef::KeepAlive(ts) => DataServerActionRef::KeepAlive(ts),
         DataServerBodyRef::Disconnect(code) => DataServerActionRef::Disconnect(code),
         DataServerBodyRef::LeaseGrant(ip) => DataServerActionRef::LeaseGrant(ip),
+        DataServerBodyRef::NodeList(nodes) => DataServerActionRef::NodeList(nodes),
     })
 }
 

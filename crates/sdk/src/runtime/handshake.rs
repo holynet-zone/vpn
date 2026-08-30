@@ -10,7 +10,7 @@ use crate::gateway::transport::ClientTransport;
 use crate::protocol::handshake::{alg_hint_byte, params_from_alg};
 use crate::protocol::{
     Alg, DataClientBody, EncryptedHandshake, HandshakeError, HandshakeResponderBody,
-    HandshakeResponderPayload, Packet, PacketRef, SessionId,
+    HandshakeResponderPayload, NodeEntry, Packet, PacketRef, SessionId,
 };
 use crate::runtime::cred::Cred;
 use crate::runtime::crypto::{
@@ -136,6 +136,46 @@ pub async fn lease_step<T: ClientTransport>(
                         ),
                         Ok(_) => continue,
                         Err(e) => { warn!("decrypt lease response: {}", e); continue; }
+                    }
+                }
+                _ => continue,
+            }
+        }} => res,
+    }
+}
+
+/// Request the multi-node registry over the control channel. Sends a
+/// `NodeListRequest` and awaits the `NodeList` reply. Usable any time after the
+/// session is established.
+pub async fn node_list_step<T: ClientTransport>(
+    transport: Arc<T>,
+    session: &ClientSession,
+    sid: SessionId,
+    timeout: Duration,
+) -> Result<Vec<NodeEntry>, RuntimeError> {
+    let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+    let encrypted = noise_encrypt(&DataClientBody::NodeListRequest, &session.noise, nonce)
+        .map_err(|e| RuntimeError::Handshake(format!("node-list encrypt: {}", e)))?;
+    let mut out = [0u8; 128];
+    let n = encode_data_client_frame(sid, nonce, &encrypted, &mut out);
+    transport.send(&out[..n]).await?;
+
+    let mut buffer = [0u8; 65536];
+    let mut plain = [0u8; 65536];
+    select! {
+        _ = tokio::time::sleep(timeout) => Err(RuntimeError::Handshake(
+            format!("node-list timeout ({:?})", timeout)
+        )),
+        res = async { loop {
+            let size = transport.recv(&mut buffer).await.map_err(
+                |err| RuntimeError::IO(format!("receive node-list: {}", err))
+            )?;
+            match PacketRef::from_bytes(&buffer[..size]) {
+                Some(PacketRef::DataServer { nonce, ciphertext }) => {
+                    match noise_decrypt_data_server_into(ciphertext, &session.noise, &mut plain, nonce) {
+                        Ok(DataServerActionRef::NodeList(nodes)) => break Ok(nodes),
+                        Ok(_) => continue,
+                        Err(e) => { warn!("decrypt node-list response: {}", e); continue; }
                     }
                 }
                 _ => continue,
