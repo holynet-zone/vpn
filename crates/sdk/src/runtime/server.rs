@@ -13,16 +13,17 @@ use tracing::info;
 
 use self::session::Sessions;
 use self::{handshake::handshake_executor, network::encrypt_forward, recv::recv_decrypt_forward};
-use crate::crypto::{PublicKey, SecretKey};
+use crate::crypto::SecretKey;
 use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
+use crate::identity::AccountPublicKey;
 use crate::runtime::error::{BuildError, RuntimeError};
 
 pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     transports: Vec<Arc<T>>,
     network: Arc<N>,
     sk: Option<SecretKey>,
-    known_clients: Arc<DashMap<PublicKey, SecretKey>>,
+    known_accounts: Arc<DashMap<AccountPublicKey, SecretKey>>,
     ip: Option<IpAddr>,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -37,7 +38,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             transports: transports.into_iter().map(Arc::new).collect(),
             network: Arc::new(network),
             sk: None,
-            known_clients: Arc::new(DashMap::new()),
+            known_accounts: Arc::new(DashMap::new()),
             ip: None,
             prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
@@ -52,8 +53,8 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
         self
     }
 
-    pub fn known_clients(mut self, clients: Vec<(PublicKey, SecretKey)>) -> Self {
-        self.known_clients = Arc::new(DashMap::from_iter(clients));
+    pub fn known_accounts(mut self, accounts: Vec<(AccountPublicKey, SecretKey)>) -> Self {
+        self.known_accounts = Arc::new(DashMap::from_iter(accounts));
         self
     }
 
@@ -104,7 +105,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             sk: self
                 .sk
                 .ok_or(BuildError::MissingRequiredField("secret_key"))?,
-            known_clients: self.known_clients,
+            known_accounts: self.known_accounts,
             ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
             prefix: self.prefix,
             session_timeout: self.session_timeout,
@@ -119,7 +120,7 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
     transports: Vec<Arc<T>>,
     network: Arc<N>,
     sk: SecretKey,
-    known_clients: Arc<DashMap<PublicKey, SecretKey>>,
+    known_accounts: Arc<DashMap<AccountPublicKey, SecretKey>>,
     ip: IpAddr,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -178,7 +179,7 @@ impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
                 stop_rx.clone(),
                 handshake_rx,
                 transport,
-                self.known_clients.clone(),
+                self.known_accounts.clone(),
                 sessions.clone(),
                 self.sk.clone(),
             ));

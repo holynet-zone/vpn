@@ -34,10 +34,14 @@ use crate::time::sec_since_start;
 
 const LEASE_UNAVAILABLE: u8 = 1;
 
-pub(super) fn lease_reply(sessions: &Sessions, session: &Session, sid: SessionId) -> DataServerBody {
+pub(super) fn lease_reply(
+    sessions: &Sessions,
+    session: &Session,
+    sid: SessionId,
+) -> DataServerBody {
     let ip = match session.holy_ip.get() {
         Some(ip) => Some(*ip),
-        None => match sessions.next_holy_ip_sticky(&session.peer_pk) {
+        None => match sessions.next_holy_ip_sticky(&session.account_pub, session.device_index) {
             Some(ip) if sessions.assign_holy_ip(&sid, ip) => Some(ip),
             _ => None,
         },
@@ -275,6 +279,7 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
 mod tests {
     use super::*;
     use crate::crypto::PublicKey;
+    use crate::identity::AccountKey;
     use crate::protocol::Alg;
     use crate::runtime::crypto::make_noise_pair_for_test;
 
@@ -285,7 +290,16 @@ mod tests {
         let addr = "127.0.0.1:1".parse().unwrap();
         let sid = sessions.next_session_id().unwrap();
         let pk = PublicKey::try_from([9u8; 32].as_slice()).unwrap();
-        sessions.add(sid, addr, Alg::ChaCha20Poly1305, server_state, pk);
+        let account = AccountKey::generate().public();
+        sessions.add(
+            sid,
+            addr,
+            Alg::ChaCha20Poly1305,
+            server_state,
+            pk,
+            account,
+            0,
+        );
 
         let session = sessions.get_by_sid(&sid).unwrap();
         let ip = match lease_reply(&sessions, &session, sid) {

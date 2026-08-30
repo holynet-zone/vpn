@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 use super::session::Sessions;
 use crate::crypto::{PublicKey, SecretKey};
 use crate::gateway::transport::Transport;
+use crate::identity::{AccountPublicKey, Enrollment};
 use crate::protocol::handshake::{alg_from_hint_byte, params_from_alg};
 use crate::protocol::{
     Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
@@ -17,10 +18,21 @@ use crate::protocol::{
 };
 use crate::runtime::cred::ServerCredential;
 
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Reads the first handshake message to recover the device static key, the
+/// negotiated algorithm, and the encrypted metadata payload (the device
+/// enrollment). The psk is not mixed into the first IKpsk2 message, so this
+/// read succeeds without knowing the account's psk.
 fn decode_handshake_params(
     handshake: &EncryptedHandshake,
     sk: &SecretKey,
-) -> anyhow::Result<(PublicKey, Alg)> {
+) -> anyhow::Result<(PublicKey, Alg, Enrollment)> {
     let (hint, noise_msg) = handshake
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("empty handshake"))?;
@@ -31,16 +43,37 @@ fn decode_handshake_params(
     let mut responder = Builder::new(params_from_alg(&alg).clone())
         .local_private_key(sk.as_slice())?
         .build_responder()?;
-    responder.read_message(noise_msg, &mut buffer)?;
+    let len = responder.read_message(noise_msg, &mut buffer)?;
+    let enrollment = Enrollment::from_bytes(&buffer[..len])?;
 
     match responder
         .get_remote_static()
         .map(|bytes: &[u8]| PublicKey::try_from(bytes))
     {
-        Some(Ok(key)) => Ok((key, alg)),
+        Some(Ok(key)) => Ok((key, alg, enrollment)),
         Some(Err(e)) => Err(anyhow::anyhow!("invalid remote static key: {}", e)),
         None => Err(anyhow::anyhow!("invalid handshake: missing remote static")),
     }
+}
+
+/// Validate a device enrollment against the connecting static key and the
+/// account registry. Returns the account the device belongs to.
+fn authorize(
+    enrollment: &Enrollment,
+    device_pk: &PublicKey,
+    known_accounts: &DashMap<AccountPublicKey, SecretKey>,
+) -> anyhow::Result<SecretKey> {
+    if &enrollment.device != device_pk {
+        anyhow::bail!("enrollment device key does not match handshake static key");
+    }
+    enrollment.verify()?;
+    if enrollment.is_expired(now_unix()) {
+        anyhow::bail!("enrollment expired");
+    }
+    known_accounts
+        .get(&enrollment.account)
+        .map(|psk| psk.clone())
+        .ok_or_else(|| anyhow::anyhow!("unknown account {}", enrollment.account))
 }
 
 /// `noise_msg` must be the handshake payload with the leading algorithm-hint
@@ -51,6 +84,8 @@ async fn complete(
     alg: Alg,
     addr: &SocketAddr,
     sessions: &Sessions,
+    account: AccountPublicKey,
+    device_index: u32,
 ) -> anyhow::Result<EncryptedHandshake> {
     let mut responder = Builder::new(params_from_alg(&alg).clone())
         .local_private_key(cred.sk.as_slice())?
@@ -93,6 +128,8 @@ async fn complete(
             alg,
             responder.into_stateless_transport_mode()?,
             cred.peer_pk.clone(),
+            account,
+            device_index,
         );
     }
 
@@ -103,7 +140,7 @@ pub(super) async fn handshake_executor<T: Transport>(
     mut stop: watch::Receiver<bool>,
     mut queue: mpsc::Receiver<(EncryptedHandshake, SocketAddr)>,
     transport: Arc<T>,
-    known_clients: Arc<DashMap<PublicKey, SecretKey>>,
+    known_accounts: Arc<DashMap<AccountPublicKey, SecretKey>>,
     sessions: Sessions,
     sk: SecretKey,
 ) {
@@ -116,14 +153,16 @@ pub(super) async fn handshake_executor<T: Transport>(
             _ = stop.changed() => break,
             data = queue.recv() => match data {
                 Some((handshake, addr)) => match decode_handshake_params(&handshake, &sk) {
-                    Ok((peer_pk, alg)) => match known_clients.get(&peer_pk) {
-                        Some(psk) => {
+                    Ok((peer_pk, alg, enrollment)) => match authorize(&enrollment, &peer_pk, &known_accounts) {
+                        Ok(psk) => {
+                            let account = enrollment.account.clone();
+                            let device_index = enrollment.device_index;
                             let cred = ServerCredential {
                                 sk: sk.clone(),
-                                psk: psk.clone(),
+                                psk,
                                 peer_pk,
                             };
-                            match complete(&handshake[1..], &cred, alg, &addr, &sessions).await {
+                            match complete(&handshake[1..], &cred, alg, &addr, &sessions, account, device_index).await {
                                 Ok(response) => {
                                     let pkt = Packet::HandshakeResponder(response);
                                     match bincode::encode_into_slice(
@@ -141,8 +180,8 @@ pub(super) async fn handshake_executor<T: Transport>(
                                 Err(err) => warn!("[{}] failed to complete handshake: {}", addr, err),
                             }
                         }
-                        None => {
-                            warn!("[{}] received handshake from unknown client: {}", addr, peer_pk);
+                        Err(e) => {
+                            warn!("[{}] rejected handshake: {}", addr, e);
                         }
                     },
                     Err(e) => warn!("[{}] failed to decode handshake params: {}", addr, e),
@@ -153,5 +192,73 @@ pub(super) async fn handshake_executor<T: Transport>(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::SecretKey;
+    use crate::identity::AccountKey;
+
+    fn device_pair() -> (SecretKey, PublicKey) {
+        let sk = SecretKey::generate_x25519();
+        let pk = PublicKey::from_secret(&sk);
+        (sk, pk)
+    }
+
+    fn registry(account: &AccountKey, psk: SecretKey) -> DashMap<AccountPublicKey, SecretKey> {
+        let map = DashMap::new();
+        map.insert(account.public(), psk);
+        map
+    }
+
+    #[test]
+    fn authorize_accepts_valid_enrollment() {
+        let account = AccountKey::generate();
+        let (_dsk, dpk) = device_pair();
+        let psk = SecretKey::generate_x25519();
+        let cert = account.issue(&dpk, 0, 0, 0);
+        let map = registry(&account, psk.clone());
+        let got = authorize(&cert, &dpk, &map).expect("valid enrollment authorized");
+        assert_eq!(got.as_bytes(), psk.as_bytes());
+    }
+
+    #[test]
+    fn authorize_rejects_device_mismatch() {
+        let account = AccountKey::generate();
+        let (_dsk, dpk) = device_pair();
+        let (_osk, other) = device_pair();
+        let cert = account.issue(&dpk, 0, 0, 0);
+        let map = registry(&account, SecretKey::generate_x25519());
+        assert!(authorize(&cert, &other, &map).is_err());
+    }
+
+    #[test]
+    fn authorize_rejects_unknown_account() {
+        let account = AccountKey::generate();
+        let (_dsk, dpk) = device_pair();
+        let cert = account.issue(&dpk, 0, 0, 0);
+        let empty = DashMap::new();
+        assert!(authorize(&cert, &dpk, &empty).is_err());
+    }
+
+    #[test]
+    fn authorize_rejects_tampered_enrollment() {
+        let account = AccountKey::generate();
+        let (_dsk, dpk) = device_pair();
+        let mut cert = account.issue(&dpk, 0, 0, 0);
+        cert.device_index = 9;
+        let map = registry(&account, SecretKey::generate_x25519());
+        assert!(authorize(&cert, &dpk, &map).is_err());
+    }
+
+    #[test]
+    fn authorize_rejects_expired_enrollment() {
+        let account = AccountKey::generate();
+        let (_dsk, dpk) = device_pair();
+        let cert = account.issue(&dpk, 0, 0, 1);
+        let map = registry(&account, SecretKey::generate_x25519());
+        assert!(authorize(&cert, &dpk, &map).is_err());
     }
 }

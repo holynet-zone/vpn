@@ -1,13 +1,15 @@
 use chrono::{DateTime, Utc};
 use fjall::{Database, Keyspace, KeyspaceCreateOptions};
-use holynet_sdk::crypto::{PublicKey, SecretKey};
+use holynet_sdk::crypto::SecretKey;
+use holynet_sdk::identity::AccountPublicKey;
 use serde::{Deserialize, Serialize};
 use tokio::task;
 
 #[derive(Serialize, Deserialize)]
 pub struct Client {
+    pub account_pub: AccountPublicKey,
     pub psk: SecretKey,
-    pub peer_pk: PublicKey,
+    pub device_index: u32,
     pub created_at: DateTime<Utc>,
 }
 
@@ -22,9 +24,9 @@ impl Clients {
         Ok(Self { db: items })
     }
 
-    pub async fn get(&self, pk: &PublicKey) -> Option<Client> {
+    pub async fn get(&self, account: &AccountPublicKey) -> Option<Client> {
         let db = self.db.clone();
-        let key = *pk.as_bytes();
+        let key = *account.as_bytes();
         task::spawn_blocking(move || {
             let bytes = db.get(key.as_slice()).expect("get client from db")?;
             match bincode::serde::decode_from_slice(&bytes, bincode::config::standard()) {
@@ -55,7 +57,7 @@ impl Clients {
 
     pub async fn save(&self, client: Client) {
         let db = self.db.clone();
-        let key = *client.peer_pk.as_bytes();
+        let key = *client.account_pub.as_bytes();
         let data = bincode::serde::encode_to_vec(&client, bincode::config::standard())
             .expect("serialize client");
         task::spawn_blocking(move || {
@@ -65,9 +67,9 @@ impl Clients {
         .unwrap()
     }
 
-    pub async fn delete(&self, pk: &PublicKey) -> anyhow::Result<()> {
+    pub async fn delete(&self, account: &AccountPublicKey) -> anyhow::Result<()> {
         let db = self.db.clone();
-        let key = *pk.as_bytes();
+        let key = *account.as_bytes();
         task::spawn_blocking(move || db.remove(key.as_slice()).map_err(anyhow::Error::from)).await?
     }
 }

@@ -144,6 +144,7 @@ impl ConnectCmd {
             sk: config.credentials.private_key,
             psk: config.credentials.pre_shared_key,
             spk: config.credentials.server_public_key,
+            enrollment: config.credentials.enrollment,
         };
 
         let tun_arc = Arc::new(tun.clone());

@@ -27,7 +27,7 @@ fn initial(alg: &Alg, cred: &Cred) -> Result<(EncryptedHandshake, HandshakeState
         .build_initiator()?;
 
     let mut buffer = [0u8; 65536];
-    let len = initiator.write_message(&[], &mut buffer)?;
+    let len = initiator.write_message(&cred.enrollment.to_bytes(), &mut buffer)?;
     // Prepend a 1-byte algorithm hint so the server can select the correct
     // Noise params on first read without a decrypt-then-retry heuristic.
     let mut msg = Vec::with_capacity(1 + len);

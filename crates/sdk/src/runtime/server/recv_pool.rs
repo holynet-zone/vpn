@@ -598,7 +598,16 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:10001".parse().unwrap();
         let sid = sessions.next_session_id().unwrap();
         let pk = crate::crypto::PublicKey::try_from([0u8; 32].as_slice()).unwrap();
-        sessions.add(sid, addr, Alg::ChaCha20Poly1305, server_state, pk);
+        let account = crate::identity::AccountKey::generate().public();
+        sessions.add(
+            sid,
+            addr,
+            Alg::ChaCha20Poly1305,
+            server_state,
+            pk,
+            account,
+            0,
+        );
         let ip = sessions.next_holy_ip().unwrap();
         sessions.assign_holy_ip(&sid, ip);
 

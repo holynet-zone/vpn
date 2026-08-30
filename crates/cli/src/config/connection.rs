@@ -2,6 +2,7 @@ use crate::network::find_available_ifname;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use holynet_sdk::crypto::{PublicKey, SecretKey};
+use holynet_sdk::identity::Enrollment;
 use holynet_sdk::protocol::Alg;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -18,6 +19,7 @@ pub struct CredentialsConfig {
     pub private_key: SecretKey,
     pub pre_shared_key: SecretKey,
     pub server_public_key: PublicKey,
+    pub enrollment: Enrollment,
 }
 
 fn default_offload() -> bool {

@@ -65,11 +65,11 @@ impl StartCmd {
             }
         };
 
-        let known_clients: Vec<_> = clients
+        let known_accounts: Vec<_> = clients
             .get_all()
             .await
             .into_iter()
-            .map(|cl| (cl.peer_pk, cl.psk))
+            .map(|cl| (cl.account_pub, cl.psk))
             .collect();
 
         let addr: SocketAddr =
@@ -126,7 +126,7 @@ impl StartCmd {
 
         let builder = ServerBuilder::new(transports, network)
             .secret_key(config.general.secret_key)
-            .known_clients(known_clients)
+            .known_accounts(known_accounts)
             .ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)

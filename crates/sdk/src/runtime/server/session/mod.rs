@@ -18,6 +18,7 @@ use snow::StatelessTransportState;
 use tracing::debug;
 
 use crate::crypto::PublicKey;
+use crate::identity::AccountPublicKey;
 use crate::protocol::{Alg, SessionId};
 use crate::runtime::replay::ReplayWindow;
 use crate::time::sec_since_start;
@@ -36,6 +37,8 @@ pub struct Session {
     pub created_at: Instant,
     pub holy_ip: OnceLock<HolyIp>,
     pub peer_pk: PublicKey,
+    pub account_pub: AccountPublicKey,
+    pub device_index: u32,
     pub enc: Alg,
     pub state: StatelessTransportState,
     /// Monotonically increasing nonce for packets sent by the server to this client.
@@ -96,7 +99,7 @@ pub struct Sessions {
     holy_ip_gen: Arc<IpAddressGenerator>,
     map: Arc<DashMap<SessionId, Arc<Session>>>,
     holy_ip_map: Arc<DashMap<HolyIp, SessionId>>,
-    sticky: Arc<DashMap<PublicKey, HolyIp>>,
+    sticky: Arc<DashMap<(AccountPublicKey, u32), HolyIp>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -126,14 +129,19 @@ impl Sessions {
         self.holy_ip_gen.next()
     }
 
-    pub fn next_holy_ip_sticky(&self, pk: &PublicKey) -> Option<HolyIp> {
-        if let Some(prev) = self.sticky.get(pk).map(|e| *e.value()) {
+    pub fn next_holy_ip_sticky(
+        &self,
+        account: &AccountPublicKey,
+        device_index: u32,
+    ) -> Option<HolyIp> {
+        let key = (account.clone(), device_index);
+        if let Some(prev) = self.sticky.get(&key).map(|e| *e.value()) {
             if self.holy_ip_gen.try_take(&prev) {
                 return Some(prev);
             }
         }
         let ip = self.holy_ip_gen.next()?;
-        self.sticky.insert(pk.clone(), ip);
+        self.sticky.insert(key, ip);
         Some(ip)
     }
 
@@ -167,6 +175,8 @@ impl Sessions {
         enc: Alg,
         state: StatelessTransportState,
         peer_pk: PublicKey,
+        account_pub: AccountPublicKey,
+        device_index: u32,
     ) {
         let (ipv4_data, ipv6_data, is_ipv4) = match sock_addr {
             SocketAddr::V4(addr_v4) => {
@@ -199,6 +209,8 @@ impl Sessions {
             created_at: Instant::now(),
             holy_ip: OnceLock::new(),
             peer_pk,
+            account_pub,
+            device_index,
             enc,
             state,
             send_nonce: AtomicU64::new(0),
@@ -340,12 +352,17 @@ mod tests {
 
     use super::*;
     use crate::crypto::PublicKey;
+    use crate::identity::AccountKey;
     use crate::protocol::Alg;
     use crate::runtime::crypto::make_noise_pair_for_test;
     use crate::time::sec_since_start;
 
     fn make_sessions() -> Sessions {
         Sessions::new(&"10.0.0.0".parse().unwrap(), 8)
+    }
+
+    fn dummy_account() -> AccountPublicKey {
+        AccountKey::generate().public()
     }
 
     fn add_one(
@@ -355,7 +372,15 @@ mod tests {
     ) -> (SessionId, HolyIp) {
         let sid = sessions.next_session_id().unwrap();
         let pk = PublicKey::try_from([0u8; 32].as_slice()).unwrap();
-        sessions.add(sid, addr, Alg::ChaCha20Poly1305, state, pk);
+        sessions.add(
+            sid,
+            addr,
+            Alg::ChaCha20Poly1305,
+            state,
+            pk,
+            dummy_account(),
+            0,
+        );
         let ip = sessions.next_holy_ip().unwrap();
         sessions.assign_holy_ip(&sid, ip);
         (sid, ip)
@@ -395,20 +420,35 @@ mod tests {
     #[test]
     fn test_sticky_reassigns_same_ip_after_release() {
         let sessions = make_sessions();
-        let pk = PublicKey::try_from([7u8; 32].as_slice()).unwrap();
-        let ip1 = sessions.next_holy_ip_sticky(&pk).unwrap();
+        let acct = dummy_account();
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
         sessions.release_holy_ip(&ip1);
-        let ip2 = sessions.next_holy_ip_sticky(&pk).unwrap();
+        let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
         assert_eq!(ip1, ip2, "reconnect must reuse the same address");
     }
 
     #[test]
     fn test_sticky_does_not_hand_out_held_ip_twice() {
         let sessions = make_sessions();
-        let pk = PublicKey::try_from([7u8; 32].as_slice()).unwrap();
-        let ip1 = sessions.next_holy_ip_sticky(&pk).unwrap();
-        let ip2 = sessions.next_holy_ip_sticky(&pk).unwrap();
+        let acct = dummy_account();
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
         assert_ne!(ip1, ip2, "held address must not be handed out twice");
+    }
+
+    #[test]
+    fn test_sticky_distinct_per_device_index() {
+        let sessions = make_sessions();
+        let acct = dummy_account();
+        let ip0 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 1).unwrap();
+        assert_ne!(
+            ip0, ip1,
+            "different devices of one account get distinct ips"
+        );
+        sessions.release_holy_ip(&ip1);
+        let ip1b = sessions.next_holy_ip_sticky(&acct, 1).unwrap();
+        assert_eq!(ip1, ip1b, "device index keeps its sticky address");
     }
 
     // ── release ────────────────────────────────────────────────────────────────

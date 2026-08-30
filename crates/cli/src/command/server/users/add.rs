@@ -5,6 +5,7 @@ use crate::style::{format_opaque_bytes, generate_qrcode};
 use crate::{success_err, success_ok};
 use clap::Args;
 use holynet_sdk::crypto::{PublicKey, SecretKey};
+use holynet_sdk::identity::AccountKey;
 use holynet_sdk::protocol::Alg;
 use inquire::required;
 use inquire::validator::Validation;
@@ -63,8 +64,14 @@ impl AddCmd {
             None => SecretKey::generate_x25519(),
         };
 
+        let account = AccountKey::generate();
+        let device_index = 0;
+        let enrollment = account.issue(&pk, device_index, 0, 0);
+        let account_pub = account.public();
+
         println!();
-        success_ok!("PubKey", pk);
+        success_ok!("Account", account_pub);
+        success_ok!("DevicePubKey", pk);
         success_ok!("PrivKey", format_opaque_bytes(sk.as_slice()));
         success_ok!("SharedKey", format_opaque_bytes(psk.as_slice()));
         println!();
@@ -72,8 +79,9 @@ impl AddCmd {
         let clients = Clients::new(database(&config.general.storage)?)?;
         clients
             .save(Client {
+                account_pub,
                 psk: psk.clone(),
-                peer_pk: pk.clone(),
+                device_index,
                 created_at: chrono::Utc::now(),
             })
             .await;
@@ -88,6 +96,7 @@ impl AddCmd {
                 private_key: sk,
                 pre_shared_key: psk,
                 server_public_key: PublicKey::from_secret(&config.general.secret_key),
+                enrollment,
             },
             interface: None,
             runtime: None,
