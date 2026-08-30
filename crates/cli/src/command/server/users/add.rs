@@ -25,6 +25,9 @@ pub struct AddCmd {
     /// Pre-shared key (base64)
     #[arg(short, long)]
     psk: Option<String>,
+    /// Pin this device to a fixed tunnel address (held out of the dynamic pool)
+    #[arg(long)]
+    ip: Option<std::net::IpAddr>,
 }
 
 impl AddCmd {
@@ -74,6 +77,9 @@ impl AddCmd {
         success_ok!("DevicePubKey", pk);
         success_ok!("PrivKey", format_opaque_bytes(sk.as_slice()));
         success_ok!("SharedKey", format_opaque_bytes(psk.as_slice()));
+        if let Some(ip) = self.ip {
+            success_ok!("PinnedIP", ip);
+        }
         println!();
 
         let clients = Clients::new(database(&config.general.storage)?)?;
@@ -82,6 +88,7 @@ impl AddCmd {
                 account_pub,
                 psk: psk.clone(),
                 device_index,
+                reserved_ip: self.ip,
                 created_at: chrono::Utc::now(),
             })
             .await;

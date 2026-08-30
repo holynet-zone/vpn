@@ -3,6 +3,7 @@ use fjall::{Database, Keyspace, KeyspaceCreateOptions};
 use holynet_sdk::crypto::SecretKey;
 use holynet_sdk::identity::AccountPublicKey;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use tokio::task;
 
 #[derive(Serialize, Deserialize)]
@@ -10,6 +11,7 @@ pub struct Client {
     pub account_pub: AccountPublicKey,
     pub psk: SecretKey,
     pub device_index: u32,
+    pub reserved_ip: Option<IpAddr>,
     pub created_at: DateTime<Utc>,
 }
 

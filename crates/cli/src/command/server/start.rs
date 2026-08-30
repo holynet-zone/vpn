@@ -65,9 +65,15 @@ impl StartCmd {
             }
         };
 
-        let known_accounts: Vec<_> = clients
-            .get_all()
-            .await
+        let all_clients = clients.get_all().await;
+        let reservations: Vec<_> = all_clients
+            .iter()
+            .filter_map(|cl| {
+                cl.reserved_ip
+                    .map(|ip| ((cl.account_pub.clone(), cl.device_index), ip))
+            })
+            .collect();
+        let known_accounts: Vec<_> = all_clients
             .into_iter()
             .map(|cl| (cl.account_pub, cl.psk))
             .collect();
@@ -127,6 +133,7 @@ impl StartCmd {
         let builder = ServerBuilder::new(transports, network)
             .secret_key(config.general.secret_key)
             .known_accounts(known_accounts)
+            .reservations(reservations)
             .ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)

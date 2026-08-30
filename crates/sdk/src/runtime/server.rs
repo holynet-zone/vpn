@@ -24,6 +24,7 @@ pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     network: Arc<N>,
     sk: Option<SecretKey>,
     known_accounts: Arc<DashMap<AccountPublicKey, SecretKey>>,
+    reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
     ip: Option<IpAddr>,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -39,6 +40,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             network: Arc::new(network),
             sk: None,
             known_accounts: Arc::new(DashMap::new()),
+            reservations: Vec::new(),
             ip: None,
             prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
@@ -55,6 +57,13 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
 
     pub fn known_accounts(mut self, accounts: Vec<(AccountPublicKey, SecretKey)>) -> Self {
         self.known_accounts = Arc::new(DashMap::from_iter(accounts));
+        self
+    }
+
+    /// Hard-pin `(account, device_index)` to a fixed address. Reserved addresses
+    /// are held out of the dynamic pool and only ever assigned to their owner.
+    pub fn reservations(mut self, reservations: Vec<((AccountPublicKey, u32), IpAddr)>) -> Self {
+        self.reservations = reservations;
         self
     }
 
@@ -106,6 +115,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
                 .sk
                 .ok_or(BuildError::MissingRequiredField("secret_key"))?,
             known_accounts: self.known_accounts,
+            reservations: self.reservations,
             ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
             prefix: self.prefix,
             session_timeout: self.session_timeout,
@@ -121,6 +131,7 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
     network: Arc<N>,
     sk: SecretKey,
     known_accounts: Arc<DashMap<AccountPublicKey, SecretKey>>,
+    reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
     ip: IpAddr,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -131,7 +142,7 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
 
 impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
-        let sessions = Sessions::new(&self.ip, self.prefix);
+        let sessions = Sessions::with_reservations(&self.ip, self.prefix, self.reservations);
         let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 
         let mut set: JoinSet<()> = JoinSet::new();

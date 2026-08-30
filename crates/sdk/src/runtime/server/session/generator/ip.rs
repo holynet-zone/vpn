@@ -18,6 +18,10 @@ pub struct IpAddressGenerator {
     cursor: AtomicU64,
     /// Set of currently allocated offsets.
     borrowed: DashSet<u64>,
+    /// Offsets set aside for hard pins. Excluded from the dynamic `next()` rotation
+    /// so a reserved address is never auto-assigned to a different client; the pin
+    /// owner still claims it directly via `try_take`.
+    reserved: DashSet<u64>,
     is_v4: bool,
 }
 
@@ -39,7 +43,21 @@ impl IpAddressGenerator {
             range_size,
             cursor: AtomicU64::new(initial_offset),
             borrowed: DashSet::new(),
+            reserved: DashSet::new(),
             is_v4,
+        }
+    }
+
+    /// Set `address` aside as a hard pin: it leaves the dynamic rotation but can
+    /// still be claimed by its owner via `try_take`. Returns false if the address
+    /// falls outside this subnet.
+    pub fn reserve(&self, address: &IpAddr) -> bool {
+        match self.ip_to_offset(address) {
+            Some(offset) => {
+                self.reserved.insert(offset);
+                true
+            }
+            None => false,
         }
     }
 
@@ -49,6 +67,9 @@ impl IpAddressGenerator {
         }
         for _ in 0..self.range_size {
             let offset = self.cursor.fetch_add(1, Ordering::Relaxed) % self.range_size;
+            if self.reserved.contains(&offset) {
+                continue;
+            }
             if self.borrowed.insert(offset) {
                 return Some(self.offset_to_ip(offset));
             }
@@ -147,6 +168,31 @@ mod tests {
         g.release(&target);
         assert!(g.try_take(&target));
         assert!(!g.try_take(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 5))));
+    }
+
+    #[test]
+    fn test_reserved_excluded_from_dynamic_but_claimable() {
+        let g = IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 30);
+        let pinned = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        assert!(g.reserve(&pinned));
+        // /30 = 4 addresses; one reserved, so dynamic hands out the other three.
+        let dyn_ips: Vec<_> = (0..3).map(|_| g.next().unwrap()).collect();
+        assert!(
+            g.next().is_none(),
+            "dynamic pool exhausts around the reservation"
+        );
+        assert!(
+            !dyn_ips.contains(&pinned),
+            "reserved address never auto-assigned"
+        );
+        // The pin owner still claims its address directly.
+        assert!(g.try_take(&pinned));
+    }
+
+    #[test]
+    fn test_reserve_rejects_out_of_subnet() {
+        let g = IpAddressGenerator::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 24);
+        assert!(!g.reserve(&IpAddr::V4(Ipv4Addr::new(10, 0, 5, 5))));
     }
 
     #[test]

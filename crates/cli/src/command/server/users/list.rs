@@ -14,6 +14,7 @@ pub struct UserRow {
     pub account: AccountPublicKey,
     pub device_index: u32,
     pub psk: SecretKey,
+    pub reserved_ip: Option<std::net::IpAddr>,
     pub created_at: String,
 }
 
@@ -31,6 +32,7 @@ impl ListCmd {
                 account: client.account_pub,
                 device_index: client.device_index,
                 psk: client.psk,
+                reserved_ip: client.reserved_ip,
                 created_at: client.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
             })
             .collect();
@@ -42,6 +44,10 @@ impl ListCmd {
         success_ok!("Account", selected.account);
         success_ok!("DeviceIndex", selected.device_index);
         success_ok!("SharedKey", format_opaque_bytes(selected.psk.as_slice()));
+        match selected.reserved_ip {
+            Some(ip) => success_ok!("PinnedIP", ip),
+            None => success_ok!("PinnedIP", "auto"),
+        }
         success_ok!("CreatedAt", selected.created_at);
         println!();
 

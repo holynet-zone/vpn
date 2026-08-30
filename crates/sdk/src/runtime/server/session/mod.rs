@@ -100,6 +100,9 @@ pub struct Sessions {
     map: Arc<DashMap<SessionId, Arc<Session>>>,
     holy_ip_map: Arc<DashMap<HolyIp, SessionId>>,
     sticky: Arc<DashMap<(AccountPublicKey, u32), HolyIp>>,
+    /// Hard pins: `(account, device_index) -> IP`. Reserved offsets are held out
+    /// of the dynamic pool; the owner claims its exact address on lease.
+    reservations: Arc<DashMap<(AccountPublicKey, u32), HolyIp>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -111,12 +114,30 @@ pub struct Sessions {
 
 impl Sessions {
     pub fn new(network: &IpAddr, prefix: u8) -> Self {
+        Self::with_reservations(network, prefix, Vec::new())
+    }
+
+    pub fn with_reservations(
+        network: &IpAddr,
+        prefix: u8,
+        reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
+    ) -> Self {
+        let holy_ip_gen = IpAddressGenerator::new(increment_ip(*network), prefix);
+        let res_map: DashMap<(AccountPublicKey, u32), HolyIp> = DashMap::new();
+        for (key, ip) in reservations {
+            if holy_ip_gen.reserve(&ip) {
+                res_map.insert(key, ip);
+            } else {
+                debug!("ignoring out-of-subnet reservation {}", ip);
+            }
+        }
         Sessions {
             sid_gen: Arc::new(SessionIdGenerator::new()),
-            holy_ip_gen: Arc::new(IpAddressGenerator::new(increment_ip(*network), prefix)),
+            holy_ip_gen: Arc::new(holy_ip_gen),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new()),
             sticky: Arc::new(DashMap::new()),
+            reservations: Arc::new(res_map),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
     }
@@ -135,6 +156,12 @@ impl Sessions {
         device_index: u32,
     ) -> Option<HolyIp> {
         let key = (account.clone(), device_index);
+        // Hard pin wins over both sticky-auto and the dynamic cursor: the reserved
+        // address is claimed directly and is never handed to anyone else.
+        if let Some(ip) = self.reservations.get(&key).map(|e| *e.value()) {
+            self.holy_ip_gen.try_take(&ip);
+            return Some(ip);
+        }
         if let Some(prev) = self.sticky.get(&key).map(|e| *e.value()) {
             if self.holy_ip_gen.try_take(&prev) {
                 return Some(prev);
@@ -434,6 +461,39 @@ mod tests {
         let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
         let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
         assert_ne!(ip1, ip2, "held address must not be handed out twice");
+    }
+
+    #[test]
+    fn test_hard_pin_returns_reserved_and_dynamic_avoids_it() {
+        let acct = dummy_account();
+        let pinned: IpAddr = "10.0.0.7".parse().unwrap();
+        let sessions = Sessions::with_reservations(
+            &"10.0.0.0".parse().unwrap(),
+            24,
+            vec![((acct.clone(), 3), pinned)],
+        );
+        assert_eq!(sessions.next_holy_ip_sticky(&acct, 3), Some(pinned));
+        for _ in 0..300 {
+            if let Some(ip) = sessions.next_holy_ip() {
+                assert_ne!(ip, pinned, "dynamic pool must never hand out a reserved ip");
+            }
+        }
+    }
+
+    #[test]
+    fn test_hard_pin_stable_across_release() {
+        let acct = dummy_account();
+        let pinned: IpAddr = "10.0.0.9".parse().unwrap();
+        let sessions = Sessions::with_reservations(
+            &"10.0.0.0".parse().unwrap(),
+            24,
+            vec![((acct.clone(), 0), pinned)],
+        );
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        sessions.release_holy_ip(&ip1);
+        let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        assert_eq!(ip1, pinned);
+        assert_eq!(ip2, pinned);
     }
 
     #[test]
