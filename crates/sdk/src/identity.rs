@@ -58,6 +58,21 @@ impl From<[u8; 32]> for AccountKey {
     }
 }
 
+impl TryFrom<&str> for AccountKey {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let bytes = STANDARD_NO_PAD
+            .decode(s.trim())
+            .map_err(|e| e.to_string())?;
+        let seed: [u8; 32] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| "account signing key must be exactly 32 bytes".to_string())?;
+        Ok(Self::from(seed))
+    }
+}
+
 impl fmt::Display for AccountKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", STANDARD_NO_PAD.encode(self.0.to_bytes()))

@@ -1,6 +1,8 @@
+pub mod nodes;
 pub mod start;
 pub mod users;
 
+use crate::command::server::nodes::NodesCmd;
 use crate::command::server::start::StartCmd;
 use crate::command::server::users::UsersCmd;
 use clap::{Args, Subcommand};
@@ -24,4 +26,9 @@ pub enum ServerCommands {
     /// Manage users
     #[clap(subcommand)]
     Users(UsersCmd),
+    /// Manage the multi-node registry (import authority-signed records)
+    #[clap(subcommand)]
+    Nodes(NodesCmd),
+    /// Print this node's public key (for `holynet authority sign --node-pk`)
+    Pubkey,
 }

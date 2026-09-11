@@ -113,6 +113,24 @@ impl NodeRecord {
         &self.entry.node_pk
     }
 
+    /// Serialize to a portable base64 blob for operator -> node distribution.
+    pub fn to_base64(&self) -> String {
+        use base64::Engine;
+        let bytes = bincode::serde::encode_to_vec(self, bincode::config::standard())
+            .expect("encode node record");
+        base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes)
+    }
+
+    pub fn from_base64(s: &str) -> Result<Self, String> {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD_NO_PAD
+            .decode(s.trim())
+            .map_err(|e| e.to_string())?;
+        bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
+            .map(|(rec, _)| rec)
+            .map_err(|e| e.to_string())
+    }
+
     /// Deterministic supersession order: a record wins if its `(version,
     /// signature)` is strictly greater. Total and order-independent, so merges
     /// converge.
@@ -319,6 +337,17 @@ mod tests {
             bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
         assert_eq!(back, rec);
         assert!(back.verify());
+    }
+
+    #[test]
+    fn base64_roundtrip() {
+        let auth = AccountKey::generate();
+        let rec = NodeRecord::sign(&auth, entry("ru", 3), 9, false);
+        let blob = rec.to_base64();
+        let back = NodeRecord::from_base64(&blob).unwrap();
+        assert_eq!(back, rec);
+        assert!(back.verify());
+        assert!(NodeRecord::from_base64("!!!not-base64").is_err());
     }
 
     #[test]

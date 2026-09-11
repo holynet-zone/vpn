@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::network::set_ipv4_forwarding;
-use crate::storage::{Clients, database};
+use crate::storage::{Clients, Nodes, database};
 use crate::success_err;
 use crate::success_warn;
 use clap::Args;
@@ -51,18 +51,31 @@ impl StartCmd {
             config.interface.offload = false;
         }
 
-        let clients = match database(&config.general.storage) {
-            Ok(db) => match Clients::new(db) {
-                Ok(store) => store,
-                Err(e) => {
-                    success_err!("failed to create client storage: {}", e);
-                    process::exit(1);
-                }
-            },
+        let db = match database(&config.general.storage) {
+            Ok(db) => db,
             Err(e) => {
                 success_err!("load storage: {}", e);
                 process::exit(1);
             }
+        };
+        let clients = match Clients::new(db.clone()) {
+            Ok(store) => store,
+            Err(e) => {
+                success_err!("failed to create client storage: {}", e);
+                process::exit(1);
+            }
+        };
+        let node_store = match Nodes::new(db) {
+            Ok(store) => store,
+            Err(e) => {
+                success_err!("failed to create node storage: {}", e);
+                process::exit(1);
+            }
+        };
+
+        let node_records = match &config.general.authority {
+            Some(_) => node_store.get_all().await,
+            None => Vec::new(),
         };
 
         let all_clients = clients.get_all().await;
@@ -130,16 +143,24 @@ impl StartCmd {
             .map(|s| Duration::from_secs(s.cleanup_interval as u64))
             .unwrap_or(Duration::from_secs(60));
 
+        let authority = config.general.authority.clone();
+        let label = config.general.label.clone();
         let builder = ServerBuilder::new(transports, network)
             .secret_key(config.general.secret_key)
             .known_accounts(known_accounts)
             .reservations(reservations)
-            .advertise(addr, config.general.label.clone())
             .ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)
             .handshake_buf(runtime.handshake_buf)
             .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers));
+        // Signed multi-node mode when an authority is configured (zero-trust
+        // relay: this node only verifies operator-signed records, including its
+        // own). Otherwise the unsigned single-network self-advertise.
+        let builder = match authority {
+            Some(auth) => builder.trusted_authority(auth).node_records(node_records),
+            None => builder.advertise(addr, label),
+        };
 
         let server = match builder.build() {
             Ok(s) => s,
