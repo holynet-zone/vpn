@@ -20,9 +20,17 @@ use self::{handshake::handshake_executor, network::encrypt_forward, recv::recv_d
 use crate::crypto::{PublicKey, SecretKey};
 use crate::gateway::network::Network;
 use crate::gateway::transport::Transport;
-use crate::identity::AccountPublicKey;
+use crate::identity::{AccountKey, AccountPublicKey};
 use crate::protocol::NodeEntry;
+use crate::registry::{NodeRecord, NodeRegistry};
 use crate::runtime::error::{BuildError, RuntimeError};
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     transports: Vec<Arc<T>>,
@@ -33,6 +41,8 @@ pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     advertise_endpoint: Option<SocketAddr>,
     node_label: String,
     peer_nodes: Vec<NodeEntry>,
+    authority: Option<AccountKey>,
+    peer_records: Vec<NodeRecord>,
     ip: Option<IpAddr>,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -52,6 +62,8 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             advertise_endpoint: None,
             node_label: String::new(),
             peer_nodes: Vec::new(),
+            authority: None,
+            peer_records: Vec::new(),
             ip: None,
             prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
@@ -88,8 +100,25 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
     }
 
     /// Statically-known peer nodes included in the registry alongside this node.
+    /// Used only when no `authority` is set (unsigned single-network mode).
     pub fn peer_nodes(mut self, nodes: Vec<NodeEntry>) -> Self {
         self.peer_nodes = nodes;
+        self
+    }
+
+    /// Network authority key. When set, the node advertises a *signed*
+    /// [`NodeRecord`] and its registry is built by verified CRDT merge, so peer
+    /// records can be relayed by untrusted nodes. Without it the node stays in
+    /// the unsigned single-network mode (`advertise` / `peer_nodes`).
+    pub fn authority(mut self, authority: AccountKey) -> Self {
+        self.authority = Some(authority);
+        self
+    }
+
+    /// Authority-signed peer records merged into the registry (used with
+    /// `authority`). Records failing verification are dropped.
+    pub fn peer_records(mut self, records: Vec<NodeRecord>) -> Self {
+        self.peer_records = records;
         self
     }
 
@@ -145,6 +174,8 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             advertise_endpoint: self.advertise_endpoint,
             node_label: self.node_label,
             peer_nodes: self.peer_nodes,
+            authority: self.authority,
+            peer_records: self.peer_records,
             ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
             prefix: self.prefix,
             session_timeout: self.session_timeout,
@@ -164,6 +195,8 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
     advertise_endpoint: Option<SocketAddr>,
     node_label: String,
     peer_nodes: Vec<NodeEntry>,
+    authority: Option<AccountKey>,
+    peer_records: Vec<NodeRecord>,
     ip: IpAddr,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -174,17 +207,29 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
 
 impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
-        let mut nodes = Vec::new();
-        if let Some(endpoint) = self.advertise_endpoint {
-            nodes.push(NodeEntry {
-                node_pk: PublicKey::from_secret(&self.sk),
-                endpoint,
-                subnet: self.ip,
-                prefix: self.prefix,
-                label: self.node_label.clone(),
-            });
-        }
-        nodes.extend(self.peer_nodes.iter().cloned());
+        let self_entry = self.advertise_endpoint.map(|endpoint| NodeEntry {
+            node_pk: PublicKey::from_secret(&self.sk),
+            endpoint,
+            subnet: self.ip,
+            prefix: self.prefix,
+            label: self.node_label.clone(),
+        });
+        let nodes = match &self.authority {
+            Some(authority) => {
+                let mut registry = NodeRegistry::new(authority.public());
+                if let Some(entry) = self_entry {
+                    registry.merge(NodeRecord::sign(authority, entry, now_millis(), false));
+                }
+                registry.merge_all(self.peer_records);
+                registry.active_entries()
+            }
+            None => {
+                let mut nodes = Vec::new();
+                nodes.extend(self_entry);
+                nodes.extend(self.peer_nodes.iter().cloned());
+                nodes
+            }
+        };
         let sessions = Sessions::with_config(&self.ip, self.prefix, self.reservations, nodes);
         let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 

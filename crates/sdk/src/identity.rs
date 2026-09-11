@@ -42,6 +42,11 @@ impl AccountKey {
         cert
     }
 
+    /// Sign an arbitrary message with this authority/account key.
+    pub fn sign(&self, msg: &[u8]) -> [u8; 64] {
+        self.0.sign(msg).to_bytes()
+    }
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         self.0.as_bytes()
     }
@@ -87,6 +92,16 @@ impl AccountPublicKey {
 
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    /// Verify a detached signature over `msg` against this key.
+    pub fn verify(&self, msg: &[u8], signature: &[u8; 64]) -> bool {
+        match self.verifying_key() {
+            Some(vk) => vk
+                .verify(msg, &ed25519_dalek::Signature::from_bytes(signature))
+                .is_ok(),
+            None => false,
+        }
     }
 
     fn verifying_key(&self) -> Option<VerifyingKey> {
