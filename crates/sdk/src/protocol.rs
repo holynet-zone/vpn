@@ -135,6 +135,9 @@ pub(crate) enum PacketRef<'a> {
     /// Unencrypted — records are self-authenticating (authority signature), so a
     /// forged sync is rejected on merge, not on transport.
     NodeSync(&'a [u8]),
+    /// Liveness probe (type 5): `type(1) | nonce(u64 BE)`. Any node reflects it
+    /// verbatim to the sender so a client can measure reachability and rtt.
+    NodePing(u64),
 }
 
 impl<'a> PacketRef<'a> {
@@ -173,6 +176,10 @@ impl<'a> PacketRef<'a> {
                 Some(PacketRef::DataServer { nonce, ciphertext })
             }
             4 => Some(PacketRef::NodeSync(buf)),
+            5 => {
+                let nonce = u64::from_be_bytes(buf.get(..8)?.try_into().ok()?);
+                Some(PacketRef::NodePing(nonce))
+            }
             _ => None,
         }
     }
@@ -280,6 +287,18 @@ mod tests {
             PacketRef::NodeSync(got) => assert_eq!(got, &payload[..]),
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn test_packet_ref_node_ping() {
+        let mut raw = vec![5u8];
+        raw.extend_from_slice(&0x0102_0304_0506_0708u64.to_be_bytes());
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::NodePing(nonce) => assert_eq!(nonce, 0x0102_0304_0506_0708),
+            _ => panic!("wrong variant"),
+        }
+        // Truncated nonce → rejected.
+        assert!(PacketRef::from_bytes(&[5u8, 0, 0]).is_none());
     }
 
     #[test]

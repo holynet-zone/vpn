@@ -3,7 +3,7 @@ use crate::success_err;
 use crate::success_ok;
 use clap::Args;
 use holynet_sdk::gateway::transport::udp::UdpTransport;
-use holynet_sdk::runtime::client::fetch_node_list;
+use holynet_sdk::runtime::client::{fetch_node_list, probe_nodes};
 use holynet_sdk::runtime::cred::Cred;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -74,20 +74,29 @@ impl NodesCmd {
             success_ok!("Nodes", "registry is empty");
             return;
         }
+
+        // Measure reachability/rtt from this client's own vantage point.
+        let probed = probe_nodes(nodes, Duration::from_millis(1500)).await;
+
         println!();
-        for node in nodes {
+        for (node, rtt) in probed {
             let label = if node.label.is_empty() {
                 "-".to_string()
             } else {
                 node.label
             };
+            let health = match rtt {
+                Some(d) => format!("up {:.1}ms", d.as_secs_f64() * 1000.0),
+                None => "down".to_string(),
+            };
             success_ok!(
                 "Node",
-                "{}  {}  {}/{}  {:.8}",
+                "{}  {}  {}/{}  {}  {:.8}",
                 label,
                 node.endpoint,
                 node.subnet,
                 node.prefix,
+                health,
                 node.node_pk.to_string()
             );
         }

@@ -126,6 +126,16 @@ pub(crate) const TYPE_DATA_SERVER: u8 = 3;
 pub(crate) const TYPE_DATA_CLIENT: u8 = 2;
 /// `NodeSync` wire type byte (node-to-node registry gossip).
 pub(crate) const TYPE_NODE_SYNC: u8 = 4;
+/// `NodePing` wire type byte (liveness probe, reflected verbatim).
+pub(crate) const TYPE_NODE_PING: u8 = 5;
+
+/// Build a 9-byte liveness-probe frame: `type(1) | nonce(u64 BE)`.
+pub(crate) fn node_ping_frame(nonce: u64) -> [u8; 9] {
+    let mut frame = [0u8; 9];
+    frame[0] = TYPE_NODE_PING;
+    frame[1..9].copy_from_slice(&nonce.to_be_bytes());
+    frame
+}
 /// `DataServer` header length: `type(1) + nonce(8)`.
 pub(crate) const DATA_SERVER_HDR_LEN: usize = 1 + 8;
 /// `DataClient` header length: `type(1) + sid(4) + nonce(8)`.

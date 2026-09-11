@@ -458,6 +458,13 @@ async fn decrypt_one<T: Transport>(
             }
         }
 
+        Some(PacketRef::NodePing(nonce)) => {
+            let frame = crate::runtime::crypto::node_ping_frame(nonce);
+            if let Err(e) = transport.send_to(&frame, &slot.addr).await {
+                debug!("[{}] ping reflect failed: {}", slot.addr, e);
+            }
+        }
+
         Some(_) => warn!("[{}] unexpected packet variant", slot.addr),
     }
 }

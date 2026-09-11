@@ -43,6 +43,56 @@ pub async fn fetch_node_list<T: ClientTransport>(
     node_list_step(transport, &session, payload.sid, timeout).await
 }
 
+/// Measure round-trip time to a node's UDP endpoint with a single reflected
+/// liveness probe. Returns `None` if no reply arrives within `timeout`. Uses its
+/// own ephemeral socket — independent of any tunnel — so reachability is measured
+/// from the client's own vantage point.
+pub async fn probe_node(
+    endpoint: std::net::SocketAddr,
+    timeout: Duration,
+) -> Option<std::time::Duration> {
+    use crate::protocol::PacketRef;
+    use crate::runtime::crypto::node_ping_frame;
+    use std::time::Instant;
+    use tokio::net::UdpSocket;
+
+    let bind = if endpoint.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
+    let sock = UdpSocket::bind(bind).await.ok()?;
+    sock.connect(endpoint).await.ok()?;
+
+    let nonce = rand::random::<u64>();
+    let frame = node_ping_frame(nonce);
+    let start = Instant::now();
+    sock.send(&frame).await.ok()?;
+
+    let mut buf = [0u8; 16];
+    let n = tokio::time::timeout(timeout, sock.recv(&mut buf))
+        .await
+        .ok()?
+        .ok()?;
+    match PacketRef::from_bytes(&buf[..n]) {
+        Some(PacketRef::NodePing(got)) if got == nonce => Some(start.elapsed()),
+        _ => None,
+    }
+}
+
+/// Probe every node's endpoint in parallel, pairing each with its measured rtt
+/// (`None` = unreachable within `timeout`).
+pub async fn probe_nodes(
+    nodes: Vec<NodeEntry>,
+    timeout: Duration,
+) -> Vec<(NodeEntry, Option<std::time::Duration>)> {
+    let futs = nodes.into_iter().map(|node| async move {
+        let rtt = probe_node(node.endpoint, timeout).await;
+        (node, rtt)
+    });
+    futures::future::join_all(futs).await
+}
+
 pub(super) const AWAIT_STATE_DELAY: Duration = Duration::from_secs(1);
 pub(super) const MAX_PACKET_SIZE: usize = 65536;
 
@@ -223,5 +273,34 @@ impl<T: ClientTransport + 'static, N: Network + 'static> Client<T, N> {
             RuntimeState::Error(err) => err,
             _ => RuntimeError::Unexpected("all tasks exited unexpectedly".into()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::UdpSocket;
+
+    #[tokio::test]
+    async fn probe_node_measures_rtt_against_reflector() {
+        let reflector = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = reflector.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 16];
+            if let Ok((n, src)) = reflector.recv_from(&mut buf).await {
+                let _ = reflector.send_to(&buf[..n], src).await;
+            }
+        });
+        let rtt = probe_node(addr, Duration::from_millis(500)).await;
+        assert!(rtt.is_some(), "reflected probe must yield an rtt");
+    }
+
+    #[tokio::test]
+    async fn probe_node_times_out_when_silent() {
+        // Hold a bound socket that never replies; the probe must time out.
+        let _silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = _silent.local_addr().unwrap();
+        let rtt = probe_node(addr, Duration::from_millis(150)).await;
+        assert!(rtt.is_none());
     }
 }

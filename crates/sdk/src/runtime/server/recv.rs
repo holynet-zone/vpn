@@ -277,6 +277,13 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                         }
                     }
 
+                    Some(PacketRef::NodePing(nonce)) => {
+                        let frame = crate::runtime::crypto::node_ping_frame(nonce);
+                        if let Err(e) = transport.send_to(&frame, &addr).await {
+                            debug!("[{}] ping reflect failed: {}", addr, e);
+                        }
+                    }
+
                     Some(_) => warn!("[{}] unexpected packet variant", addr),
                 }
             }
