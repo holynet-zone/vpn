@@ -270,6 +270,13 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                         }
                     }
 
+                    Some(PacketRef::NodeSync(payload)) => {
+                        let n = super::gossip::on_node_sync(&sessions, payload);
+                        if n > 0 {
+                            debug!("[{}] merged {} node record(s) from gossip", addr, n);
+                        }
+                    }
+
                     Some(_) => warn!("[{}] unexpected packet variant", addr),
                 }
             }

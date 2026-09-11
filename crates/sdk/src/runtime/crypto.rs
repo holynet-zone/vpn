@@ -124,6 +124,8 @@ fn write_ip_packet_plain(plain_buf: &mut [u8], payload: &[u8]) -> usize {
 pub(crate) const TYPE_DATA_SERVER: u8 = 3;
 /// `DataClient` wire type byte.
 pub(crate) const TYPE_DATA_CLIENT: u8 = 2;
+/// `NodeSync` wire type byte (node-to-node registry gossip).
+pub(crate) const TYPE_NODE_SYNC: u8 = 4;
 /// `DataServer` header length: `type(1) + nonce(8)`.
 pub(crate) const DATA_SERVER_HDR_LEN: usize = 1 + 8;
 /// `DataClient` header length: `type(1) + sid(4) + nonce(8)`.

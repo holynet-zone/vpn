@@ -451,6 +451,13 @@ async fn decrypt_one<T: Transport>(
             }
         }
 
+        Some(PacketRef::NodeSync(payload)) => {
+            let n = super::gossip::on_node_sync(sessions, payload);
+            if n > 0 {
+                debug!("[{}] merged {} node record(s) from gossip", slot.addr, n);
+            }
+        }
+
         Some(_) => warn!("[{}] unexpected packet variant", slot.addr),
     }
 }

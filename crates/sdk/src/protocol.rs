@@ -131,6 +131,10 @@ pub(crate) enum PacketRef<'a> {
         nonce: u64,
         ciphertext: &'a [u8],
     },
+    /// Node-to-node registry sync (type 4): `type(1) | bincode(Vec<NodeRecord>)`.
+    /// Unencrypted — records are self-authenticating (authority signature), so a
+    /// forged sync is rejected on merge, not on transport.
+    NodeSync(&'a [u8]),
 }
 
 impl<'a> PacketRef<'a> {
@@ -168,6 +172,7 @@ impl<'a> PacketRef<'a> {
                 let ciphertext = buf.get(8..)?;
                 Some(PacketRef::DataServer { nonce, ciphertext })
             }
+            4 => Some(PacketRef::NodeSync(buf)),
             _ => None,
         }
     }
@@ -262,6 +267,17 @@ mod tests {
                 assert_eq!(nonce, 12345);
                 assert_eq!(ciphertext, &cipher[..]);
             }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_node_sync() {
+        let payload = vec![0x11u8, 0x22, 0x33, 0x44, 0x55];
+        let mut raw = vec![4u8];
+        raw.extend_from_slice(&payload);
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::NodeSync(got) => assert_eq!(got, &payload[..]),
             _ => panic!("wrong variant"),
         }
     }

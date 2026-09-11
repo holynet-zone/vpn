@@ -1,3 +1,4 @@
+mod gossip;
 mod handshake;
 mod network;
 mod recv;
@@ -36,6 +37,7 @@ pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     peer_nodes: Vec<NodeEntry>,
     trusted_authority: Option<AccountPublicKey>,
     node_records: Vec<NodeRecord>,
+    gossip_interval: Duration,
     ip: Option<IpAddr>,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -57,6 +59,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             peer_nodes: Vec::new(),
             trusted_authority: None,
             node_records: Vec::new(),
+            gossip_interval: Duration::from_secs(30),
             ip: None,
             prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
@@ -116,6 +119,12 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
         self
     }
 
+    /// Interval between node-to-node registry gossip pushes (signed mode only).
+    pub fn gossip_interval(mut self, interval: Duration) -> Self {
+        self.gossip_interval = interval;
+        self
+    }
+
     /// Set the VPN server IP and subnet prefix used for client session assignment.
     pub fn ip(mut self, ip: IpAddr, prefix: u8) -> Self {
         self.ip = Some(ip);
@@ -170,6 +179,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             peer_nodes: self.peer_nodes,
             trusted_authority: self.trusted_authority,
             node_records: self.node_records,
+            gossip_interval: self.gossip_interval,
             ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
             prefix: self.prefix,
             session_timeout: self.session_timeout,
@@ -191,6 +201,7 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
     peer_nodes: Vec<NodeEntry>,
     trusted_authority: Option<AccountPublicKey>,
     node_records: Vec<NodeRecord>,
+    gossip_interval: Duration,
     ip: IpAddr,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -201,20 +212,21 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
 
 impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
     pub async fn run(self) -> Result<std::convert::Infallible, RuntimeError> {
-        let nodes = match self.trusted_authority {
-            // Zero-trust relay: the node holds no signing key. It verifies and
-            // merges operator-signed records (its own self-record included).
+        let self_pk = PublicKey::from_secret(&self.sk);
+        // Zero-trust relay: the node holds no signing key. It verifies and merges
+        // operator-signed records (its own self-record included) into a live
+        // registry fed by gossip. Unsigned mode keeps a static advertised list.
+        let (nodes, registry) = match self.trusted_authority {
             Some(trusted) => {
-                let mut registry = NodeRegistry::new(trusted);
-                registry.merge_all(self.node_records);
-                registry.active_entries()
+                let mut reg = NodeRegistry::new(trusted);
+                reg.merge_all(self.node_records);
+                (Vec::new(), Some(reg))
             }
-            // Unsigned single-network mode: advertise self plainly + static peers.
             None => {
                 let mut nodes = Vec::new();
                 if let Some(endpoint) = self.advertise_endpoint {
                     nodes.push(NodeEntry {
-                        node_pk: PublicKey::from_secret(&self.sk),
+                        node_pk: self_pk.clone(),
                         endpoint,
                         subnet: self.ip,
                         prefix: self.prefix,
@@ -222,13 +234,26 @@ impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
                     });
                 }
                 nodes.extend(self.peer_nodes.iter().cloned());
-                nodes
+                (nodes, None)
             }
         };
-        let sessions = Sessions::with_config(&self.ip, self.prefix, self.reservations, nodes);
+        let gossip_enabled = registry.is_some();
+        let sessions =
+            Sessions::with_config(&self.ip, self.prefix, self.reservations, nodes, registry);
         let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 
         let mut set: JoinSet<()> = JoinSet::new();
+
+        // One gossip pusher for the node, sharing the first receive socket.
+        if gossip_enabled && let Some(transport) = self.transports.first().cloned() {
+            set.spawn(gossip::gossip_loop(
+                stop_rx.clone(),
+                transport,
+                sessions.clone(),
+                self_pk,
+                self.gossip_interval,
+            ));
+        }
 
         for transport in self.transports {
             let network = self.network.clone();

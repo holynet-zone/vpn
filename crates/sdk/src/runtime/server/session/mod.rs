@@ -3,7 +3,7 @@ pub mod worker;
 
 use std::collections::BTreeMap;
 use std::sync::{
-    Mutex, Mutex as StdMutex, OnceLock,
+    Mutex, Mutex as StdMutex, OnceLock, RwLock,
     atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering},
 };
 use std::time::Duration;
@@ -20,6 +20,7 @@ use tracing::debug;
 use crate::crypto::PublicKey;
 use crate::identity::AccountPublicKey;
 use crate::protocol::{Alg, NodeEntry, SessionId};
+use crate::registry::{NodeRecord, NodeRegistry};
 use crate::runtime::replay::ReplayWindow;
 use crate::time::sec_since_start;
 
@@ -103,9 +104,13 @@ pub struct Sessions {
     /// Hard pins: `(account, device_index) -> IP`. Reserved offsets are held out
     /// of the dynamic pool; the owner claims its exact address on lease.
     reservations: Arc<DashMap<(AccountPublicKey, u32), HolyIp>>,
-    /// Multi-node registry advertised to clients on `NodeListRequest`. Static for
-    /// now (this node + configured peers); gossip/anti-entropy will feed it later.
+    /// Multi-node registry advertised to clients on `NodeListRequest`.
+    ///
+    /// In unsigned single-network mode this is a static list (this node + peers).
+    /// In signed mode `registry` holds the live, gossip-fed CRDT registry and
+    /// takes precedence; `nodes` stays empty.
     nodes: Arc<Vec<NodeEntry>>,
+    registry: Option<Arc<RwLock<NodeRegistry>>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -125,7 +130,7 @@ impl Sessions {
         prefix: u8,
         reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
     ) -> Self {
-        Self::with_config(network, prefix, reservations, Vec::new())
+        Self::with_config(network, prefix, reservations, Vec::new(), None)
     }
 
     pub fn with_config(
@@ -133,6 +138,7 @@ impl Sessions {
         prefix: u8,
         reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
         nodes: Vec<NodeEntry>,
+        registry: Option<NodeRegistry>,
     ) -> Self {
         let holy_ip_gen = IpAddressGenerator::new(increment_ip(*network), prefix);
         let res_map: DashMap<(AccountPublicKey, u32), HolyIp> = DashMap::new();
@@ -151,13 +157,49 @@ impl Sessions {
             sticky: Arc::new(DashMap::new()),
             reservations: Arc::new(res_map),
             nodes: Arc::new(nodes),
+            registry: registry.map(|r| Arc::new(RwLock::new(r))),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
     }
 
-    /// Snapshot of the node registry for a `NodeList` control reply.
+    /// Snapshot of the active node registry for a `NodeList` control reply.
     pub fn node_list(&self) -> Vec<NodeEntry> {
-        self.nodes.as_ref().clone()
+        match &self.registry {
+            Some(reg) => reg.read().unwrap().active_entries(),
+            None => self.nodes.as_ref().clone(),
+        }
+    }
+
+    /// Merge gossiped records into the live registry. Returns how many were
+    /// applied (0 in unsigned mode or if none were new/valid).
+    pub fn merge_records(&self, records: Vec<NodeRecord>) -> usize {
+        match &self.registry {
+            Some(reg) => reg.write().unwrap().merge_all(records),
+            None => 0,
+        }
+    }
+
+    /// All records (including tombstones) to push to peers during gossip.
+    pub fn sync_snapshot(&self) -> Vec<NodeRecord> {
+        match &self.registry {
+            Some(reg) => reg.read().unwrap().records(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Endpoints of active peer nodes to gossip to, excluding this node itself.
+    pub fn gossip_targets(&self, self_pk: &PublicKey) -> Vec<SocketAddr> {
+        match &self.registry {
+            Some(reg) => reg
+                .read()
+                .unwrap()
+                .active_entries()
+                .into_iter()
+                .filter(|e| &e.node_pk != self_pk)
+                .map(|e| e.endpoint)
+                .collect(),
+            None => Vec::new(),
+        }
     }
 
     pub fn next_session_id(&self) -> Option<SessionId> {
@@ -496,6 +538,7 @@ mod tests {
             24,
             Vec::new(),
             vec![node.clone()],
+            None,
         );
         assert_eq!(sessions.node_list(), vec![node]);
         assert!(
