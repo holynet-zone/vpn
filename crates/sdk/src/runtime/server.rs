@@ -3,6 +3,7 @@ mod handshake;
 mod network;
 mod recv;
 mod recv_pool;
+mod relay;
 pub mod session;
 
 use std::{
@@ -244,6 +245,10 @@ impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
 
         let mut set: JoinSet<()> = JoinSet::new();
 
+        // Transparent inter-node relay: one shared flow table + an idle reaper.
+        let relay_table = Arc::new(relay::RelayTable::new());
+        set.spawn(relay::gc_loop(relay_table.clone(), stop_rx.clone()));
+
         // One gossip pusher for the node, sharing the first receive socket.
         if gossip_enabled && let Some(transport) = self.transports.first().cloned() {
             set.spawn(gossip::gossip_loop(
@@ -273,6 +278,7 @@ impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
                     handshake_tx,
                     inf_timeout,
                     self.decrypt_workers,
+                    relay_table.clone(),
                 ));
             } else {
                 set.spawn(recv_decrypt_forward(
@@ -282,6 +288,7 @@ impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
                     sessions.clone(),
                     handshake_tx,
                     inf_timeout,
+                    relay_table.clone(),
                 ));
             }
 

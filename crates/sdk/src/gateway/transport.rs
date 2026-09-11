@@ -1,6 +1,8 @@
 #[cfg(feature = "udp")]
 pub mod udp;
 
+pub mod relay;
+
 #[cfg(test)]
 pub(crate) mod mock;
 #[cfg(feature = "ws")]

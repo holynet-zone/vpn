@@ -170,6 +170,25 @@ impl Sessions {
         }
     }
 
+    /// Resolve a node's advertised endpoint by its public key. Used by the relay
+    /// to forward only to known registry members (never arbitrary hosts).
+    pub fn node_endpoint(&self, node_pk: &PublicKey) -> Option<SocketAddr> {
+        match &self.registry {
+            Some(reg) => reg
+                .read()
+                .unwrap()
+                .active_entries()
+                .into_iter()
+                .find(|e| &e.node_pk == node_pk)
+                .map(|e| e.endpoint),
+            None => self
+                .nodes
+                .iter()
+                .find(|e| &e.node_pk == node_pk)
+                .map(|e| e.endpoint),
+        }
+    }
+
     /// Merge gossiped records into the live registry. Returns how many were
     /// applied (0 in unsigned mode or if none were new/valid).
     pub fn merge_records(&self, records: Vec<NodeRecord>) -> usize {

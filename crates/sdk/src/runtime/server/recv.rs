@@ -58,13 +58,14 @@ pub(super) fn lease_reply(
 /// - **Data packets** → batched and written to `network` via `send_multiple`.
 /// - **Keepalive** → response encrypted and sent back inline.
 /// - **Handshakes** → forwarded to `handshake_tx` (rare, may allocate).
-pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
+pub(super) async fn recv_decrypt_forward<T: Transport + 'static, N: Network>(
     mut stop: watch::Receiver<bool>,
     transport: Arc<T>,
     network: Arc<N>,
     sessions: Sessions,
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
     inf_sessions_timeout: bool,
+    relay_table: Arc<super::relay::RelayTable>,
 ) {
     let mut udp_buf = [0u8; 65536];
     let mut encode_buf = [0u8; 65600]; // for keepalive response encoding, reused in-place
@@ -282,6 +283,15 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                         if let Err(e) = transport.send_to(&frame, &addr).await {
                             debug!("[{}] ping reflect failed: {}", addr, e);
                         }
+                    }
+
+                    Some(PacketRef::RelayOpen(dest_pk)) => {
+                        super::relay::open(&relay_table, &sessions, &transport, dest_pk, addr)
+                            .await;
+                    }
+
+                    Some(PacketRef::RelayData { relay_id, payload }) => {
+                        super::relay::forward(&relay_table, relay_id, payload, addr).await;
                     }
 
                     Some(_) => warn!("[{}] unexpected packet variant", addr),

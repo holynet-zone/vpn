@@ -16,6 +16,11 @@ impl UdpTransport {
     ///
     /// Only available on Linux and some BSD systems
     #[cfg(feature = "udp-reuse-port")]
+    /// Local socket address (resolves the actual port when bound to `:0`).
+    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.socket.local_addr()
+    }
+
     pub fn new_pool(
         addr: SocketAddr,
         so_rcvbuf: usize,

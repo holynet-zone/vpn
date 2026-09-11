@@ -128,6 +128,14 @@ pub(crate) const TYPE_DATA_CLIENT: u8 = 2;
 pub(crate) const TYPE_NODE_SYNC: u8 = 4;
 /// `NodePing` wire type byte (liveness probe, reflected verbatim).
 pub(crate) const TYPE_NODE_PING: u8 = 5;
+/// `RelayOpen` wire type byte (client asks a node to open a transparent relay).
+pub(crate) const TYPE_RELAY_OPEN: u8 = 6;
+/// `RelayOpened` wire type byte (relay open reply).
+pub(crate) const TYPE_RELAY_OPENED: u8 = 7;
+/// `RelayData` wire type byte (opaque relayed payload).
+pub(crate) const TYPE_RELAY_DATA: u8 = 8;
+/// Fixed `RelayData` header: `type(1) | relay_id(u32 BE)`.
+pub(crate) const RELAY_DATA_HDR_LEN: usize = 1 + 4;
 
 /// Build a 9-byte liveness-probe frame: `type(1) | nonce(u64 BE)`.
 pub(crate) fn node_ping_frame(nonce: u64) -> [u8; 9] {
@@ -135,6 +143,31 @@ pub(crate) fn node_ping_frame(nonce: u64) -> [u8; 9] {
     frame[0] = TYPE_NODE_PING;
     frame[1..9].copy_from_slice(&nonce.to_be_bytes());
     frame
+}
+
+/// Build a 33-byte `RelayOpen` request: `type(1) | dest_pk(32)`.
+pub(crate) fn relay_open_frame(dest_pk: &[u8; 32]) -> [u8; 33] {
+    let mut frame = [0u8; 33];
+    frame[0] = TYPE_RELAY_OPEN;
+    frame[1..33].copy_from_slice(dest_pk);
+    frame
+}
+
+/// Build a 5-byte `RelayOpened` reply: `type(1) | relay_id(u32 BE)`.
+pub(crate) fn relay_opened_frame(relay_id: u32) -> [u8; 5] {
+    let mut frame = [0u8; 5];
+    frame[0] = TYPE_RELAY_OPENED;
+    frame[1..5].copy_from_slice(&relay_id.to_be_bytes());
+    frame
+}
+
+/// Write a `RelayData` frame (`type | relay_id | payload`) into `out`. Returns
+/// the total length. Caller must ensure `out.len() >= RELAY_DATA_HDR_LEN + payload.len()`.
+pub(crate) fn write_relay_data(out: &mut [u8], relay_id: u32, payload: &[u8]) -> usize {
+    out[0] = TYPE_RELAY_DATA;
+    out[1..5].copy_from_slice(&relay_id.to_be_bytes());
+    out[RELAY_DATA_HDR_LEN..RELAY_DATA_HDR_LEN + payload.len()].copy_from_slice(payload);
+    RELAY_DATA_HDR_LEN + payload.len()
 }
 /// `DataServer` header length: `type(1) + nonce(8)`.
 pub(crate) const DATA_SERVER_HDR_LEN: usize = 1 + 8;
