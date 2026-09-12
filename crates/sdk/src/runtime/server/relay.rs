@@ -254,7 +254,7 @@ pub(super) async fn gc_loop(table: Arc<RelayTable>, mut stop: watch::Receiver<bo
 mod tests {
     use super::*;
     use crate::crypto::SecretKey;
-    use crate::gateway::transport::relay::RelayTransport;
+    use crate::gateway::transport::relay::RelayChain;
     use crate::gateway::transport::udp::UdpTransport;
     use crate::gateway::transport::{ClientTransport, TransportReceiver, TransportSender};
     use crate::identity::AccountKey;
@@ -262,7 +262,54 @@ mod tests {
     use crate::registry::{NodeRecord, NodeRegistry};
     use tokio::net::UdpSocket;
 
-    /// End-to-end relay: client (RelayTransport) -> US relay -> dest echo -> back.
+    /// Spawn a transparent relay node whose registry resolves `known` peers.
+    /// Returns the node's listen address.
+    async fn spawn_relay_node(auth: &AccountKey, known: Vec<(PublicKey, SocketAddr)>) -> SocketAddr {
+        let buf = 1 << 20;
+        let lo = "127.0.0.1:0";
+        let mut reg = NodeRegistry::new(auth.public());
+        for (i, (pk, addr)) in known.into_iter().enumerate() {
+            let entry = NodeEntry {
+                node_pk: pk,
+                endpoint: addr,
+                subnet: "10.0.0.0".parse().unwrap(),
+                prefix: 18,
+                label: format!("n{i}"),
+            };
+            reg.merge(NodeRecord::sign(auth, entry, 1, false));
+        }
+        let sessions = Sessions::with_config(
+            &"10.0.0.0".parse().unwrap(),
+            18,
+            Vec::new(),
+            Vec::new(),
+            Some(reg),
+        );
+        let node = Arc::new(
+            UdpTransport::new_pool(lo.parse().unwrap(), buf, buf, 1)
+                .unwrap()
+                .pop()
+                .unwrap(),
+        );
+        let addr = node.local_addr().unwrap();
+        let table = Arc::new(RelayTable::new());
+        tokio::spawn(async move {
+            let mut b = [0u8; 65536];
+            loop {
+                let (n, from) = node.recv_from(&mut b).await.unwrap();
+                match PacketRef::from_bytes(&b[..n]) {
+                    Some(PacketRef::RelayOpen(pk)) => open(&table, &sessions, &node, pk, from).await,
+                    Some(PacketRef::RelayData { relay_id, payload }) => {
+                        forward(&table, relay_id, payload, from).await
+                    }
+                    _ => {}
+                }
+            }
+        });
+        addr
+    }
+
+    /// End-to-end relay: client (RelayChain) -> US relay -> dest echo -> back.
     #[tokio::test]
     async fn relay_round_trips_through_us_to_dest() {
         let buf = 1 << 20;
@@ -329,7 +376,7 @@ mod tests {
 
         // Client tunnels to dest through US.
         let inner = Arc::new(UdpTransport::new(us_addr, buf, buf).unwrap());
-        let relay = RelayTransport::new(inner, dest_pk, Duration::from_millis(1000));
+        let relay = RelayChain::new(inner, vec![dest_pk], Duration::from_millis(1000));
         relay.connect().await.expect("relay open");
 
         relay.send(b"hello relay").await.unwrap();
@@ -339,6 +386,43 @@ mod tests {
             .expect("no reply")
             .unwrap();
         assert_eq!(&rbuf[..n], b"hello relay");
+    }
+
+    /// Arbitrary-depth chain: client -> R1 -> R2 -> dest echo -> back, one
+    /// RelayData layer per hop stripped by each relay in turn.
+    #[tokio::test]
+    async fn relay_chains_two_hops_to_dest() {
+        let buf = 1 << 20;
+        let lo = "127.0.0.1:0";
+        let auth = AccountKey::generate();
+
+        let dest = UdpSocket::bind(lo).await.unwrap();
+        let dest_addr = dest.local_addr().unwrap();
+        let dest_pk = PublicKey::from_secret(&SecretKey::generate_x25519());
+        tokio::spawn(async move {
+            let mut b = [0u8; 65536];
+            loop {
+                let (n, src) = dest.recv_from(&mut b).await.unwrap();
+                let _ = dest.send_to(&b[..n], src).await;
+            }
+        });
+
+        // R2 resolves dest; R1 resolves R2. Client dials R1.
+        let r2_pk = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let r2_addr = spawn_relay_node(&auth, vec![(dest_pk.clone(), dest_addr)]).await;
+        let r1_addr = spawn_relay_node(&auth, vec![(r2_pk.clone(), r2_addr)]).await;
+
+        let inner = Arc::new(UdpTransport::new(r1_addr, buf, buf).unwrap());
+        let relay = RelayChain::new(inner, vec![r2_pk, dest_pk], Duration::from_millis(1000));
+        relay.connect().await.expect("chain open");
+
+        relay.send(b"hello chain").await.unwrap();
+        let mut rbuf = [0u8; 1024];
+        let n = tokio::time::timeout(Duration::from_millis(1000), relay.recv(&mut rbuf))
+            .await
+            .expect("no reply")
+            .unwrap();
+        assert_eq!(&rbuf[..n], b"hello chain");
     }
 
     /// A relay to an unknown destination is refused (RelayOpened id = 0).
@@ -376,7 +460,7 @@ mod tests {
 
         let unknown = PublicKey::from_secret(&SecretKey::generate_x25519());
         let inner = Arc::new(UdpTransport::new(us_addr, buf, buf).unwrap());
-        let relay = RelayTransport::new(inner, unknown, Duration::from_millis(1000));
+        let relay = RelayChain::new(inner, vec![unknown], Duration::from_millis(1000));
         assert!(
             relay.connect().await.is_err(),
             "unknown dest must be refused"

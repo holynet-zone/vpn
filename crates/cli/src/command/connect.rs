@@ -5,7 +5,7 @@ use clap::Args;
 use holynet_sdk::crypto::PublicKey;
 use holynet_sdk::gateway::network::tun::TunNetwork;
 use holynet_sdk::gateway::transport::ClientTransport;
-use holynet_sdk::gateway::transport::relay::RelayTransport;
+use holynet_sdk::gateway::transport::relay::RelayChain;
 use holynet_sdk::gateway::transport::udp::UdpTransport;
 use holynet_sdk::protocol::Alg;
 use holynet_sdk::runtime::client::ClientBuilder;
@@ -45,8 +45,8 @@ pub struct ConnectCmd {
     #[arg(long, value_name = "HOST:PORT")]
     via: Option<String>,
     /// Intermediate relay pubkey(s) to chain before the target (multi-hop).
-    /// `--via R1 --hop R2pk` gives client->R1->R2->target. Each relay must know
-    /// the next hop in its registry. Currently at most one `--hop` (3-hop total).
+    /// `--via R1 --hop R2pk --hop R3pk` gives client->R1->R2->R3->target. Each
+    /// relay must know its next hop in its registry. Repeatable, no depth limit.
     #[arg(long, value_name = "PUBKEY", requires = "via")]
     hop: Vec<String>,
 }
@@ -198,23 +198,16 @@ impl ConnectCmd {
             }
         };
 
-        // Nesting a RelayTransport per hop gives multi-hop for free: each relay
-        // forwards opaque bytes, stripping exactly its own layer.
-        match (self.via.is_some(), hop_pks.as_slice()) {
-            (false, _) => run_client(udp, tun, tun_arc, cred, alg, runtime, routes).await,
-            (true, []) => {
-                let relay = RelayTransport::new(Arc::new(udp), dest_pk, hs_to);
-                run_client(relay, tun, tun_arc, cred, alg, runtime, routes).await;
-            }
-            (true, [h1]) => {
-                let inner = RelayTransport::new(Arc::new(udp), h1.clone(), hs_to);
-                let outer = RelayTransport::new(Arc::new(inner), dest_pk, hs_to);
-                run_client(outer, tun, tun_arc, cred, alg, runtime, routes).await;
-            }
-            (true, _) => {
-                success_err!("at most one --hop (3-hop) is currently supported");
-                process::exit(1);
-            }
+        // A RelayChain applies one RelayData layer per hop over a single socket:
+        // each relay forwards opaque bytes, stripping exactly its own layer, so
+        // the depth is just the number of destinations (arbitrary).
+        if self.via.is_some() {
+            let mut dests = hop_pks;
+            dests.push(dest_pk);
+            let relay = RelayChain::new(Arc::new(udp), dests, hs_to);
+            run_client(relay, tun, tun_arc, cred, alg, runtime, routes).await;
+        } else {
+            run_client(udp, tun, tun_arc, cred, alg, runtime, routes).await;
         }
     }
 }
