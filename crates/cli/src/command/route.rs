@@ -19,8 +19,9 @@ pub struct RouteCmd {
     /// Connection config file path, or base64-encoded connection key
     #[arg(value_name = "CONNECTION")]
     connection: String,
-    /// Entry node to fetch the topology from (host:port). Defaults to the
-    /// connection's own server. Must be directly reachable and know your account.
+    /// Alternate address (host:port) to reach the target node for the topology
+    /// fetch, if it differs from the config. This is the SAME node (same key),
+    /// just a different address; it is not a different entry node.
     #[arg(long, value_name = "HOST:PORT")]
     entry: Option<String>,
 }
