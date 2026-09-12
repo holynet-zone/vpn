@@ -3,8 +3,8 @@ use std::net::IpAddr;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use super::NodeEntry;
 use super::varint::{read_u32, read_u128, read_usize};
+use super::{EdgeMetric, NodeEntry};
 
 /// Bodies encrypted inside a Noise transport message.
 #[derive(Serialize, Deserialize)]
@@ -16,6 +16,8 @@ pub enum DataServerBody {
     Disconnect(u8),
     LeaseGrant(IpAddr),
     NodeList(Vec<NodeEntry>),
+    /// Inter-node routing overlay snapshot for client-side path planning.
+    EdgeList(Vec<EdgeMetric>),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -25,6 +27,7 @@ pub enum DataClientBody {
     KeepAlive(u128),
     LeaseRequest,
     NodeListRequest,
+    EdgeListRequest,
 }
 
 // Zero-copy borrowed views decoded from PLAIN_BUF
@@ -44,6 +47,7 @@ pub(crate) enum DataClientBodyRef<'a> {
     KeepAlive(u128),
     LeaseRequest,
     NodeListRequest,
+    EdgeListRequest,
 }
 
 impl<'a> DataClientBodyRef<'a> {
@@ -65,6 +69,7 @@ impl<'a> DataClientBodyRef<'a> {
             }
             2 => Some(DataClientBodyRef::LeaseRequest),
             3 => Some(DataClientBodyRef::NodeListRequest),
+            4 => Some(DataClientBodyRef::EdgeListRequest),
             _ => None,
         }
     }
@@ -93,6 +98,7 @@ pub(crate) enum DataServerBodyRef<'a> {
     Disconnect(u8),
     LeaseGrant(IpAddr),
     NodeList(Vec<NodeEntry>),
+    EdgeList(Vec<EdgeMetric>),
 }
 
 impl<'a> DataServerBodyRef<'a> {
@@ -125,6 +131,12 @@ impl<'a> DataServerBodyRef<'a> {
                 let (nodes, _): (Vec<NodeEntry>, _) =
                     bincode::serde::decode_from_slice(buf, bincode::config::standard()).ok()?;
                 Some(DataServerBodyRef::NodeList(nodes))
+            }
+            5 => {
+                // EdgeList(Vec<EdgeMetric>): rare owned control message, full bincode.
+                let (edges, _): (Vec<EdgeMetric>, _) =
+                    bincode::serde::decode_from_slice(buf, bincode::config::standard()).ok()?;
+                Some(DataServerBodyRef::EdgeList(edges))
             }
             _ => None,
         }
@@ -257,6 +269,44 @@ mod tests {
             let enc = encode_server(&DataServerBody::NodeList(nodes.clone()));
             match DataServerBodyRef::from_plain_buf(&enc).unwrap() {
                 DataServerBodyRef::NodeList(got) => assert_eq!(got, nodes),
+                _ => panic!("wrong variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_client_edge_list_request_roundtrip() {
+        let enc = encode_client(&DataClientBody::EdgeListRequest);
+        match DataClientBodyRef::from_plain_buf(&enc).unwrap() {
+            DataClientBodyRef::EdgeListRequest => {}
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_server_edge_list_roundtrip() {
+        use crate::crypto::{PublicKey, SecretKey};
+        use crate::protocol::EdgeMetric;
+        let a = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let b = PublicKey::from_secret(&SecretKey::generate_x25519());
+        for edges in [
+            vec![],
+            vec![EdgeMetric {
+                from: a.clone(),
+                to: b.clone(),
+                rtt_micros: Some(1234),
+                updated_ms: 99,
+            }],
+            vec![EdgeMetric {
+                from: a,
+                to: b,
+                rtt_micros: None,
+                updated_ms: 7,
+            }],
+        ] {
+            let enc = encode_server(&DataServerBody::EdgeList(edges.clone()));
+            match DataServerBodyRef::from_plain_buf(&enc).unwrap() {
+                DataServerBodyRef::EdgeList(got) => assert_eq!(got, edges),
                 _ => panic!("wrong variant"),
             }
         }

@@ -4,6 +4,9 @@ mod network;
 mod network_pool;
 mod recv;
 mod recv_pool;
+mod route;
+
+pub use route::plan_route;
 
 use std::{sync::Arc, time::Duration};
 
@@ -13,14 +16,14 @@ use tracing::{debug, warn};
 
 use crate::{
     gateway::{network::Network, transport::ClientTransport},
-    protocol::{Alg, NodeEntry},
+    protocol::{Alg, EdgeMetric, NodeEntry},
     runtime::{
         client::{
             keepalive::keepalive_sender, network::encrypt_forward, recv::recv_decrypt_forward,
         },
         cred::Cred,
         error::{BuildError, RuntimeError},
-        handshake::{handshake_step, node_list_step},
+        handshake::{edge_list_step, handshake_step, node_list_step},
         state::{ClientSession, RuntimeState},
     },
 };
@@ -41,6 +44,25 @@ pub async fn fetch_node_list<T: ClientTransport>(
     let (payload, transport_state) = handshake_step(transport.clone(), cred, alg, timeout).await?;
     let session = ClientSession::new(transport_state);
     node_list_step(transport, &session, payload.sid, timeout).await
+}
+
+/// One-shot control query fetching both the node registry and the inter-node
+/// routing overlay over a single session, for client-side path planning.
+pub async fn fetch_topology<T: ClientTransport>(
+    transport: Arc<T>,
+    cred: &Cred,
+    alg: &Alg,
+    timeout: Duration,
+) -> Result<(Vec<NodeEntry>, Vec<EdgeMetric>), RuntimeError> {
+    transport
+        .connect()
+        .await
+        .map_err(|e| RuntimeError::IO(format!("connect: {}", e)))?;
+    let (payload, transport_state) = handshake_step(transport.clone(), cred, alg, timeout).await?;
+    let session = ClientSession::new(transport_state);
+    let nodes = node_list_step(transport.clone(), &session, payload.sid, timeout).await?;
+    let edges = edge_list_step(transport, &session, payload.sid, timeout).await?;
+    Ok((nodes, edges))
 }
 
 /// Measure round-trip time to a node's UDP endpoint with a single reflected

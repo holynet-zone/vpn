@@ -445,6 +445,22 @@ async fn decrypt_one<T: Transport + 'static>(
                             }
                         }
                     }
+                    Ok(DataClientActionRef::EdgeListRequest) => {
+                        let reply = DataServerBody::EdgeList(sessions.edge_snapshot());
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                            Err(e) => error!("[{}] edge-list encrypt failed: {}", slot.addr, e),
+                            Ok(encrypted) => {
+                                let m =
+                                    encode_data_server_frame(send_nonce, &encrypted, encode_buf);
+                                if let Err(e) =
+                                    transport.send_to(&encode_buf[..m], &slot.addr).await
+                                {
+                                    error!("[{}] edge-list send failed: {}", slot.addr, e);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

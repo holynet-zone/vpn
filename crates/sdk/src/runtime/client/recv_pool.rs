@@ -376,6 +376,9 @@ fn decrypt_one(
                 Ok(DataServerActionRef::NodeList(_)) => {
                     warn!("unexpected node list in steady state");
                 }
+                Ok(DataServerActionRef::EdgeList(_)) => {
+                    warn!("unexpected edge list in steady state");
+                }
             }
         }
 

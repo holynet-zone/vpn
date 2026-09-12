@@ -283,6 +283,7 @@ pub(crate) enum DataClientActionRef<'p> {
     KeepAlive(u128),
     LeaseRequest,
     NodeListRequest,
+    EdgeListRequest,
 }
 
 /// Result of decrypting a DataServerBody (client receives this from server).
@@ -298,6 +299,7 @@ pub(crate) enum DataServerActionRef<'p> {
     Disconnect(u8),
     LeaseGrant(std::net::IpAddr),
     NodeList(Vec<NodeEntry>),
+    EdgeList(Vec<crate::protocol::EdgeMetric>),
 }
 
 /// Decrypt a DataClientBody from raw ciphertext directly into `plain`.
@@ -326,6 +328,7 @@ pub(crate) fn noise_decrypt_data_client_into<'p>(
         DataClientBodyRef::KeepAlive(ts) => DataClientActionRef::KeepAlive(ts),
         DataClientBodyRef::LeaseRequest => DataClientActionRef::LeaseRequest,
         DataClientBodyRef::NodeListRequest => DataClientActionRef::NodeListRequest,
+        DataClientBodyRef::EdgeListRequest => DataClientActionRef::EdgeListRequest,
     })
 }
 
@@ -349,6 +352,7 @@ pub(crate) fn noise_decrypt_data_server_into<'p>(
         DataServerBodyRef::Disconnect(code) => DataServerActionRef::Disconnect(code),
         DataServerBodyRef::LeaseGrant(ip) => DataServerActionRef::LeaseGrant(ip),
         DataServerBodyRef::NodeList(nodes) => DataServerActionRef::NodeList(nodes),
+        DataServerBodyRef::EdgeList(edges) => DataServerActionRef::EdgeList(edges),
     })
 }
 

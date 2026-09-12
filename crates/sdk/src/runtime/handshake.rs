@@ -9,7 +9,7 @@ use tracing::warn;
 use crate::gateway::transport::ClientTransport;
 use crate::protocol::handshake::{alg_hint_byte, params_from_alg};
 use crate::protocol::{
-    Alg, DataClientBody, EncryptedHandshake, HandshakeError, HandshakeResponderBody,
+    Alg, DataClientBody, EdgeMetric, EncryptedHandshake, HandshakeError, HandshakeResponderBody,
     HandshakeResponderPayload, NodeEntry, Packet, PacketRef, SessionId,
 };
 use crate::runtime::cred::Cred;
@@ -176,6 +176,45 @@ pub async fn node_list_step<T: ClientTransport>(
                         Ok(DataServerActionRef::NodeList(nodes)) => break Ok(nodes),
                         Ok(_) => continue,
                         Err(e) => { warn!("decrypt node-list response: {}", e); continue; }
+                    }
+                }
+                _ => continue,
+            }
+        }} => res,
+    }
+}
+
+/// Request the inter-node routing overlay over the control channel. Sends an
+/// `EdgeListRequest` and awaits the `EdgeList` reply.
+pub async fn edge_list_step<T: ClientTransport>(
+    transport: Arc<T>,
+    session: &ClientSession,
+    sid: SessionId,
+    timeout: Duration,
+) -> Result<Vec<EdgeMetric>, RuntimeError> {
+    let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+    let encrypted = noise_encrypt(&DataClientBody::EdgeListRequest, &session.noise, nonce)
+        .map_err(|e| RuntimeError::Handshake(format!("edge-list encrypt: {}", e)))?;
+    let mut out = [0u8; 128];
+    let n = encode_data_client_frame(sid, nonce, &encrypted, &mut out);
+    transport.send(&out[..n]).await?;
+
+    let mut buffer = [0u8; 65536];
+    let mut plain = [0u8; 65536];
+    select! {
+        _ = tokio::time::sleep(timeout) => Err(RuntimeError::Handshake(
+            format!("edge-list timeout ({:?})", timeout)
+        )),
+        res = async { loop {
+            let size = transport.recv(&mut buffer).await.map_err(
+                |err| RuntimeError::IO(format!("receive edge-list: {}", err))
+            )?;
+            match PacketRef::from_bytes(&buffer[..size]) {
+                Some(PacketRef::DataServer { nonce, ciphertext }) => {
+                    match noise_decrypt_data_server_into(ciphertext, &session.noise, &mut plain, nonce) {
+                        Ok(DataServerActionRef::EdgeList(edges)) => break Ok(edges),
+                        Ok(_) => continue,
+                        Err(e) => { warn!("decrypt edge-list response: {}", e); continue; }
                     }
                 }
                 _ => continue,

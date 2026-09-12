@@ -270,6 +270,32 @@ pub(super) async fn recv_decrypt_forward<T: Transport + 'static, N: Network>(
                                             }
                                         }
                                     }
+                                    Ok(DataClientActionRef::EdgeListRequest) => {
+                                        let reply =
+                                            DataServerBody::EdgeList(sessions.edge_snapshot());
+                                        let send_nonce =
+                                            session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                                            Err(e) => {
+                                                error!("[{}] edge-list encrypt failed: {}", addr, e)
+                                            }
+                                            Ok(encrypted) => {
+                                                let m = encode_data_server_frame(
+                                                    send_nonce,
+                                                    &encrypted,
+                                                    &mut encode_buf,
+                                                );
+                                                if let Err(e) =
+                                                    transport.send_to(&encode_buf[..m], &addr).await
+                                                {
+                                                    error!(
+                                                        "[{}] edge-list send failed: {}",
+                                                        addr, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
