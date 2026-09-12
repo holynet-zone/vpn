@@ -43,7 +43,12 @@ impl<T: ClientTransport> TransportSender for RelayTransport<T> {
     fn send<'a>(&'a self, data: &'a [u8]) -> impl Future<Output = io::Result<usize>> + Send + 'a {
         async move {
             let id = self.relay_id.load(Ordering::Relaxed);
-            let mut frame = vec![0u8; RELAY_DATA_HDR_LEN + data.len()];
+            // Stack scratch (no per-packet heap alloc); one UDP datagram never
+            // exceeds this. Oversized input is rejected rather than truncated.
+            let mut frame = [0u8; 65600];
+            if RELAY_DATA_HDR_LEN + data.len() > frame.len() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "relay frame too large"));
+            }
             let n = write_relay_data(&mut frame, id, data);
             self.inner.send(&frame[..n]).await?;
             Ok(data.len())
