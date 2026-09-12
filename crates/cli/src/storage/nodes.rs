@@ -36,6 +36,15 @@ impl Nodes {
         }
     }
 
+    /// Synchronous delete for the SDK's tombstone-reap callback: drops a reaped
+    /// record so it does not reload into the registry on the next restart.
+    pub fn delete_blocking(&self, record: &NodeRecord) {
+        let key = *record.node_pk().as_bytes();
+        if let Err(e) = self.db.remove(key.as_slice()) {
+            tracing::warn!("delete reaped node record failed: {}", e);
+        }
+    }
+
     pub async fn get_all(&self) -> Vec<NodeRecord> {
         let db = self.db.clone();
         task::spawn_blocking(move || {

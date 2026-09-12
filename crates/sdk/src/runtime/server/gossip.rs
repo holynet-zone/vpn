@@ -7,7 +7,7 @@
 //! transitively as each node re-advertises what it has learned.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::watch;
 use tracing::{debug, warn};
@@ -16,6 +16,18 @@ use super::session::Sessions;
 use crate::crypto::PublicKey;
 use crate::gateway::transport::Transport;
 use crate::runtime::crypto::TYPE_NODE_SYNC;
+
+/// How long a revoked tombstone is retained before GC. It must exceed the
+/// longest survivable partition (a lagging peer still holding the pre-revocation
+/// record would otherwise resurrect the node), so this is deliberately weeks.
+const TOMBSTONE_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 pub(super) async fn gossip_loop<T: Transport>(
     mut stop: watch::Receiver<bool>,
@@ -31,6 +43,12 @@ pub(super) async fn gossip_loop<T: Transport>(
         tokio::select! {
             _ = stop.changed() => break,
             _ = ticker.tick() => {
+                // Reap tombstones older than the TTL, in step with each push.
+                let cutoff = now_millis().saturating_sub(TOMBSTONE_TTL.as_millis() as u64);
+                let reaped = sessions.gc_tombstones(cutoff);
+                if reaped > 0 {
+                    debug!("reaped {} expired tombstone(s)", reaped);
+                }
                 let snapshot = sessions.sync_snapshot();
                 let targets = sessions.gossip_targets(&self_pk);
                 if snapshot.is_empty() || targets.is_empty() {
@@ -221,6 +239,39 @@ mod tests {
             n,
             "stale merge must not invoke the sink"
         );
+    }
+
+    #[test]
+    fn gc_tombstones_reaps_and_notifies_reap_sink() {
+        use std::sync::Mutex;
+
+        let auth = AccountKey::generate();
+        let (_pk, entry) = node("gone", 6100);
+        let sessions = Sessions::with_config(
+            &"10.0.0.0".parse().unwrap(),
+            18,
+            Vec::new(),
+            Vec::new(),
+            Some(NodeRegistry::new(auth.public())),
+        );
+        let reaped = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = reaped.clone();
+        sessions.set_reap_callback(Box::new(move |recs| {
+            sink.lock()
+                .unwrap()
+                .extend(recs.iter().map(|r| r.entry.label.clone()));
+        }));
+
+        // Old tombstone (version 100) is merged, then reaped under a later cutoff.
+        on_node_sync(
+            &sessions,
+            &payload(&[NodeRecord::sign(&auth, entry, 100, true)]),
+        );
+        assert_eq!(sessions.gc_tombstones(1000), 1);
+        assert_eq!(*reaped.lock().unwrap(), vec!["gone".to_string()]);
+        // Idempotent: nothing left, sink not invoked again.
+        assert_eq!(sessions.gc_tombstones(1000), 0);
+        assert_eq!(reaped.lock().unwrap().len(), 1);
     }
 
     #[test]

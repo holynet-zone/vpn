@@ -115,6 +115,10 @@ pub struct Sessions {
     /// host (CLI) can persist them. Set once after construction; shared by clones.
     #[allow(clippy::type_complexity)]
     on_merge: Arc<OnceLock<Box<dyn Fn(&[NodeRecord]) + Send + Sync>>>,
+    /// Optional sink invoked with tombstones reaped by `gc_tombstones`, so a host
+    /// (CLI) can drop them from durable storage too. Shared by clones.
+    #[allow(clippy::type_complexity)]
+    on_reap: Arc<OnceLock<Box<dyn Fn(&[NodeRecord]) + Send + Sync>>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -163,6 +167,7 @@ impl Sessions {
             nodes: Arc::new(nodes),
             registry: registry.map(|r| Arc::new(RwLock::new(r))),
             on_merge: Arc::new(OnceLock::new()),
+            on_reap: Arc::new(OnceLock::new()),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
     }
@@ -171,6 +176,27 @@ impl Sessions {
     /// call before cloning `Sessions` into workers so all clones share it.
     pub fn set_merge_callback(&self, cb: Box<dyn Fn(&[NodeRecord]) + Send + Sync>) {
         let _ = self.on_merge.set(cb);
+    }
+
+    /// Register a sink for reaped tombstones (durable-cleanup hook). Idempotent;
+    /// call before cloning `Sessions` into workers so all clones share it.
+    pub fn set_reap_callback(&self, cb: Box<dyn Fn(&[NodeRecord]) + Send + Sync>) {
+        let _ = self.on_reap.set(cb);
+    }
+
+    /// Reap tombstones older than `cutoff_millis` from the live registry and
+    /// notify the reap sink. Returns how many were reaped (0 in unsigned mode).
+    pub fn gc_tombstones(&self, cutoff_millis: u64) -> usize {
+        let Some(reg) = &self.registry else {
+            return 0;
+        };
+        let reaped = reg.write().unwrap().gc_tombstones(cutoff_millis);
+        if !reaped.is_empty()
+            && let Some(cb) = self.on_reap.get()
+        {
+            cb(&reaped);
+        }
+        reaped.len()
     }
 
     /// Snapshot of the active node registry for a `NodeList` control reply.

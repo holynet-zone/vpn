@@ -196,6 +196,27 @@ impl NodeRegistry {
         out
     }
 
+    /// Reap revoked tombstones whose LWW `version` (unix-millis, as issued by the
+    /// default signing path) predates `cutoff_millis`, returning the reaped
+    /// records so callers can drop them from durable storage too.
+    ///
+    /// A tombstone must outlive the longest survivable partition: reap one too
+    /// early and a lagging peer still holding the pre-revocation record would
+    /// resurrect the node. Pick `cutoff` well past the maximum expected partition
+    /// (weeks), never minutes.
+    pub fn gc_tombstones(&mut self, cutoff_millis: u64) -> Vec<NodeRecord> {
+        let stale: Vec<PublicKey> = self
+            .records
+            .iter()
+            .filter(|(_, r)| r.revoked && r.version < cutoff_millis)
+            .map(|(pk, _)| pk.clone())
+            .collect();
+        stale
+            .into_iter()
+            .filter_map(|pk| self.records.remove(&pk))
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }
@@ -348,6 +369,39 @@ mod tests {
         assert_eq!(back, rec);
         assert!(back.verify());
         assert!(NodeRecord::from_base64("!!!not-base64").is_err());
+    }
+
+    #[test]
+    fn gc_reaps_only_old_tombstones() {
+        let auth = AccountKey::generate();
+        let pk_old = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let pk_fresh = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let pk_active = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let mut reg = NodeRegistry::new(auth.public());
+        // Old tombstone (version 100), fresh tombstone (version 5000), live node.
+        reg.merge(NodeRecord::sign(&auth, entry_for(&pk_old, "old"), 100, true));
+        reg.merge(NodeRecord::sign(
+            &auth,
+            entry_for(&pk_fresh, "fresh"),
+            5000,
+            true,
+        ));
+        reg.merge(NodeRecord::sign(
+            &auth,
+            entry_for(&pk_active, "live"),
+            100,
+            false,
+        ));
+
+        let reaped = reg.gc_tombstones(1000);
+        assert_eq!(reaped.len(), 1);
+        assert_eq!(reaped[0].entry.label, "old");
+        // Fresh tombstone (still relayed) and the active node survive.
+        assert_eq!(reg.records().len(), 2);
+        assert!(reg.records().iter().any(|r| r.revoked && r.version == 5000));
+        assert_eq!(reg.active_entries().len(), 1);
+        // Idempotent: nothing left to reap under the same cutoff.
+        assert!(reg.gc_tombstones(1000).is_empty());
     }
 
     #[test]

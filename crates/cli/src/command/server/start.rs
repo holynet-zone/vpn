@@ -145,7 +145,7 @@ impl StartCmd {
 
         let authority = config.general.authority.clone();
         let label = config.general.label.clone();
-        let builder = ServerBuilder::new(transports, network)
+        let mut builder = ServerBuilder::new(transports, network)
             .secret_key(config.general.secret_key)
             .known_accounts(known_accounts)
             .reservations(reservations)
@@ -154,6 +154,9 @@ impl StartCmd {
             .session_cleanup_interval(cleanup_interval)
             .handshake_buf(runtime.handshake_buf)
             .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers));
+        if let Some(secs) = config.general.gossip_interval {
+            builder = builder.gossip_interval(Duration::from_secs(secs));
+        }
         // Signed multi-node mode when an authority is configured (zero-trust
         // relay: this node only verifies operator-signed records, including its
         // own). Otherwise the unsigned single-network self-advertise.
@@ -162,12 +165,18 @@ impl StartCmd {
                 // Persist gossip-learned records so the registry survives restart
                 // without waiting for the next gossip cycle.
                 let store = node_store.clone();
+                let reap_store = node_store.clone();
                 builder
                     .trusted_authority(auth)
                     .node_records(node_records)
                     .on_registry_merge(move |recs| {
                         for r in recs {
                             store.save_blocking(r);
+                        }
+                    })
+                    .on_registry_reap(move |recs| {
+                        for r in recs {
+                            reap_store.delete_blocking(r);
                         }
                     })
             }

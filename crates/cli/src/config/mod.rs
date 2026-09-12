@@ -24,6 +24,9 @@ pub struct GeneralConfig {
     /// it stays in unsigned single-network mode.
     #[serde(default)]
     pub authority: Option<AccountPublicKey>,
+    /// Registry gossip push interval in seconds. Absent keeps the SDK default.
+    #[serde(default)]
+    pub gossip_interval: Option<u64>,
 }
 
 fn default_offload() -> bool {
@@ -126,6 +129,7 @@ impl Default for GeneralConfig {
             storage: PathBuf::from("database"),
             label: String::new(),
             authority: None,
+            gossip_interval: None,
         }
     }
 }
