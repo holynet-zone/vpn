@@ -45,7 +45,7 @@ const RELAY_SOCK_BUF: usize = 4 * 1024 * 1024;
 
 struct RelayFlow {
     socket: UdpTransport,
-    client_addr: Mutex<SocketAddr>,
+    client_addr: SocketAddr,
     last_seen: AtomicU64,
     reader: Mutex<Option<JoinHandle<()>>>,
 }
@@ -120,7 +120,7 @@ pub(super) async fn open<T: Transport + 'static>(
     let relay_id = table.alloc_id();
     let flow = Arc::new(RelayFlow {
         socket,
-        client_addr: Mutex::new(client_addr),
+        client_addr,
         last_seen: AtomicU64::new(sec_since_start()),
         reader: Mutex::new(None),
     });
@@ -134,7 +134,7 @@ pub(super) async fn open<T: Transport + 'static>(
 }
 
 /// Wrap datagrams the destination sends back as `RelayData{relay_id,..}` and
-/// deliver them to the flow's current client address. Batches with
+/// deliver them to the flow's pinned client address. Batches with
 /// `recvmmsg` (dest) + `sendmmsg` (client) to cut per-packet syscalls.
 async fn reader_loop<T: Transport>(relay_id: u32, flow: Arc<RelayFlow>, transport: Arc<T>) {
     let mut recv_bufs: Vec<Vec<u8>> = (0..RELAY_BATCH).map(|_| vec![0u8; RELAY_BUF]).collect();
@@ -159,7 +159,7 @@ async fn reader_loop<T: Transport>(relay_id: u32, flow: Arc<RelayFlow>, transpor
             }
         };
         flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
-        let client = *flow.client_addr.lock().unwrap();
+        let client = flow.client_addr;
 
         for i in 0..count {
             write_relay_data(&mut frames[i], relay_id, &recv_bufs[i][..lens[i]]);
@@ -183,13 +183,12 @@ pub(super) async fn forward(
     let Some(flow) = table.flows.get(&relay_id).map(|f| f.value().clone()) else {
         return;
     };
-    flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
-    {
-        let mut ca = flow.client_addr.lock().unwrap();
-        if *ca != from {
-            *ca = from; // client roamed / NAT rebind
-        }
+    // relay_id is a guessable counter; only the address that opened the flow may
+    // drive it, else a spoofed RelayData would hijack the reverse path.
+    if from != flow.client_addr {
+        return;
     }
+    flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
     if let Err(e) = flow.socket.send(payload).await {
         debug!("relay {} -> dest send failed: {}", relay_id, e);
     }
@@ -204,7 +203,7 @@ pub(super) async fn forward_batch(
     idx: &[(u32, usize, usize, SocketAddr)],
 ) {
     let mut done: Vec<u32> = Vec::new();
-    for &(id, _, _, from) in idx {
+    for &(id, _, _, _) in idx {
         if done.contains(&id) {
             continue;
         }
@@ -212,18 +211,17 @@ pub(super) async fn forward_batch(
         let Some(flow) = table.flows.get(&id).map(|f| f.value().clone()) else {
             continue;
         };
-        flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
-        {
-            let mut ca = flow.client_addr.lock().unwrap();
-            if *ca != from {
-                *ca = from; // client roamed / NAT rebind
-            }
-        }
+        // Only datagrams from the flow's pinned client are forwarded; spoofed
+        // ones (guessed relay_id from another address) are dropped.
         let refs: Vec<&[u8]> = idx
             .iter()
-            .filter(|e| e.0 == id)
+            .filter(|e| e.0 == id && e.3 == flow.client_addr)
             .map(|e| &scratch[e.1..e.1 + e.2])
             .collect();
+        if refs.is_empty() {
+            continue;
+        }
+        flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
         if let Err(e) = flow.socket.send_mmsg(&refs, None).await {
             debug!("relay {} -> dest batch send failed: {}", id, e);
         }
@@ -383,5 +381,65 @@ mod tests {
             relay.connect().await.is_err(),
             "unknown dest must be refused"
         );
+    }
+
+    /// A `RelayData` from an address other than the one that opened the flow is
+    /// dropped: the guessable `relay_id` cannot be used to hijack the path.
+    #[tokio::test]
+    async fn relay_drops_spoofed_source() {
+        let buf = 1 << 20;
+        let lo = "127.0.0.1:0";
+
+        let dest = UdpSocket::bind(lo).await.unwrap();
+        let dest_addr = dest.local_addr().unwrap();
+
+        let auth = AccountKey::generate();
+        let dest_pk = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let entry = NodeEntry {
+            node_pk: dest_pk.clone(),
+            endpoint: dest_addr,
+            subnet: "10.0.0.0".parse().unwrap(),
+            prefix: 18,
+            label: "ru".into(),
+        };
+        let mut reg = NodeRegistry::new(auth.public());
+        reg.merge(NodeRecord::sign(&auth, entry, 1, false));
+        let sessions = Sessions::with_config(
+            &"10.0.0.0".parse().unwrap(),
+            18,
+            Vec::new(),
+            Vec::new(),
+            Some(reg),
+        );
+
+        let us = Arc::new(
+            UdpTransport::new_pool(lo.parse().unwrap(), buf, buf, 1)
+                .unwrap()
+                .pop()
+                .unwrap(),
+        );
+
+        // The legit client's address pins the flow at open time.
+        let client = UdpSocket::bind(lo).await.unwrap();
+        let client_addr = client.local_addr().unwrap();
+
+        let table = Arc::new(RelayTable::new());
+        open(&table, &sessions, &us, dest_pk.as_slice(), client_addr).await;
+        let relay_id = 1; // first allocation
+
+        // Spoofed source: must not reach dest.
+        let spoof: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        forward(&table, relay_id, b"spoofed", spoof).await;
+        let mut b = [0u8; 64];
+        let leaked = tokio::time::timeout(Duration::from_millis(200), dest.recv_from(&mut b)).await;
+        assert!(leaked.is_err(), "spoofed source must be dropped");
+
+        // The pinned client is forwarded normally.
+        forward(&table, relay_id, b"legit", client_addr).await;
+        let (n, _) = tokio::time::timeout(Duration::from_millis(500), dest.recv_from(&mut b))
+            .await
+            .expect("legit payload was dropped")
+            .unwrap();
+        assert_eq!(&b[..n], b"legit");
     }
 }
