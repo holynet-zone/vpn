@@ -3,7 +3,10 @@ use crate::network::{RouteState, add_route};
 use crate::success_err;
 use clap::Args;
 use holynet_sdk::gateway::network::tun::TunNetwork;
+use holynet_sdk::gateway::transport::ClientTransport;
+use holynet_sdk::gateway::transport::relay::RelayTransport;
 use holynet_sdk::gateway::transport::udp::UdpTransport;
+use holynet_sdk::protocol::Alg;
 use holynet_sdk::runtime::client::ClientBuilder;
 use holynet_sdk::runtime::cred::Cred;
 use holynet_sdk::runtime::error::RuntimeError;
@@ -26,6 +29,11 @@ pub struct ConnectCmd {
     /// in the config (runtime kill-switch for buggy NICs).
     #[arg(long)]
     no_offload: bool,
+    /// Reach the target node through a relay node at this `host:port`. The dialed
+    /// address becomes the relay; the end-to-end session is still with the target
+    /// node (the config's server public key), which the relay never decrypts.
+    #[arg(long, value_name = "HOST:PORT")]
+    via: Option<String>,
 }
 
 /// Mutually-exclusive connection source: exactly one must be provided.
@@ -124,7 +132,20 @@ impl ConnectCmd {
             }
         };
 
-        let routes = match RouteState::new(server_addr.ip(), tun_name).build() {
+        // With `--via`, the client dials the relay node instead of the target;
+        // the end-to-end session is still with the target (config server pubkey).
+        let dial_addr = match &self.via {
+            Some(v) => match v.parse::<SocketAddr>() {
+                Ok(a) => a,
+                Err(e) => {
+                    success_err!("invalid --via address {}: {}", v, e);
+                    process::exit(1);
+                }
+            },
+            None => server_addr,
+        };
+
+        let routes = match RouteState::new(dial_addr.ip(), tun_name).build() {
             Ok(r) => Arc::new(r),
             Err(e) => {
                 success_err!("setup routes: {}", e);
@@ -132,7 +153,7 @@ impl ConnectCmd {
             }
         };
 
-        let transport = match UdpTransport::new(server_addr, runtime.so_rcvbuf, runtime.so_sndbuf) {
+        let udp = match UdpTransport::new(dial_addr, runtime.so_rcvbuf, runtime.so_sndbuf) {
             Ok(t) => t,
             Err(e) => {
                 success_err!("create transport: {}", e);
@@ -140,6 +161,7 @@ impl ConnectCmd {
             }
         };
 
+        let dest_pk = config.credentials.server_public_key.clone();
         let cred = Cred {
             sk: config.credentials.private_key,
             psk: config.credentials.pre_shared_key,
@@ -148,42 +170,68 @@ impl ConnectCmd {
         };
 
         let tun_arc = Arc::new(tun.clone());
+        let alg = config.general.alg;
 
-        let client = match ClientBuilder::new(transport, tun)
-            .alg(config.general.alg)
-            .keepalive(runtime.keepalive.map(Duration::from_secs))
-            .handshake_timeout(Duration::from_millis(runtime.handshake_timeout))
-            .cred(cred)
-            .encrypt_workers(crate::config::resolve_pool_workers(runtime.encrypt_workers))
-            .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers))
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                success_err!("build client: {}", e);
-                process::exit(1);
+        match self.via {
+            Some(_) => {
+                let relay = RelayTransport::new(
+                    Arc::new(udp),
+                    dest_pk,
+                    Duration::from_millis(runtime.handshake_timeout),
+                );
+                run_client(relay, tun, tun_arc, cred, alg, runtime, routes).await;
             }
-        };
-
-        let state_rx = client.subscribe();
-        tokio::spawn(tun_service(state_rx, tun_arc));
-
-        let routes_ctrlc = routes.clone();
-        ctrlc::set_handler(move || {
-            println!("Ctrl-C received, stopping...");
-            routes_ctrlc.restore();
-            thread::sleep(Duration::from_secs(1));
-            process::exit(0);
-        })
-        .expect("error setting Ctrl-C handler");
-
-        match client.run().await {
-            Ok(_) => unreachable!(),
-            Err(RuntimeError::StopSignal) => info!("runtime stopped"),
-            Err(e) => {
-                routes.restore();
-                success_err!("{}", e);
+            None => {
+                run_client(udp, tun, tun_arc, cred, alg, runtime, routes).await;
             }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_client<T: ClientTransport + 'static>(
+    transport: T,
+    tun: TunNetwork,
+    tun_arc: Arc<TunNetwork>,
+    cred: Cred,
+    alg: Alg,
+    runtime: RuntimeConfig,
+    routes: Arc<RouteState>,
+) {
+    let client = match ClientBuilder::new(transport, tun)
+        .alg(alg)
+        .keepalive(runtime.keepalive.map(Duration::from_secs))
+        .handshake_timeout(Duration::from_millis(runtime.handshake_timeout))
+        .cred(cred)
+        .encrypt_workers(crate::config::resolve_pool_workers(runtime.encrypt_workers))
+        .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            success_err!("build client: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let state_rx = client.subscribe();
+    tokio::spawn(tun_service(state_rx, tun_arc));
+
+    let routes_ctrlc = routes.clone();
+    ctrlc::set_handler(move || {
+        println!("Ctrl-C received, stopping...");
+        routes_ctrlc.restore();
+        thread::sleep(Duration::from_secs(1));
+        process::exit(0);
+    })
+    .expect("error setting Ctrl-C handler");
+
+    match client.run().await {
+        Ok(_) => unreachable!(),
+        Err(RuntimeError::StopSignal) => info!("runtime stopped"),
+        Err(e) => {
+            routes.restore();
+            success_err!("{}", e);
         }
     }
 }
