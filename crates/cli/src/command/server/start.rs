@@ -158,7 +158,19 @@ impl StartCmd {
         // relay: this node only verifies operator-signed records, including its
         // own). Otherwise the unsigned single-network self-advertise.
         let builder = match authority {
-            Some(auth) => builder.trusted_authority(auth).node_records(node_records),
+            Some(auth) => {
+                // Persist gossip-learned records so the registry survives restart
+                // without waiting for the next gossip cycle.
+                let store = node_store.clone();
+                builder
+                    .trusted_authority(auth)
+                    .node_records(node_records)
+                    .on_registry_merge(move |recs| {
+                        for r in recs {
+                            store.save_blocking(r);
+                        }
+                    })
+            }
             None => builder.advertise(addr, label),
         };
 

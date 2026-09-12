@@ -111,6 +111,10 @@ pub struct Sessions {
     /// takes precedence; `nodes` stays empty.
     nodes: Arc<Vec<NodeEntry>>,
     registry: Option<Arc<RwLock<NodeRegistry>>>,
+    /// Optional sink invoked with records newly applied by a gossip merge, so a
+    /// host (CLI) can persist them. Set once after construction; shared by clones.
+    #[allow(clippy::type_complexity)]
+    on_merge: Arc<OnceLock<Box<dyn Fn(&[NodeRecord]) + Send + Sync>>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -158,8 +162,15 @@ impl Sessions {
             reservations: Arc::new(res_map),
             nodes: Arc::new(nodes),
             registry: registry.map(|r| Arc::new(RwLock::new(r))),
+            on_merge: Arc::new(OnceLock::new()),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
+    }
+
+    /// Register a sink for gossip-merged records (persistence hook). Idempotent;
+    /// call before cloning `Sessions` into workers so all clones share it.
+    pub fn set_merge_callback(&self, cb: Box<dyn Fn(&[NodeRecord]) + Send + Sync>) {
+        let _ = self.on_merge.set(cb);
     }
 
     /// Snapshot of the active node registry for a `NodeList` control reply.
@@ -192,10 +203,19 @@ impl Sessions {
     /// Merge gossiped records into the live registry. Returns how many were
     /// applied (0 in unsigned mode or if none were new/valid).
     pub fn merge_records(&self, records: Vec<NodeRecord>) -> usize {
-        match &self.registry {
-            Some(reg) => reg.write().unwrap().merge_all(records),
-            None => 0,
+        let Some(reg) = &self.registry else {
+            return 0;
+        };
+        let applied: Vec<NodeRecord> = {
+            let mut w = reg.write().unwrap();
+            records.into_iter().filter(|r| w.merge(r.clone())).collect()
+        };
+        if !applied.is_empty()
+            && let Some(cb) = self.on_merge.get()
+        {
+            cb(&applied);
         }
+        applied.len()
     }
 
     /// All records (including tombstones) to push to peers during gossip.

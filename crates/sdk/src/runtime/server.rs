@@ -39,6 +39,8 @@ pub struct ServerBuilder<T: Transport + 'static, N: Network + 'static> {
     trusted_authority: Option<AccountPublicKey>,
     node_records: Vec<NodeRecord>,
     gossip_interval: Duration,
+    #[allow(clippy::type_complexity)]
+    on_registry_merge: Option<Box<dyn Fn(&[NodeRecord]) + Send + Sync>>,
     ip: Option<IpAddr>,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -61,6 +63,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             trusted_authority: None,
             node_records: Vec::new(),
             gossip_interval: Duration::from_secs(30),
+            on_registry_merge: None,
             ip: None,
             prefix: 24,
             session_timeout: Some(Duration::from_secs(60 * 5)),
@@ -126,6 +129,13 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
         self
     }
 
+    /// Sink invoked with records newly applied by a gossip merge, so the host can
+    /// persist them (the registry survives restart without waiting a gossip cycle).
+    pub fn on_registry_merge(mut self, cb: impl Fn(&[NodeRecord]) + Send + Sync + 'static) -> Self {
+        self.on_registry_merge = Some(Box::new(cb));
+        self
+    }
+
     /// Set the VPN server IP and subnet prefix used for client session assignment.
     pub fn ip(mut self, ip: IpAddr, prefix: u8) -> Self {
         self.ip = Some(ip);
@@ -181,6 +191,7 @@ impl<T: Transport + 'static, N: Network + 'static> ServerBuilder<T, N> {
             trusted_authority: self.trusted_authority,
             node_records: self.node_records,
             gossip_interval: self.gossip_interval,
+            on_registry_merge: self.on_registry_merge,
             ip: self.ip.ok_or(BuildError::MissingRequiredField("ip"))?,
             prefix: self.prefix,
             session_timeout: self.session_timeout,
@@ -203,6 +214,8 @@ pub struct Server<T: Transport + 'static, N: Network + 'static> {
     trusted_authority: Option<AccountPublicKey>,
     node_records: Vec<NodeRecord>,
     gossip_interval: Duration,
+    #[allow(clippy::type_complexity)]
+    on_registry_merge: Option<Box<dyn Fn(&[NodeRecord]) + Send + Sync>>,
     ip: IpAddr,
     prefix: u8,
     session_timeout: Option<Duration>,
@@ -241,6 +254,9 @@ impl<T: Transport + 'static, N: Network + 'static> Server<T, N> {
         let gossip_enabled = registry.is_some();
         let sessions =
             Sessions::with_config(&self.ip, self.prefix, self.reservations, nodes, registry);
+        if let Some(cb) = self.on_registry_merge {
+            sessions.set_merge_callback(cb);
+        }
         let (_stop_tx, stop_rx) = watch::channel::<bool>(false);
 
         let mut set: JoinSet<()> = JoinSet::new();

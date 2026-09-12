@@ -184,6 +184,46 @@ mod tests {
     }
 
     #[test]
+    fn merge_callback_fires_only_on_applied_records() {
+        use std::sync::Mutex;
+
+        let auth = AccountKey::generate();
+        let (_pk, entry) = node("a", 6001);
+        let sessions = Sessions::with_config(
+            &"10.0.0.0".parse().unwrap(),
+            18,
+            Vec::new(),
+            Vec::new(),
+            Some(NodeRegistry::new(auth.public())),
+        );
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = seen.clone();
+        sessions.set_merge_callback(Box::new(move |recs| {
+            sink.lock()
+                .unwrap()
+                .extend(recs.iter().map(|r| r.entry.label.clone()));
+        }));
+
+        assert_eq!(
+            on_node_sync(
+                &sessions,
+                &payload(&[NodeRecord::sign(&auth, entry, 1, false)])
+            ),
+            1
+        );
+        assert_eq!(*seen.lock().unwrap(), vec!["a".to_string()]);
+
+        // Re-merging our own snapshot applies nothing → callback must not fire.
+        let n = seen.lock().unwrap().len();
+        on_node_sync(&sessions, &payload(&sessions.sync_snapshot()));
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            n,
+            "stale merge must not invoke the sink"
+        );
+    }
+
+    #[test]
     fn on_node_sync_noop_without_registry() {
         let auth = AccountKey::generate();
         let (_pk, entry) = node("x", 5004);

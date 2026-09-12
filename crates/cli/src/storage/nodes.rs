@@ -25,6 +25,17 @@ impl Nodes {
         .unwrap()
     }
 
+    /// Synchronous insert for use from non-async contexts (e.g. the SDK's
+    /// gossip-merge callback). fjall inserts hit the memtable and are fast.
+    pub fn save_blocking(&self, record: &NodeRecord) {
+        let key = *record.node_pk().as_bytes();
+        let data = bincode::serde::encode_to_vec(record, bincode::config::standard())
+            .expect("serialize node record");
+        if let Err(e) = self.db.insert(key.as_slice(), &data) {
+            tracing::warn!("persist gossiped node record failed: {}", e);
+        }
+    }
+
     pub async fn get_all(&self) -> Vec<NodeRecord> {
         let db = self.db.clone();
         task::spawn_blocking(move || {
