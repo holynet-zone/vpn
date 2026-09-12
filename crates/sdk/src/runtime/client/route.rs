@@ -30,16 +30,17 @@ pub fn plan_route(
     target: &PublicKey,
 ) -> Option<Vec<PublicKey>> {
     let n = nodes.len();
-    let idx: HashMap<&PublicKey, usize> =
-        nodes.iter().enumerate().map(|(i, e)| (&e.node_pk, i)).collect();
+    let idx: HashMap<&PublicKey, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (&e.node_pk, i))
+        .collect();
     let target_i = *idx.get(target)?;
 
     // Adjacency as (neighbour_idx, weight) for node->node links.
     let mut adj: Vec<Vec<(usize, u64)>> = vec![Vec::new(); n];
     for e in edges {
-        if let (Some(&f), Some(&t), Some(w)) =
-            (idx.get(&e.from), idx.get(&e.to), e.rtt_micros)
-        {
+        if let (Some(&f), Some(&t), Some(w)) = (idx.get(&e.from), idx.get(&e.to), e.rtt_micros) {
             adj[f].push((t, w as u64));
         }
     }
@@ -112,7 +113,9 @@ mod tests {
     fn node(k: &PublicKey, label: &str) -> NodeEntry {
         NodeEntry {
             node_pk: k.clone(),
-            endpoint: format!("203.0.113.1:{}", 5000 + label.len()).parse::<SocketAddr>().unwrap(),
+            endpoint: format!("203.0.113.1:{}", 5000 + label.len())
+                .parse::<SocketAddr>()
+                .unwrap(),
             subnet: "10.0.0.0".parse().unwrap(),
             prefix: 18,
             label: label.into(),

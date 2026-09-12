@@ -96,7 +96,9 @@ impl RouteCmd {
         let probed = probe_nodes(nodes.clone(), Duration::from_millis(1500)).await;
         let client_rtts: Vec<_> = probed
             .into_iter()
-            .filter_map(|(node, rtt)| rtt.map(|d| (node.node_pk, d.as_micros().min(u32::MAX as u128) as u32)))
+            .filter_map(|(node, rtt)| {
+                rtt.map(|d| (node.node_pk, d.as_micros().min(u32::MAX as u128) as u32))
+            })
             .collect();
 
         let path = match plan_route(&nodes, &edges, &client_rtts, &target) {
@@ -111,18 +113,28 @@ impl RouteCmd {
             nodes
                 .iter()
                 .find(|n| &n.node_pk == pk)
-                .map(|n| if n.label.is_empty() { "-".to_string() } else { n.label.clone() })
+                .map(|n| {
+                    if n.label.is_empty() {
+                        "-".to_string()
+                    } else {
+                        n.label.clone()
+                    }
+                })
                 .unwrap_or_else(|| "?".to_string())
         };
 
         println!();
         if path.len() == 1 {
-            success_ok!("Route", "direct to {} (no relay is faster)", label_of(&path[0]));
+            success_ok!(
+                "Route",
+                "direct to {} (no relay is faster)",
+                label_of(&path[0])
+            );
             println!();
             return;
         }
 
-        let hops: Vec<String> = path.iter().map(|pk| label_of(pk)).collect();
+        let hops: Vec<String> = path.iter().map(label_of).collect();
         success_ok!("Route", "{}", hops.join(" -> "));
 
         // First hop is dialed (--via its endpoint); the rest are --hop <pubkey>,

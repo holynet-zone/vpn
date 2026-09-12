@@ -140,6 +140,7 @@ impl Batch {
 /// Spawn the reader + `workers` decrypt tasks + writer and run until stop.
 ///
 /// `workers` must be >= 2 (the caller uses the single-task path otherwise).
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network + 'static>(
     stop: watch::Receiver<bool>,
     transport: Arc<T>,
@@ -275,6 +276,7 @@ async fn reader<T: Transport>(
 /// the writer (skipped slots included, so the writer's rotation stays in lockstep
 /// with the batch `seq`). Data packets decrypt straight into the slot's `plain`
 /// buffer; keepalives are answered inline; handshakes go out of band.
+#[allow(clippy::too_many_arguments)]
 async fn worker<T: Transport + 'static>(
     mut work_rx: mpsc::Receiver<Box<Batch>>,
     done_tx: mpsc::Sender<Box<Batch>>,

@@ -84,7 +84,7 @@ mod sig_serde {
 }
 
 fn signable(entry: &NodeEntry, version: u64, revoked: bool) -> Vec<u8> {
-    bincode::serde::encode_to_vec(&(entry, version, revoked), bincode::config::standard())
+    bincode::serde::encode_to_vec((entry, version, revoked), bincode::config::standard())
         .expect("encode node record signable bytes")
 }
 
@@ -379,7 +379,12 @@ mod tests {
         let pk_active = PublicKey::from_secret(&SecretKey::generate_x25519());
         let mut reg = NodeRegistry::new(auth.public());
         // Old tombstone (version 100), fresh tombstone (version 5000), live node.
-        reg.merge(NodeRecord::sign(&auth, entry_for(&pk_old, "old"), 100, true));
+        reg.merge(NodeRecord::sign(
+            &auth,
+            entry_for(&pk_old, "old"),
+            100,
+            true,
+        ));
         reg.merge(NodeRecord::sign(
             &auth,
             entry_for(&pk_fresh, "fresh"),

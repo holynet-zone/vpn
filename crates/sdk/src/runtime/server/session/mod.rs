@@ -179,12 +179,14 @@ impl Sessions {
 
     /// Register a sink for gossip-merged records (persistence hook). Idempotent;
     /// call before cloning `Sessions` into workers so all clones share it.
+    #[allow(clippy::type_complexity)]
     pub fn set_merge_callback(&self, cb: Box<dyn Fn(&[NodeRecord]) + Send + Sync>) {
         let _ = self.on_merge.set(cb);
     }
 
     /// Register a sink for reaped tombstones (durable-cleanup hook). Idempotent;
     /// call before cloning `Sessions` into workers so all clones share it.
+    #[allow(clippy::type_complexity)]
     pub fn set_reap_callback(&self, cb: Box<dyn Fn(&[NodeRecord]) + Send + Sync>) {
         let _ = self.on_reap.set(cb);
     }
@@ -336,10 +338,10 @@ impl Sessions {
             self.holy_ip_gen.try_take(&ip);
             return Some(ip);
         }
-        if let Some(prev) = self.sticky.get(&key).map(|e| *e.value()) {
-            if self.holy_ip_gen.try_take(&prev) {
-                return Some(prev);
-            }
+        if let Some(prev) = self.sticky.get(&key).map(|e| *e.value())
+            && self.holy_ip_gen.try_take(&prev)
+        {
+            return Some(prev);
         }
         let ip = self.holy_ip_gen.next()?;
         self.sticky.insert(key, ip);
@@ -369,6 +371,7 @@ impl Sessions {
         self.holy_ip_gen.release(holy_ip);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add(
         &self,
         sid: SessionId,

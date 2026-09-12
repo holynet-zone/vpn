@@ -264,7 +264,10 @@ mod tests {
 
     /// Spawn a transparent relay node whose registry resolves `known` peers.
     /// Returns the node's listen address.
-    async fn spawn_relay_node(auth: &AccountKey, known: Vec<(PublicKey, SocketAddr)>) -> SocketAddr {
+    async fn spawn_relay_node(
+        auth: &AccountKey,
+        known: Vec<(PublicKey, SocketAddr)>,
+    ) -> SocketAddr {
         let buf = 1 << 20;
         let lo = "127.0.0.1:0";
         let mut reg = NodeRegistry::new(auth.public());
@@ -298,7 +301,9 @@ mod tests {
             loop {
                 let (n, from) = node.recv_from(&mut b).await.unwrap();
                 match PacketRef::from_bytes(&b[..n]) {
-                    Some(PacketRef::RelayOpen(pk)) => open(&table, &sessions, &node, pk, from).await,
+                    Some(PacketRef::RelayOpen(pk)) => {
+                        open(&table, &sessions, &node, pk, from).await
+                    }
                     Some(PacketRef::RelayData { relay_id, payload }) => {
                         forward(&table, relay_id, payload, from).await
                     }
