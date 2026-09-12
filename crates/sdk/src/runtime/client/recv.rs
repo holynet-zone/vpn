@@ -144,6 +144,15 @@ pub(super) async fn recv_decrypt_forward<T: ClientTransport, N: Network>(
                                     warn!("server disconnect code {}", code);
                                     reconnect = true;
                                 }
+                                Ok(DataServerActionRef::LeaseGrant(_)) => {
+                                    warn!("unexpected lease grant in steady state");
+                                }
+                                Ok(DataServerActionRef::NodeList(_)) => {
+                                    warn!("unexpected node list in steady state");
+                                }
+                                Ok(DataServerActionRef::EdgeList(_)) => {
+                                    warn!("unexpected edge list in steady state");
+                                }
                             }
                         }
                     }

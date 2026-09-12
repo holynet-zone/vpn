@@ -1,6 +1,6 @@
 use inquire::ui::{Attributes, Color, IndexPrefix, RenderConfig, StyleSheet, Styled};
 use qrcode::render::unicode;
-use qrcode::{EcLevel, QrCode, Version};
+use qrcode::{EcLevel, QrCode};
 
 pub fn styles() -> clap::builder::Styles {
     clap::builder::Styles::styled()
@@ -99,7 +99,9 @@ pub fn format_opaque_bytes(bytes: &[u8]) -> String {
 }
 
 pub fn generate_qrcode(data: &[u8]) -> anyhow::Result<String> {
-    let code = QrCode::with_version(data, Version::Normal(8), EcLevel::L)?;
+    // Auto-select the smallest version that fits: the connection payload grew
+    // with the device enrollment and no longer fits a fixed Version::Normal(8).
+    let code = QrCode::with_error_correction_level(data, EcLevel::L)?;
     let string = code
         .render::<unicode::Dense1x2>()
         .dark_color(unicode::Dense1x2::Dark)

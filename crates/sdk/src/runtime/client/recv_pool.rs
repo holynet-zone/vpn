@@ -370,6 +370,15 @@ fn decrypt_one(
                     warn!("server disconnect code {}", code);
                     let _ = state_tx.send(RuntimeState::Connecting);
                 }
+                Ok(DataServerActionRef::LeaseGrant(_)) => {
+                    warn!("unexpected lease grant in steady state");
+                }
+                Ok(DataServerActionRef::NodeList(_)) => {
+                    warn!("unexpected node list in steady state");
+                }
+                Ok(DataServerActionRef::EdgeList(_)) => {
+                    warn!("unexpected edge list in steady state");
+                }
             }
         }
 
@@ -487,8 +496,8 @@ mod tests {
     use crate::gateway::network::{NetworkReceiver, NetworkSender};
     use crate::gateway::transport::TransportSender;
     use crate::gateway::transport::mock::MockTransport;
-    use crate::protocol::handshake::HandshakeResponderPayload;
     use crate::runtime::crypto::{encode_data_server_packet, make_noise_pair_for_test};
+    use crate::runtime::state::SessionInfo;
     use std::io;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -556,12 +565,12 @@ mod tests {
         ));
 
         // Move to Connected so the reader starts consuming the socket.
-        let payload = HandshakeResponderPayload {
+        let info = SessionInfo {
             sid: 1,
             ipaddr: IpAddr::V4(Ipv4Addr::new(10, 8, 0, 2)),
         };
         state_tx
-            .send(RuntimeState::Connected((payload, session)))
+            .send(RuntimeState::Connected((info, session)))
             .unwrap();
 
         // Each packet's payload starts with its sequence number.

@@ -1,6 +1,8 @@
 mod clients;
+mod nodes;
 
 pub use clients::{Client, Clients};
+pub use nodes::Nodes;
 
 use fjall::{Config, Database};
 use std::path::Path;

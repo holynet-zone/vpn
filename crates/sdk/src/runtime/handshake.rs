@@ -1,5 +1,7 @@
 use snow::{Builder, HandshakeState, StatelessTransportState};
+use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::select;
 use tracing::warn;
@@ -7,11 +9,15 @@ use tracing::warn;
 use crate::gateway::transport::ClientTransport;
 use crate::protocol::handshake::{alg_hint_byte, params_from_alg};
 use crate::protocol::{
-    Alg, EncryptedHandshake, HandshakeError, HandshakeResponderBody, HandshakeResponderPayload,
-    Packet,
+    Alg, DataClientBody, EdgeMetric, EncryptedHandshake, HandshakeError, HandshakeResponderBody,
+    HandshakeResponderPayload, NodeEntry, Packet, PacketRef, SessionId,
 };
 use crate::runtime::cred::Cred;
+use crate::runtime::crypto::{
+    DataServerActionRef, encode_data_client_frame, noise_decrypt_data_server_into, noise_encrypt,
+};
 use crate::runtime::error::RuntimeError;
+use crate::runtime::state::ClientSession;
 
 fn initial(alg: &Alg, cred: &Cred) -> Result<(EncryptedHandshake, HandshakeState), RuntimeError> {
     let mut initiator = Builder::new(params_from_alg(alg).clone())
@@ -21,7 +27,7 @@ fn initial(alg: &Alg, cred: &Cred) -> Result<(EncryptedHandshake, HandshakeState
         .build_initiator()?;
 
     let mut buffer = [0u8; 65536];
-    let len = initiator.write_message(&[], &mut buffer)?;
+    let len = initiator.write_message(&cred.enrollment.to_bytes(), &mut buffer)?;
     // Prepend a 1-byte algorithm hint so the server can select the correct
     // Noise params on first read without a decrypt-then-retry heuristic.
     let mut msg = Vec::with_capacity(1 + len);
@@ -95,5 +101,124 @@ pub async fn handshake_step<T: ClientTransport>(
                 err
             ))),
         },
+    }
+}
+
+pub async fn lease_step<T: ClientTransport>(
+    transport: Arc<T>,
+    session: &ClientSession,
+    sid: SessionId,
+    timeout: Duration,
+) -> Result<IpAddr, RuntimeError> {
+    let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+    let encrypted = noise_encrypt(&DataClientBody::LeaseRequest, &session.noise, nonce)
+        .map_err(|e| RuntimeError::Handshake(format!("lease encrypt: {}", e)))?;
+    let mut out = [0u8; 128];
+    let n = encode_data_client_frame(sid, nonce, &encrypted, &mut out);
+    transport.send(&out[..n]).await?;
+
+    let mut buffer = [0u8; 65536];
+    let mut plain = [0u8; 65536];
+    select! {
+        _ = tokio::time::sleep(timeout) => Err(RuntimeError::Handshake(
+            format!("lease timeout ({:?})", timeout)
+        )),
+        res = async { loop {
+            let size = transport.recv(&mut buffer).await.map_err(
+                |err| RuntimeError::IO(format!("receive lease: {}", err))
+            )?;
+            match PacketRef::from_bytes(&buffer[..size]) {
+                Some(PacketRef::DataServer { nonce, ciphertext }) => {
+                    match noise_decrypt_data_server_into(ciphertext, &session.noise, &mut plain, nonce) {
+                        Ok(DataServerActionRef::LeaseGrant(ip)) => break Ok(ip),
+                        Ok(DataServerActionRef::Disconnect(code)) => break Err(
+                            RuntimeError::Handshake(format!("lease refused (code {})", code))
+                        ),
+                        Ok(_) => continue,
+                        Err(e) => { warn!("decrypt lease response: {}", e); continue; }
+                    }
+                }
+                _ => continue,
+            }
+        }} => res,
+    }
+}
+
+/// Request the multi-node registry over the control channel. Sends a
+/// `NodeListRequest` and awaits the `NodeList` reply. Usable any time after the
+/// session is established.
+pub async fn node_list_step<T: ClientTransport>(
+    transport: Arc<T>,
+    session: &ClientSession,
+    sid: SessionId,
+    timeout: Duration,
+) -> Result<Vec<NodeEntry>, RuntimeError> {
+    let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+    let encrypted = noise_encrypt(&DataClientBody::NodeListRequest, &session.noise, nonce)
+        .map_err(|e| RuntimeError::Handshake(format!("node-list encrypt: {}", e)))?;
+    let mut out = [0u8; 128];
+    let n = encode_data_client_frame(sid, nonce, &encrypted, &mut out);
+    transport.send(&out[..n]).await?;
+
+    let mut buffer = [0u8; 65536];
+    let mut plain = [0u8; 65536];
+    select! {
+        _ = tokio::time::sleep(timeout) => Err(RuntimeError::Handshake(
+            format!("node-list timeout ({:?})", timeout)
+        )),
+        res = async { loop {
+            let size = transport.recv(&mut buffer).await.map_err(
+                |err| RuntimeError::IO(format!("receive node-list: {}", err))
+            )?;
+            match PacketRef::from_bytes(&buffer[..size]) {
+                Some(PacketRef::DataServer { nonce, ciphertext }) => {
+                    match noise_decrypt_data_server_into(ciphertext, &session.noise, &mut plain, nonce) {
+                        Ok(DataServerActionRef::NodeList(nodes)) => break Ok(nodes),
+                        Ok(_) => continue,
+                        Err(e) => { warn!("decrypt node-list response: {}", e); continue; }
+                    }
+                }
+                _ => continue,
+            }
+        }} => res,
+    }
+}
+
+/// Request the inter-node routing overlay over the control channel. Sends an
+/// `EdgeListRequest` and awaits the `EdgeList` reply.
+pub async fn edge_list_step<T: ClientTransport>(
+    transport: Arc<T>,
+    session: &ClientSession,
+    sid: SessionId,
+    timeout: Duration,
+) -> Result<Vec<EdgeMetric>, RuntimeError> {
+    let nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+    let encrypted = noise_encrypt(&DataClientBody::EdgeListRequest, &session.noise, nonce)
+        .map_err(|e| RuntimeError::Handshake(format!("edge-list encrypt: {}", e)))?;
+    let mut out = [0u8; 128];
+    let n = encode_data_client_frame(sid, nonce, &encrypted, &mut out);
+    transport.send(&out[..n]).await?;
+
+    let mut buffer = [0u8; 65536];
+    let mut plain = [0u8; 65536];
+    select! {
+        _ = tokio::time::sleep(timeout) => Err(RuntimeError::Handshake(
+            format!("edge-list timeout ({:?})", timeout)
+        )),
+        res = async { loop {
+            let size = transport.recv(&mut buffer).await.map_err(
+                |err| RuntimeError::IO(format!("receive edge-list: {}", err))
+            )?;
+            match PacketRef::from_bytes(&buffer[..size]) {
+                Some(PacketRef::DataServer { nonce, ciphertext }) => {
+                    match noise_decrypt_data_server_into(ciphertext, &session.noise, &mut plain, nonce) {
+                        Ok(DataServerActionRef::EdgeList(edges)) => break Ok(edges),
+                        Ok(_) => continue,
+                        Err(e) => { warn!("decrypt edge-list response: {}", e); continue; }
+                    }
+                }
+                _ => continue,
+            }
+        }} => res,
     }
 }

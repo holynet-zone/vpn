@@ -7,8 +7,8 @@ use crate::gateway::transport::ClientTransport;
 use crate::protocol::Alg;
 use crate::runtime::cred::Cred;
 use crate::runtime::error::RuntimeError;
-use crate::runtime::handshake::handshake_step;
-use crate::runtime::state::{ClientSession, RuntimeState};
+use crate::runtime::handshake::{handshake_step, lease_step};
+use crate::runtime::state::{ClientSession, RuntimeState, SessionInfo};
 
 pub(crate) async fn executor<T: ClientTransport>(
     state: watch::Sender<RuntimeState>,
@@ -30,14 +30,27 @@ pub(crate) async fn executor<T: ClientTransport>(
                 match current {
                     RuntimeState::Connecting => match transport.connect().await {
                         Ok(_) => {
-                            match handshake_step(transport.clone(), &cred, &alg, timeout).await {
-                                Ok((payload, transport_state)) => {
+                            let outcome = async {
+                                let (payload, transport_state) =
+                                    handshake_step(transport.clone(), &cred, &alg, timeout).await?;
+                                let session = ClientSession::new(transport_state);
+                                let ipaddr =
+                                    lease_step(transport.clone(), &session, payload.sid, timeout)
+                                        .await?;
+                                Ok::<_, RuntimeError>((
+                                    SessionInfo {
+                                        sid: payload.sid,
+                                        ipaddr,
+                                    },
+                                    session,
+                                ))
+                            }
+                            .await;
+                            match outcome {
+                                Ok((info, session)) => {
                                     is_reconnect = true;
                                     state
-                                        .send(RuntimeState::Connected((
-                                            payload,
-                                            ClientSession::new(transport_state),
-                                        )))
+                                        .send(RuntimeState::Connected((info, session)))
                                         .expect("broken runtime state pipe");
                                     continue;
                                 }
