@@ -2,10 +2,10 @@ use crate::config::connection::{ConnectionConfig, InterfaceConfig, RuntimeConfig
 use crate::network::{RouteState, add_route};
 use crate::success_err;
 use clap::Args;
+use holynet_sdk::crypto::PublicKey;
 use holynet_sdk::gateway::network::tun::TunNetwork;
 use holynet_sdk::gateway::transport::ClientTransport;
 use holynet_sdk::gateway::transport::relay::RelayTransport;
-use holynet_sdk::crypto::PublicKey;
 use holynet_sdk::gateway::transport::udp::UdpTransport;
 use holynet_sdk::protocol::Alg;
 use holynet_sdk::runtime::client::ClientBuilder;

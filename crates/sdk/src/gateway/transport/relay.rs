@@ -47,7 +47,10 @@ impl<T: ClientTransport> TransportSender for RelayTransport<T> {
             // exceeds this. Oversized input is rejected rather than truncated.
             let mut frame = [0u8; 65600];
             if RELAY_DATA_HDR_LEN + data.len() > frame.len() {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "relay frame too large"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "relay frame too large",
+                ));
             }
             let n = write_relay_data(&mut frame, id, data);
             self.inner.send(&frame[..n]).await?;
