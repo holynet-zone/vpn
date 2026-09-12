@@ -85,6 +85,10 @@ pub(super) async fn recv_decrypt_forward<T: Transport + 'static, N: Network>(
     // Per-task 1-entry session cache: eliminates DashMap lookup on every packet
     // when a single client dominates the worker's receive queue.
     let mut cached_session: Option<(SessionId, Arc<Session>)> = None;
+    // Relay-forward accumulation, flushed as one sendmmsg per flow after each
+    // drain. Empty (zero cost) on non-relay nodes.
+    let mut relay_scratch: Vec<u8> = Vec::new();
+    let mut relay_idx: Vec<(u32, usize, usize, SocketAddr)> = Vec::new();
 
     loop {
         // Await the first datagram (or a stop signal).
@@ -291,7 +295,10 @@ pub(super) async fn recv_decrypt_forward<T: Transport + 'static, N: Network>(
                     }
 
                     Some(PacketRef::RelayData { relay_id, payload }) => {
-                        super::relay::forward(&relay_table, relay_id, payload, addr).await;
+                        // Accumulate; flushed as one sendmmsg per flow after the drain.
+                        let off = relay_scratch.len();
+                        relay_scratch.extend_from_slice(payload);
+                        relay_idx.push((relay_id, off, payload.len(), addr));
                     }
 
                     Some(_) => warn!("[{}] unexpected packet variant", addr),
@@ -319,6 +326,13 @@ pub(super) async fn recv_decrypt_forward<T: Transport + 'static, N: Network>(
                 .await
         {
             error!("network send_multiple error: {}", e);
+        }
+
+        // Flush accumulated relay-forward payloads: one sendmmsg per flow.
+        if !relay_idx.is_empty() {
+            super::relay::forward_batch(&relay_table, &relay_scratch, &relay_idx).await;
+            relay_scratch.clear();
+            relay_idx.clear();
         }
     }
     debug!("recv_decrypt_forward stopped");

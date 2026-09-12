@@ -21,24 +21,30 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dashmap::DashMap;
-use tokio::net::UdpSocket;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
 use super::session::Sessions;
 use crate::crypto::PublicKey;
-use crate::gateway::transport::Transport;
-use crate::runtime::crypto::{relay_opened_frame, write_relay_data};
+use crate::gateway::transport::udp::UdpTransport;
+use crate::gateway::transport::{Transport, TransportReceiver, TransportSender};
+use crate::runtime::crypto::{RELAY_DATA_HDR_LEN, relay_opened_frame, write_relay_data};
 use crate::time::sec_since_start;
 
 /// Flows idle (no traffic either way) longer than this are reaped.
 const RELAY_IDLE_SECS: u64 = 60;
 /// Cap on concurrent relay flows per node, to bound sockets/tasks.
 const MAX_RELAY_FLOWS: usize = 4096;
+/// Datagrams the reader batches per `recvmmsg` / `sendmmsg` on the reverse leg.
+const RELAY_BATCH: usize = 32;
+/// Per-datagram buffer size (MTU + headroom).
+const RELAY_BUF: usize = 65536;
+/// So_rcvbuf/So_sndbuf for a relay's ephemeral per-flow socket.
+const RELAY_SOCK_BUF: usize = 4 * 1024 * 1024;
 
 struct RelayFlow {
-    socket: Arc<UdpSocket>,
+    socket: UdpTransport,
     client_addr: Mutex<SocketAddr>,
     last_seen: AtomicU64,
     reader: Mutex<Option<JoinHandle<()>>>,
@@ -101,28 +107,19 @@ pub(super) async fn open<T: Transport + 'static>(
         return;
     };
 
-    let bind: SocketAddr = if dest.is_ipv4() {
-        "0.0.0.0:0".parse().unwrap()
-    } else {
-        "[::]:0".parse().unwrap()
-    };
-    let socket = match UdpSocket::bind(bind).await {
+    // Ephemeral socket bound to :0 and connected to dest (UdpTransport::new).
+    let socket = match UdpTransport::new(dest, RELAY_SOCK_BUF, RELAY_SOCK_BUF) {
         Ok(s) => s,
         Err(e) => {
-            debug!("relay bind failed: {}", e);
+            debug!("relay socket to {} failed: {}", dest, e);
             refuse(transport).await;
             return;
         }
     };
-    if let Err(e) = socket.connect(dest).await {
-        debug!("relay connect to {} failed: {}", dest, e);
-        refuse(transport).await;
-        return;
-    }
 
     let relay_id = table.alloc_id();
     let flow = Arc::new(RelayFlow {
-        socket: Arc::new(socket),
+        socket,
         client_addr: Mutex::new(client_addr),
         last_seen: AtomicU64::new(sec_since_start()),
         reader: Mutex::new(None),
@@ -136,25 +133,42 @@ pub(super) async fn open<T: Transport + 'static>(
         .await;
 }
 
-/// Wrap every datagram the destination sends back as `RelayData{relay_id,..}`
-/// and deliver it to the flow's current client address.
+/// Wrap datagrams the destination sends back as `RelayData{relay_id,..}` and
+/// deliver them to the flow's current client address. Batches with
+/// `recvmmsg` (dest) + `sendmmsg` (client) to cut per-packet syscalls.
 async fn reader_loop<T: Transport>(relay_id: u32, flow: Arc<RelayFlow>, transport: Arc<T>) {
-    let mut recv_buf = [0u8; 65536];
-    let mut out = [0u8; 65600];
+    let mut recv_bufs: Vec<Vec<u8>> = (0..RELAY_BATCH).map(|_| vec![0u8; RELAY_BUF]).collect();
+    let mut lens = vec![0usize; RELAY_BATCH];
+    let mut addrs = vec![SocketAddr::from(([0, 0, 0, 0], 0)); RELAY_BATCH];
+    // Wrapped [relay-hdr | payload] frames, reused across batches.
+    let mut frames: Vec<Vec<u8>> = (0..RELAY_BATCH)
+        .map(|_| vec![0u8; RELAY_DATA_HDR_LEN + RELAY_BUF])
+        .collect();
+
     loop {
-        match flow.socket.recv(&mut recv_buf).await {
-            Ok(n) => {
-                flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
-                let client = *flow.client_addr.lock().unwrap();
-                let m = write_relay_data(&mut out, relay_id, &recv_buf[..n]);
-                if let Err(e) = transport.send_to(&out[..m], &client).await {
-                    debug!("relay {} -> client send failed: {}", relay_id, e);
-                }
-            }
+        let count = match flow
+            .socket
+            .recv_mmsg(&mut recv_bufs, &mut lens, &mut addrs)
+            .await
+        {
+            Ok(0) => continue,
+            Ok(c) => c,
             Err(e) => {
-                debug!("relay {} socket recv ended: {}", relay_id, e);
+                debug!("relay {} recv ended: {}", relay_id, e);
                 break;
             }
+        };
+        flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
+        let client = *flow.client_addr.lock().unwrap();
+
+        for i in 0..count {
+            write_relay_data(&mut frames[i], relay_id, &recv_bufs[i][..lens[i]]);
+        }
+        let refs: Vec<&[u8]> = (0..count)
+            .map(|i| &frames[i][..RELAY_DATA_HDR_LEN + lens[i]])
+            .collect();
+        if let Err(e) = transport.send_mmsg(&refs, Some(&client)).await {
+            debug!("relay {} -> client send failed: {}", relay_id, e);
         }
     }
 }
@@ -178,6 +192,41 @@ pub(super) async fn forward(
     }
     if let Err(e) = flow.socket.send(payload).await {
         debug!("relay {} -> dest send failed: {}", relay_id, e);
+    }
+}
+
+/// Batched forward: the recv loop accumulates `(relay_id, offset, len, from)`
+/// into `scratch` across a drain, then flushes here — one `sendmmsg` per flow to
+/// its destination, instead of a syscall per packet.
+pub(super) async fn forward_batch(
+    table: &Arc<RelayTable>,
+    scratch: &[u8],
+    idx: &[(u32, usize, usize, SocketAddr)],
+) {
+    let mut done: Vec<u32> = Vec::new();
+    for &(id, _, _, from) in idx {
+        if done.contains(&id) {
+            continue;
+        }
+        done.push(id);
+        let Some(flow) = table.flows.get(&id).map(|f| f.value().clone()) else {
+            continue;
+        };
+        flow.last_seen.store(sec_since_start(), Ordering::Relaxed);
+        {
+            let mut ca = flow.client_addr.lock().unwrap();
+            if *ca != from {
+                *ca = from; // client roamed / NAT rebind
+            }
+        }
+        let refs: Vec<&[u8]> = idx
+            .iter()
+            .filter(|e| e.0 == id)
+            .map(|e| &scratch[e.1..e.1 + e.2])
+            .collect();
+        if let Err(e) = flow.socket.send_mmsg(&refs, None).await {
+            debug!("relay {} -> dest batch send failed: {}", id, e);
+        }
     }
 }
 

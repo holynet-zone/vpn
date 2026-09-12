@@ -67,6 +67,47 @@ impl<T: ClientTransport> TransportSender for RelayTransport<T> {
         // is fixed by the relay_id, so `addr` is irrelevant here.
         self.send(data)
     }
+
+    /// Batch the client->relay leg: wrap each segment as `[relay-hdr | seg]` and
+    /// send the run as one GSO `sendmsg` on the inner socket. The wrapped
+    /// segments stay uniform (`segment_size + 5`, last may be smaller), so each
+    /// on-wire datagram is a valid `RelayData` frame the relay forwards verbatim.
+    fn send_gso<'a>(
+        &'a self,
+        buf: &'a [u8],
+        segment_size: usize,
+        _addr: Option<&'a SocketAddr>,
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            if segment_size == 0 || buf.is_empty() {
+                return Ok(0);
+            }
+            let id = self.relay_id.load(Ordering::Relaxed);
+            let wseg = segment_size + RELAY_DATA_HDR_LEN;
+            // Group so each wrapped GSO batch stays within the kernel limits
+            // (<=64 segments and <=65535 bytes).
+            let max_segs = (65535 / wseg).clamp(1, 64);
+            let group_bytes = segment_size * max_segs;
+            let mut scratch: Vec<u8> = Vec::new();
+            let mut off = 0;
+            while off < buf.len() {
+                let end = (off + group_bytes).min(buf.len());
+                let group = &buf[off..end];
+                scratch.clear();
+                let mut so = 0;
+                while so < group.len() {
+                    let se = (so + segment_size).min(group.len());
+                    let base = scratch.len();
+                    scratch.resize(base + RELAY_DATA_HDR_LEN + (se - so), 0);
+                    write_relay_data(&mut scratch[base..], id, &group[so..se]);
+                    so = se;
+                }
+                self.inner.send_gso(&scratch, wseg, None).await?;
+                off = end;
+            }
+            Ok(buf.len())
+        }
+    }
 }
 
 impl<T: ClientTransport> TransportReceiver for RelayTransport<T> {

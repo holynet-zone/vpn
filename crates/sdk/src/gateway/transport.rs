@@ -76,6 +76,30 @@ pub trait TransportSender: Send + Sync {
             Ok(buf.len())
         }
     }
+
+    /// Send a batch of **variable-size** datagrams in one `sendmmsg` syscall, all
+    /// to the same destination (`addr` for an unconnected socket, `None` for a
+    /// connected one). Unlike GSO, segments need not be equal size — the right
+    /// primitive for a relay forwarding heterogeneous frames. Returns how many
+    /// were accepted by the kernel (may be fewer than `bufs.len()`).
+    ///
+    /// Default: send each individually (no batching), so non-UDP transports and
+    /// non-Linux targets stay correct.
+    fn send_mmsg<'a>(
+        &'a self,
+        bufs: &'a [&'a [u8]],
+        addr: Option<&'a SocketAddr>,
+    ) -> impl Future<Output = io::Result<usize>> + Send + 'a {
+        async move {
+            for b in bufs {
+                match addr {
+                    Some(a) => self.send_to(b, a).await?,
+                    None => self.send(b).await?,
+                };
+            }
+            Ok(bufs.len())
+        }
+    }
 }
 
 /// Receive half — implemented by both server and client transports.

@@ -245,6 +245,76 @@ impl TransportSender for UdpTransport {
             }
         }
     }
+
+    /// Batched variable-size send via `sendmmsg` (one syscall for up to MAX_MMSG
+    /// datagrams). Used by the relay to forward heterogeneous frames.
+    #[cfg(target_os = "linux")]
+    async fn send_mmsg(&self, bufs: &[&[u8]], addr: Option<&SocketAddr>) -> std::io::Result<usize> {
+        use tokio::io::Interest;
+        if bufs.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            self.socket.writable().await?;
+            match self.socket.try_io(Interest::WRITABLE, || {
+                sendmmsg_batch(&self.socket, bufs, addr)
+            }) {
+                Ok(n) => return Ok(n),
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
+/// One non-blocking `sendmmsg` of up to `MAX_MMSG` variable-size datagrams, all
+/// to the same destination (`addr`, or the connected peer when `None`).
+#[cfg(target_os = "linux")]
+fn sendmmsg_batch(
+    socket: &UdpSocket,
+    bufs: &[&[u8]],
+    addr: Option<&SocketAddr>,
+) -> std::io::Result<usize> {
+    use nix::libc;
+    use nix::sys::socket::{SockaddrLike, SockaddrStorage};
+    use std::os::fd::AsRawFd;
+
+    let vlen = bufs.len().min(MAX_MMSG);
+    let mut iovecs: [libc::iovec; MAX_MMSG] = unsafe { std::mem::zeroed() };
+    let mut msgs: [libc::mmsghdr; MAX_MMSG] = unsafe { std::mem::zeroed() };
+
+    // Shared destination name (kept alive for the whole call).
+    let name = addr.map(|a| SockaddrStorage::from(*a));
+    let (name_ptr, name_len) = match &name {
+        Some(sa) => (sa.as_ptr() as *mut libc::c_void, sa.len()),
+        None => (std::ptr::null_mut(), 0),
+    };
+
+    for i in 0..vlen {
+        // sendmmsg does not mutate the buffers; the cast to *mut is required by
+        // the iovec type but the kernel treats it as read-only on send.
+        iovecs[i].iov_base = bufs[i].as_ptr() as *mut libc::c_void;
+        iovecs[i].iov_len = bufs[i].len();
+        msgs[i].msg_hdr.msg_iov = &mut iovecs[i];
+        msgs[i].msg_hdr.msg_iovlen = 1;
+        msgs[i].msg_hdr.msg_name = name_ptr;
+        msgs[i].msg_hdr.msg_namelen = name_len;
+    }
+
+    // SAFETY: msgs[..vlen] are initialised above and outlive the call; the fd is
+    // valid for the borrow of `socket`; `name` outlives the call.
+    let n = unsafe {
+        libc::sendmmsg(
+            socket.as_raw_fd(),
+            msgs.as_mut_ptr(),
+            vlen as libc::c_uint,
+            libc::MSG_DONTWAIT,
+        )
+    };
+    if n < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(n as usize)
 }
 
 /// Perform a single non-blocking `sendmsg` carrying a `UDP_SEGMENT` cmsg.
