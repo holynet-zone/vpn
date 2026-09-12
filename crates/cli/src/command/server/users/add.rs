@@ -93,11 +93,19 @@ impl AddCmd {
             })
             .await;
 
+        // The network's owned subnet (server interface address masked by prefix),
+        // so a multi-network client routes only this subnet through the tunnel.
+        let network = Some(crate::config::connection::NetworkRoute {
+            subnet: mask_subnet(config.interface.address, config.interface.prefix),
+            prefix: config.interface.prefix,
+        });
+
         let connection_config = ConnectionConfig {
             general: GeneralConfig {
                 host,
                 port,
                 alg: Alg::default(),
+                network,
             },
             credentials: CredentialsConfig {
                 private_key: sk,
@@ -127,5 +135,30 @@ impl AddCmd {
         success_ok!("Key", "{}", connection_config.to_base64()?);
 
         Ok(())
+    }
+}
+
+/// Base address of the subnet containing `ip` at the given prefix length.
+fn mask_subnet(ip: std::net::IpAddr, prefix: u8) -> std::net::IpAddr {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let bits = u32::from(v4);
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u32::MAX << (32 - prefix.min(32))
+            };
+            IpAddr::V4((bits & mask).into())
+        }
+        IpAddr::V6(v6) => {
+            let bits = u128::from(v6);
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u128::MAX << (128 - prefix.min(128))
+            };
+            IpAddr::V6((bits & mask).into())
+        }
     }
 }

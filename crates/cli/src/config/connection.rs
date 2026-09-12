@@ -5,13 +5,27 @@ use holynet_sdk::crypto::{PublicKey, SecretKey};
 use holynet_sdk::identity::Enrollment;
 use holynet_sdk::protocol::Alg;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::path::Path;
+
+/// The network's address space, used to route only that subnet through this
+/// tunnel (multi-network split routing). Absent = full-tunnel default route.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct NetworkRoute {
+    pub subnet: IpAddr,
+    pub prefix: u8,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct GeneralConfig {
     pub host: String,
     pub port: u16,
     pub alg: Alg,
+    /// Owned subnet of this network. When set (and multiple networks are given),
+    /// only this subnet routes through the tunnel; when absent, the tunnel takes
+    /// the default route (single full-tunnel VPN).
+    #[serde(default)]
+    pub network: Option<NetworkRoute>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

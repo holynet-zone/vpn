@@ -24,8 +24,17 @@ use tracing::{debug, error, info};
 
 #[derive(Debug, Args)]
 pub struct ConnectCmd {
-    #[command(flatten)]
-    source: ConnectSource,
+    /// One or more connection sources (config file path or base64 key). Give
+    /// several to join multiple non-overlapping networks at once (multi-network):
+    /// each routes only its own subnet through its tunnel.
+    #[arg(value_name = "CONNECTION", num_args = 1..)]
+    connection: Vec<String>,
+    /// Single-connection config file path (alternative to a positional CONNECTION).
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<PathBuf>,
+    /// Single-connection base64 key (alternative to a positional CONNECTION).
+    #[arg(short, long, value_name = "KEY")]
+    key: Option<String>,
     /// Force-disable Linux TUN GRO/TSO offload, overriding `interface.offload`
     /// in the config (runtime kill-switch for buggy NICs).
     #[arg(long)]
@@ -42,53 +51,49 @@ pub struct ConnectCmd {
     hop: Vec<String>,
 }
 
-/// Mutually-exclusive connection source: exactly one must be provided.
-#[derive(Debug, Args)]
-#[group(required = true, multiple = false)]
-pub struct ConnectSource {
-    /// Connection config file path, or base64-encoded key
-    #[arg(value_name = "CONNECTION")]
-    connection: Option<String>,
-    /// Config file path
-    #[arg(short, long, value_name = "FILE")]
-    config: Option<PathBuf>,
-    /// Base64-encoded connection key
-    #[arg(short, long, value_name = "KEY")]
-    key: Option<String>,
+/// Load a connection config from a source string: try base64 first, then a file
+/// path. Returns the config and the path (for save-back) when it was a file.
+fn load_source(src: &str) -> anyhow::Result<(ConnectionConfig, Option<String>)> {
+    match ConnectionConfig::from_base64(src) {
+        Ok(cfg) => Ok((cfg, None)),
+        Err(_) => ConnectionConfig::load(&PathBuf::from(src))
+            .map(|cfg| (cfg, Some(src.to_string())))
+            .map_err(|e| anyhow::anyhow!("parse connection {}: {}", src, e)),
+    }
 }
 
 impl ConnectCmd {
     pub async fn exec(self) {
-        let (mut config, path) = match self.source.connection {
-            Some(ref conn) => match ConnectionConfig::from_base64(conn) {
-                Ok(cfg) => (cfg, None),
-                Err(_) => match ConnectionConfig::load(&PathBuf::from(conn)) {
-                    Ok(cfg) => (cfg, Some(conn.clone())),
-                    Err(e) => {
-                        success_err!("parse connection: {}", e);
-                        process::exit(1);
-                    }
-                },
-            },
-            None => match self.source.key {
-                Some(key) => match ConnectionConfig::from_base64(&key) {
-                    Ok(cfg) => (cfg, None),
-                    Err(e) => {
-                        success_err!("parse config key: {}", e);
-                        process::exit(1);
-                    }
-                },
-                None => match self.source.config {
-                    Some(ref p) => match ConnectionConfig::load(p) {
-                        Ok(cfg) => (cfg, Some(p.to_string_lossy().to_string())),
-                        Err(e) => {
-                            success_err!("load config: {}", e);
-                            process::exit(1);
-                        }
-                    },
-                    None => unreachable!(),
-                },
-            },
+        // Gather sources: positional list, or the single --config / --key flag.
+        let mut sources: Vec<String> = self.connection.clone();
+        if sources.is_empty() {
+            if let Some(k) = &self.key {
+                sources.push(k.clone());
+            } else if let Some(c) = &self.config {
+                sources.push(c.to_string_lossy().to_string());
+            }
+        }
+        if sources.is_empty() {
+            success_err!("no connection given (pass a config/key, or several for multi-network)");
+            process::exit(1);
+        }
+
+        // Multiple sources => join several non-overlapping networks at once.
+        if sources.len() > 1 {
+            if self.via.is_some() || !self.hop.is_empty() {
+                success_err!("--via/--hop is not supported with multiple networks");
+                process::exit(1);
+            }
+            multi_network(&sources, self.no_offload).await;
+            return;
+        }
+
+        let (mut config, path) = match load_source(&sources[0]) {
+            Ok(v) => v,
+            Err(e) => {
+                success_err!("{}", e);
+                process::exit(1);
+            }
         };
 
         if config.runtime.is_none() {
@@ -241,7 +246,7 @@ async fn run_client<T: ClientTransport + 'static>(
     };
 
     let state_rx = client.subscribe();
-    tokio::spawn(tun_service(state_rx, tun_arc));
+    tokio::spawn(tun_service(state_rx, tun_arc, RouteMode::Default));
 
     let routes_ctrlc = routes.clone();
     ctrlc::set_handler(move || {
@@ -262,12 +267,145 @@ async fn run_client<T: ClientTransport + 'static>(
     }
 }
 
-async fn tun_service(mut state_rx: watch::Receiver<RuntimeState>, tun: Arc<TunNetwork>) {
+/// Join several non-overlapping networks at once: one tunnel per source, each
+/// routing only its own subnet. Requires every config to carry `general.network`.
+async fn multi_network(sources: &[String], no_offload: bool) {
+    let mut all_routes: Vec<Arc<RouteState>> = Vec::new();
+    let mut set: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+
+    for src in sources {
+        let mut config = match load_source(src) {
+            Ok((c, _)) => c,
+            Err(e) => {
+                success_err!("{}", e);
+                process::exit(1);
+            }
+        };
+        let Some(net) = config.general.network.clone() else {
+            success_err!("multi-network needs a network subnet in each config (missing in {src})");
+            process::exit(1);
+        };
+        let server_addr = match config.general.host.parse::<IpAddr>() {
+            Ok(ip) => SocketAddr::new(ip, config.general.port),
+            Err(_) => {
+                success_err!("invalid host address: {}", config.general.host);
+                process::exit(1);
+            }
+        };
+
+        let mut iface = config.interface.take().unwrap_or_default();
+        if no_offload {
+            iface.offload = false;
+        }
+        let runtime = config.runtime.take().unwrap_or_default();
+
+        // Sequential setup so each TUN gets a distinct auto-picked name.
+        let tun = match TunNetwork::new(&iface.name, iface.mtu, false, None, iface.offload).await {
+            Ok(t) => t,
+            Err(e) => {
+                success_err!("setup tun ({}): {}", src, e);
+                process::exit(1);
+            }
+        };
+        let tun_name = match tun.name() {
+            Ok(n) => n,
+            Err(e) => {
+                success_err!("get tun name: {}", e);
+                process::exit(1);
+            }
+        };
+        let routes = match RouteState::new(server_addr.ip(), tun_name).build() {
+            Ok(r) => Arc::new(r),
+            Err(e) => {
+                success_err!("setup routes ({}): {}", src, e);
+                process::exit(1);
+            }
+        };
+        all_routes.push(routes.clone());
+
+        let transport = match UdpTransport::new(server_addr, runtime.so_rcvbuf, runtime.so_sndbuf) {
+            Ok(t) => t,
+            Err(e) => {
+                success_err!("create transport ({}): {}", src, e);
+                process::exit(1);
+            }
+        };
+        let cred = Cred {
+            sk: config.credentials.private_key,
+            psk: config.credentials.pre_shared_key,
+            spk: config.credentials.server_public_key,
+            enrollment: config.credentials.enrollment,
+        };
+        let alg = config.general.alg;
+        let tun_arc = Arc::new(tun.clone());
+        let client = match ClientBuilder::new(transport, tun)
+            .alg(alg)
+            .keepalive(runtime.keepalive.map(Duration::from_secs))
+            .handshake_timeout(Duration::from_millis(runtime.handshake_timeout))
+            .cred(cred)
+            .encrypt_workers(crate::config::resolve_pool_workers(runtime.encrypt_workers))
+            .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                success_err!("build client ({}): {}", src, e);
+                process::exit(1);
+            }
+        };
+        let state_rx = client.subscribe();
+        tokio::spawn(tun_service(
+            state_rx,
+            tun_arc,
+            RouteMode::Subnet(net.subnet, net.prefix),
+        ));
+        info!("network {}/{} via {}", net.subnet, net.prefix, server_addr);
+        set.spawn(async move {
+            match client.run().await {
+                Ok(_) => unreachable!(),
+                Err(RuntimeError::StopSignal) => info!("runtime stopped"),
+                Err(e) => success_err!("network error: {}", e),
+            }
+        });
+    }
+
+    // One Ctrl-C handler restores every network's routes.
+    let cleanup = all_routes.clone();
+    ctrlc::set_handler(move || {
+        println!("Ctrl-C received, stopping...");
+        for r in &cleanup {
+            r.restore();
+        }
+        thread::sleep(Duration::from_secs(1));
+        process::exit(0);
+    })
+    .expect("error setting Ctrl-C handler");
+
+    while set.join_next().await.is_some() {}
+    for r in &all_routes {
+        r.restore();
+    }
+}
+
+/// How a tunnel claims routes once its address is leased.
+#[derive(Clone, Copy)]
+enum RouteMode {
+    /// Full-tunnel: default route (0.0.0.0/1 + 128.0.0.0/1). Single-network VPN.
+    Default,
+    /// Split: route only this network's subnet through the tunnel (multi-network).
+    Subnet(IpAddr, u8),
+}
+
+async fn tun_service(
+    mut state_rx: watch::Receiver<RuntimeState>,
+    tun: Arc<TunNetwork>,
+    route: RouteMode,
+) {
     while state_rx.changed().await.is_ok() {
         let state = state_rx.borrow().clone();
         match state {
             RuntimeState::Connected((payload, _)) => {
-                configure_tun(&tun, &payload).await;
+                configure_tun(&tun, &payload, route).await;
             }
             RuntimeState::Error(_) => break,
             _ => {}
@@ -275,7 +413,7 @@ async fn tun_service(mut state_rx: watch::Receiver<RuntimeState>, tun: Arc<TunNe
     }
 }
 
-async fn configure_tun(tun: &TunNetwork, payload: &SessionInfo) {
+async fn configure_tun(tun: &TunNetwork, payload: &SessionInfo, route: RouteMode) {
     let prefix = match payload.ipaddr {
         IpAddr::V4(_) => 32,
         IpAddr::V6(_) => 128,
@@ -284,24 +422,42 @@ async fn configure_tun(tun: &TunNetwork, payload: &SessionInfo) {
         error!("configure tun ip {}: {}", payload.ipaddr, e);
         return;
     }
-    if payload.ipaddr.is_ipv4() {
-        let tun_name = match tun.name() {
-            Ok(n) => n,
+    let tun_name = match tun.name() {
+        Ok(n) => n,
+        Err(e) => {
+            error!("get tun name: {}", e);
+            return;
+        }
+    };
+    let routes: Vec<IpNetwork> = match route {
+        RouteMode::Default if payload.ipaddr.is_ipv4() => vec![
+            IpNetwork::from_str("0.0.0.0/1").unwrap(),
+            IpNetwork::from_str("128.0.0.0/1").unwrap(),
+        ],
+        RouteMode::Default => vec![],
+        RouteMode::Subnet(net, plen) => match IpNetwork::new(net, plen) {
+            Ok(n) => vec![n],
             Err(e) => {
-                error!("get tun name: {}", e);
-                return;
+                error!("invalid network route {}/{}: {}", net, plen, e);
+                vec![]
             }
-        };
-        for prefix in ["0.0.0.0/1", "128.0.0.0/1"] {
-            if let Err(e) = add_route(
-                &IpNetwork::from_str(prefix).unwrap(),
-                None,
-                &tun_name,
-                Some(1),
-            ) {
-                error!("add route {}: {}", prefix, e);
-            }
+        },
+    };
+    for net in routes {
+        if let Err(e) = add_route(&net, None, &tun_name, Some(1)) {
+            error!("add route {}: {}", net, e);
         }
     }
-    debug!("tun configured with ip {}", payload.ipaddr);
+    debug!(
+        "tun configured with ip {} ({} routes)",
+        payload.ipaddr,
+        route_label(route)
+    );
+}
+
+fn route_label(route: RouteMode) -> String {
+    match route {
+        RouteMode::Default => "default".to_string(),
+        RouteMode::Subnet(net, plen) => format!("{net}/{plen}"),
+    }
 }
