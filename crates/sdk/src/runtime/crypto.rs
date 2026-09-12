@@ -625,4 +625,102 @@ mod tests {
             }
         }
     }
+
+    /// The steady-state forward hot path (client encrypt frame -> parse -> server
+    /// decrypt) must not allocate after warm-up: `encode_data_client_packet` and
+    /// `noise_decrypt_data_client_into` both write into caller/thread-local
+    /// buffers. Uses the test-only thread-local allocation counter.
+    #[test]
+    fn hot_path_forward_zero_alloc_after_warmup() {
+        use crate::protocol::PacketRef;
+
+        let (tx, rx) = make_noise_pair_for_test();
+        let payload = vec![0x5Au8; 1200];
+        let mut out = [0u8; 65600];
+        let mut plain = [0u8; 65536];
+
+        let mut round = |nonce: u64, out: &mut [u8], plain: &mut [u8]| {
+            let n = encode_data_client_packet(&payload, 1, &tx, nonce, out).unwrap();
+            match PacketRef::from_bytes(&out[..n]) {
+                Some(PacketRef::DataClient {
+                    ciphertext,
+                    nonce: pn,
+                    ..
+                }) => match noise_decrypt_data_client_into(ciphertext, &rx, plain, pn).unwrap() {
+                    DataClientActionRef::Forward(p) => assert_eq!(p.len(), payload.len()),
+                    _ => panic!("expected forward"),
+                },
+                _ => panic!("parse"),
+            }
+        };
+
+        // Warm up thread-local PLAIN_BUF / CIPHER_POOL (first use allocates once).
+        for nonce in 0..8u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+
+        crate::test_alloc::reset();
+        for nonce in 8..1008u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+        let allocs = crate::test_alloc::count();
+        assert_eq!(
+            allocs, 0,
+            "steady-state forward hot path allocated {allocs} times over 1000 packets"
+        );
+    }
+
+    /// Reverse hot path (server encrypt frame -> parse -> client decrypt) must
+    /// also be allocation-free in steady state.
+    #[test]
+    fn hot_path_reverse_zero_alloc_after_warmup() {
+        use crate::protocol::PacketRef;
+
+        let (tx, rx) = make_noise_pair_for_test();
+        let payload = vec![0xA5u8; 1200];
+        let mut out = [0u8; 65600];
+        let mut plain = [0u8; 65536];
+
+        let mut round = |nonce: u64, out: &mut [u8], plain: &mut [u8]| {
+            let n = encode_data_server_packet(&payload, &tx, nonce, out).unwrap();
+            match PacketRef::from_bytes(&out[..n]) {
+                Some(PacketRef::DataServer {
+                    ciphertext,
+                    nonce: pn,
+                }) => match noise_decrypt_data_server_into(ciphertext, &rx, plain, pn).unwrap() {
+                    DataServerActionRef::Forward(p) => assert_eq!(p.len(), payload.len()),
+                    _ => panic!("expected forward"),
+                },
+                _ => panic!("parse"),
+            }
+        };
+
+        for nonce in 0..8u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+        crate::test_alloc::reset();
+        for nonce in 8..1008u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+        let allocs = crate::test_alloc::count();
+        assert_eq!(
+            allocs, 0,
+            "steady-state reverse hot path allocated {allocs} times over 1000 packets"
+        );
+    }
+
+    /// Guard against a false zero-alloc pass: the thread-local counter must
+    /// actually observe allocations.
+    #[test]
+    fn alloc_counter_observes_allocations() {
+        crate::test_alloc::reset();
+        let before = crate::test_alloc::count();
+        let v = std::hint::black_box(vec![0u8; 4096]);
+        let after = crate::test_alloc::count();
+        drop(v);
+        assert!(
+            after > before,
+            "allocation counter did not observe a heap allocation"
+        );
+    }
 }
