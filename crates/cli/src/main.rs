@@ -28,6 +28,9 @@ async fn main() {
 
     match opt.cmd {
         Commands::Connect(cmd) => cmd.exec().await,
+        Commands::Nodes(cmd) => cmd.exec().await,
+        Commands::Route(cmd) => cmd.exec().await,
+        Commands::Authority(cmd) => cmd.exec().await,
         Commands::Server(server_cmd) => {
             let config = match server_cmd.config.exists() {
                 true => match config::Config::load(&server_cmd.config) {
@@ -50,6 +53,11 @@ async fn main() {
             match server_cmd.cmd {
                 ServerCommands::Start(cmd) => cmd.exec(config).await,
                 ServerCommands::Users(cmd) => cmd.exec(config).await,
+                ServerCommands::Nodes(cmd) => cmd.exec(config).await,
+                ServerCommands::Pubkey => {
+                    use holynet_sdk::crypto::PublicKey;
+                    success_ok!("PubKey", PublicKey::from_secret(&config.general.secret_key));
+                }
             }
         }
     }

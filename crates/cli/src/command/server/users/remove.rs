@@ -3,28 +3,28 @@ use crate::storage::{Clients, database};
 use crate::success_ok;
 use anyhow::anyhow;
 use clap::Args;
-use holynet_sdk::crypto::PublicKey;
+use holynet_sdk::identity::AccountPublicKey;
 
 #[derive(Debug, Args)]
 pub struct RemoveCmd {
-    /// Public key (base64)
+    /// Account public key (base64)
     #[arg()]
-    pk: String,
+    account: String,
 }
 
 impl RemoveCmd {
     pub async fn exec(self, config: Config) -> anyhow::Result<()> {
-        let pk = PublicKey::try_from(self.pk.as_str())
-            .map_err(|e| anyhow::anyhow!("parse public key: {}", e))?;
+        let account = AccountPublicKey::try_from(self.account.as_str())
+            .map_err(|e| anyhow::anyhow!("parse account public key: {}", e))?;
 
         let clients = Clients::new(database(&config.general.storage)?)?;
-        match clients.get(&pk).await {
+        match clients.get(&account).await {
             Some(_) => {
-                clients.delete(&pk).await?;
-                success_ok!("Removed", "client {:.8}", pk);
+                clients.delete(&account).await?;
+                success_ok!("Removed", "account {:.8}", account);
                 Ok(())
             }
-            None => Err(anyhow!("client {:.8} not found", pk)),
+            None => Err(anyhow!("account {:.8} not found", account)),
         }
     }
 }

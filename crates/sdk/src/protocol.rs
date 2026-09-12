@@ -1,5 +1,7 @@
 mod data;
+mod edge;
 pub mod handshake;
+mod node;
 mod primitives;
 mod session;
 pub(crate) mod varint;
@@ -8,7 +10,9 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 pub use data::{DataClientBody, DataServerBody};
 pub(crate) use data::{DataClientBodyRef, DataServerBodyRef};
+pub use edge::EdgeMetric;
 pub use handshake::{HandshakeError, HandshakeResponderBody, HandshakeResponderPayload};
+pub use node::NodeEntry;
 use primitives::VecU16;
 pub use session::{Alg, SessionId};
 use varint::{read_u16, read_u32};
@@ -129,6 +133,31 @@ pub(crate) enum PacketRef<'a> {
         nonce: u64,
         ciphertext: &'a [u8],
     },
+    /// Node-to-node registry sync (type 4): `type(1) | bincode(Vec<NodeRecord>)`.
+    /// Unencrypted: records are self-authenticating (authority signature), so a
+    /// forged sync is rejected on merge, not on transport.
+    NodeSync(&'a [u8]),
+    /// Liveness probe (type 5): `type(1) | nonce(u64 BE)`. Any node reflects it
+    /// verbatim to the sender so a client can measure reachability and rtt.
+    NodePing(u64),
+    /// Relay open request (type 6): `type(1) | dest_pk(32)`. Client asks the node
+    /// to open a transparent relay to the registry node `dest_pk`.
+    RelayOpen(&'a [u8]),
+    /// Relay open reply (type 7): `type(1) | relay_id(u32 BE)`. `relay_id == 0`
+    /// means the request was refused (unknown destination or capacity).
+    RelayOpened(u32),
+    /// Relayed opaque payload (type 8): `type(1) | relay_id(u32 BE) | payload`.
+    /// The relay forwards `payload` verbatim; it never sees the plaintext (the
+    /// client runs an end-to-end Noise session with the destination node).
+    RelayData {
+        relay_id: u32,
+        payload: &'a [u8],
+    },
+    /// Node-to-node routing overlay (type 9): `type(1) | bincode(Vec<EdgeMetric>)`.
+    /// Unencrypted and unsigned: edges are soft routing hints that only bias
+    /// path selection, never data-plane correctness (end-to-end Noise protects
+    /// the payload).
+    NodeEdges(&'a [u8]),
 }
 
 impl<'a> PacketRef<'a> {
@@ -166,6 +195,22 @@ impl<'a> PacketRef<'a> {
                 let ciphertext = buf.get(8..)?;
                 Some(PacketRef::DataServer { nonce, ciphertext })
             }
+            4 => Some(PacketRef::NodeSync(buf)),
+            5 => {
+                let nonce = u64::from_be_bytes(buf.get(..8)?.try_into().ok()?);
+                Some(PacketRef::NodePing(nonce))
+            }
+            6 => Some(PacketRef::RelayOpen(buf.get(..32)?)),
+            7 => {
+                let relay_id = u32::from_be_bytes(buf.get(..4)?.try_into().ok()?);
+                Some(PacketRef::RelayOpened(relay_id))
+            }
+            8 => {
+                let relay_id = u32::from_be_bytes(buf.get(..4)?.try_into().ok()?);
+                let payload = buf.get(4..)?;
+                Some(PacketRef::RelayData { relay_id, payload })
+            }
+            9 => Some(PacketRef::NodeEdges(buf)),
             _ => None,
         }
     }
@@ -259,6 +304,78 @@ mod tests {
             PacketRef::DataServer { nonce, ciphertext } => {
                 assert_eq!(nonce, 12345);
                 assert_eq!(ciphertext, &cipher[..]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_node_sync() {
+        let payload = vec![0x11u8, 0x22, 0x33, 0x44, 0x55];
+        let mut raw = vec![4u8];
+        raw.extend_from_slice(&payload);
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::NodeSync(got) => assert_eq!(got, &payload[..]),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_node_edges() {
+        let payload = vec![0xAAu8, 0xBB, 0xCC];
+        let mut raw = vec![9u8];
+        raw.extend_from_slice(&payload);
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::NodeEdges(got) => assert_eq!(got, &payload[..]),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_node_ping() {
+        let mut raw = vec![5u8];
+        raw.extend_from_slice(&0x0102_0304_0506_0708u64.to_be_bytes());
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::NodePing(nonce) => assert_eq!(nonce, 0x0102_0304_0506_0708),
+            _ => panic!("wrong variant"),
+        }
+        // Truncated nonce → rejected.
+        assert!(PacketRef::from_bytes(&[5u8, 0, 0]).is_none());
+    }
+
+    #[test]
+    fn test_packet_ref_relay_frames() {
+        // RelayOpen: type 6 + 32-byte dest pk
+        let pk = [7u8; 32];
+        let mut open = vec![6u8];
+        open.extend_from_slice(&pk);
+        match PacketRef::from_bytes(&open).unwrap() {
+            PacketRef::RelayOpen(got) => assert_eq!(got, &pk[..]),
+            _ => panic!("wrong variant"),
+        }
+        // Short dest pk rejected.
+        assert!(PacketRef::from_bytes(&[6u8, 1, 2, 3]).is_none());
+
+        // RelayOpened: type 7 + u32
+        let mut opened = vec![7u8];
+        opened.extend_from_slice(&0xABCD_1234u32.to_be_bytes());
+        match PacketRef::from_bytes(&opened).unwrap() {
+            PacketRef::RelayOpened(id) => assert_eq!(id, 0xABCD_1234),
+            _ => panic!("wrong variant"),
+        }
+
+        // RelayData: type 8 + u32 relay_id + payload
+        let payload = [0xDEu8, 0xAD, 0xBE, 0xEF];
+        let mut data = vec![8u8];
+        data.extend_from_slice(&99u32.to_be_bytes());
+        data.extend_from_slice(&payload);
+        match PacketRef::from_bytes(&data).unwrap() {
+            PacketRef::RelayData {
+                relay_id,
+                payload: got,
+            } => {
+                assert_eq!(relay_id, 99);
+                assert_eq!(got, &payload[..]);
             }
             _ => panic!("wrong variant"),
         }

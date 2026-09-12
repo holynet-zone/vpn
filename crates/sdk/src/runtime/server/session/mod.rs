@@ -1,9 +1,9 @@
 mod generator;
 pub mod worker;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{
-    Mutex, Mutex as StdMutex,
+    Mutex, Mutex as StdMutex, OnceLock, RwLock,
     atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering},
 };
 use std::time::Duration;
@@ -17,7 +17,10 @@ use dashmap::DashMap;
 use snow::StatelessTransportState;
 use tracing::debug;
 
-use crate::protocol::{Alg, SessionId};
+use crate::crypto::PublicKey;
+use crate::identity::AccountPublicKey;
+use crate::protocol::{Alg, EdgeMetric, NodeEntry, SessionId};
+use crate::registry::{NodeRecord, NodeRegistry};
 use crate::runtime::replay::ReplayWindow;
 use crate::time::sec_since_start;
 
@@ -33,7 +36,10 @@ pub struct Session {
     //
     pub last_seen: AtomicU64,
     pub created_at: Instant,
-    pub holy_ip: HolyIp,
+    pub holy_ip: OnceLock<HolyIp>,
+    pub peer_pk: PublicKey,
+    pub account_pub: AccountPublicKey,
+    pub device_index: u32,
     pub enc: Alg,
     pub state: StatelessTransportState,
     /// Monotonically increasing nonce for packets sent by the server to this client.
@@ -94,6 +100,29 @@ pub struct Sessions {
     holy_ip_gen: Arc<IpAddressGenerator>,
     map: Arc<DashMap<SessionId, Arc<Session>>>,
     holy_ip_map: Arc<DashMap<HolyIp, SessionId>>,
+    sticky: Arc<DashMap<(AccountPublicKey, u32), HolyIp>>,
+    /// Hard pins: `(account, device_index) -> IP`. Reserved offsets are held out
+    /// of the dynamic pool; the owner claims its exact address on lease.
+    reservations: Arc<DashMap<(AccountPublicKey, u32), HolyIp>>,
+    /// Multi-node registry advertised to clients on `NodeListRequest`.
+    ///
+    /// In unsigned single-network mode this is a static list (this node + peers).
+    /// In signed mode `registry` holds the live, gossip-fed CRDT registry and
+    /// takes precedence; `nodes` stays empty.
+    nodes: Arc<Vec<NodeEntry>>,
+    registry: Option<Arc<RwLock<NodeRegistry>>>,
+    /// Ephemeral inter-node routing overlay, keyed `(from, to)`, merged LWW on
+    /// `updated_ms`. Fed by this node's own probes and gossiped `NodeEdges`; only
+    /// present in signed (multi-node) mode. Not durable.
+    edges: Arc<RwLock<HashMap<(PublicKey, PublicKey), EdgeMetric>>>,
+    /// Optional sink invoked with records newly applied by a gossip merge, so a
+    /// host (CLI) can persist them. Set once after construction; shared by clones.
+    #[allow(clippy::type_complexity)]
+    on_merge: Arc<OnceLock<Box<dyn Fn(&[NodeRecord]) + Send + Sync>>>,
+    /// Optional sink invoked with tombstones reaped by `gc_tombstones`, so a host
+    /// (CLI) can drop them from durable storage too. Shared by clones.
+    #[allow(clippy::type_complexity)]
+    on_reap: Arc<OnceLock<Box<dyn Fn(&[NodeRecord]) + Send + Sync>>>,
     /// TTL-ordered queue for O(k) cleanup.
     ///
     /// Key = seconds-since-start when the session was inserted or last re-queued.
@@ -105,13 +134,188 @@ pub struct Sessions {
 
 impl Sessions {
     pub fn new(network: &IpAddr, prefix: u8) -> Self {
+        Self::with_reservations(network, prefix, Vec::new())
+    }
+
+    pub fn with_reservations(
+        network: &IpAddr,
+        prefix: u8,
+        reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
+    ) -> Self {
+        Self::with_config(network, prefix, reservations, Vec::new(), None)
+    }
+
+    pub fn with_config(
+        network: &IpAddr,
+        prefix: u8,
+        reservations: Vec<((AccountPublicKey, u32), IpAddr)>,
+        nodes: Vec<NodeEntry>,
+        registry: Option<NodeRegistry>,
+    ) -> Self {
+        let holy_ip_gen = IpAddressGenerator::new(increment_ip(*network), prefix);
+        let res_map: DashMap<(AccountPublicKey, u32), HolyIp> = DashMap::new();
+        for (key, ip) in reservations {
+            if holy_ip_gen.reserve(&ip) {
+                res_map.insert(key, ip);
+            } else {
+                debug!("ignoring out-of-subnet reservation {}", ip);
+            }
+        }
         Sessions {
             sid_gen: Arc::new(SessionIdGenerator::new()),
-            holy_ip_gen: Arc::new(IpAddressGenerator::new(increment_ip(*network), prefix)),
+            holy_ip_gen: Arc::new(holy_ip_gen),
             map: Arc::new(DashMap::new()),
             holy_ip_map: Arc::new(DashMap::new()),
+            sticky: Arc::new(DashMap::new()),
+            reservations: Arc::new(res_map),
+            nodes: Arc::new(nodes),
+            registry: registry.map(|r| Arc::new(RwLock::new(r))),
+            edges: Arc::new(RwLock::new(HashMap::new())),
+            on_merge: Arc::new(OnceLock::new()),
+            on_reap: Arc::new(OnceLock::new()),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
         }
+    }
+
+    /// Register a sink for gossip-merged records (persistence hook). Idempotent;
+    /// call before cloning `Sessions` into workers so all clones share it.
+    #[allow(clippy::type_complexity)]
+    pub fn set_merge_callback(&self, cb: Box<dyn Fn(&[NodeRecord]) + Send + Sync>) {
+        let _ = self.on_merge.set(cb);
+    }
+
+    /// Register a sink for reaped tombstones (durable-cleanup hook). Idempotent;
+    /// call before cloning `Sessions` into workers so all clones share it.
+    #[allow(clippy::type_complexity)]
+    pub fn set_reap_callback(&self, cb: Box<dyn Fn(&[NodeRecord]) + Send + Sync>) {
+        let _ = self.on_reap.set(cb);
+    }
+
+    /// Reap tombstones older than `cutoff_millis` from the live registry and
+    /// notify the reap sink. Returns how many were reaped (0 in unsigned mode).
+    pub fn gc_tombstones(&self, cutoff_millis: u64) -> usize {
+        let Some(reg) = &self.registry else {
+            return 0;
+        };
+        let reaped = reg.write().unwrap().gc_tombstones(cutoff_millis);
+        if !reaped.is_empty()
+            && let Some(cb) = self.on_reap.get()
+        {
+            cb(&reaped);
+        }
+        reaped.len()
+    }
+
+    /// Snapshot of the active node registry for a `NodeList` control reply.
+    pub fn node_list(&self) -> Vec<NodeEntry> {
+        match &self.registry {
+            Some(reg) => reg.read().unwrap().active_entries(),
+            None => self.nodes.as_ref().clone(),
+        }
+    }
+
+    /// Resolve a node's advertised endpoint by its public key. Used by the relay
+    /// to forward only to known registry members (never arbitrary hosts).
+    pub fn node_endpoint(&self, node_pk: &PublicKey) -> Option<SocketAddr> {
+        match &self.registry {
+            Some(reg) => reg
+                .read()
+                .unwrap()
+                .active_entries()
+                .into_iter()
+                .find(|e| &e.node_pk == node_pk)
+                .map(|e| e.endpoint),
+            None => self
+                .nodes
+                .iter()
+                .find(|e| &e.node_pk == node_pk)
+                .map(|e| e.endpoint),
+        }
+    }
+
+    /// Merge gossiped records into the live registry. Returns how many were
+    /// applied (0 in unsigned mode or if none were new/valid).
+    pub fn merge_records(&self, records: Vec<NodeRecord>) -> usize {
+        let Some(reg) = &self.registry else {
+            return 0;
+        };
+        let applied: Vec<NodeRecord> = {
+            let mut w = reg.write().unwrap();
+            records.into_iter().filter(|r| w.merge(r.clone())).collect()
+        };
+        if !applied.is_empty()
+            && let Some(cb) = self.on_merge.get()
+        {
+            cb(&applied);
+        }
+        applied.len()
+    }
+
+    /// All records (including tombstones) to push to peers during gossip.
+    pub fn sync_snapshot(&self) -> Vec<NodeRecord> {
+        match &self.registry {
+            Some(reg) => reg.read().unwrap().records(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Endpoints of active peer nodes to gossip to, excluding this node itself.
+    pub fn gossip_targets(&self, self_pk: &PublicKey) -> Vec<SocketAddr> {
+        match &self.registry {
+            Some(reg) => reg
+                .read()
+                .unwrap()
+                .active_entries()
+                .into_iter()
+                .filter(|e| &e.node_pk != self_pk)
+                .map(|e| e.endpoint)
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Active peer nodes (pubkey + endpoint), excluding this node, for edge
+    /// probing.
+    pub fn peer_entries(&self, self_pk: &PublicKey) -> Vec<(PublicKey, SocketAddr)> {
+        match &self.registry {
+            Some(reg) => reg
+                .read()
+                .unwrap()
+                .active_entries()
+                .into_iter()
+                .filter(|e| &e.node_pk != self_pk)
+                .map(|e| (e.node_pk, e.endpoint))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Merge inter-node edge metrics into the routing overlay (LWW on
+    /// `updated_ms` per `(from, to)`). Returns how many entries changed.
+    pub fn merge_edges(&self, edges: Vec<EdgeMetric>) -> usize {
+        let mut w = self.edges.write().unwrap();
+        let mut applied = 0;
+        for e in edges {
+            let key = (e.from.clone(), e.to.clone());
+            match w.get(&key) {
+                Some(cur) if cur.updated_ms >= e.updated_ms => {}
+                _ => {
+                    w.insert(key, e);
+                    applied += 1;
+                }
+            }
+        }
+        applied
+    }
+
+    /// Snapshot of the routing overlay for gossip and for the client `EdgeList`
+    /// control reply. Sorted by `(from, to)` for a stable wire order.
+    pub fn edge_snapshot(&self) -> Vec<EdgeMetric> {
+        let mut out: Vec<EdgeMetric> = self.edges.read().unwrap().values().cloned().collect();
+        out.sort_by(|a, b| {
+            (a.from.as_bytes(), a.to.as_bytes()).cmp(&(b.from.as_bytes(), b.to.as_bytes()))
+        });
+        out
     }
 
     pub fn next_session_id(&self) -> Option<SessionId> {
@@ -120,6 +324,41 @@ impl Sessions {
 
     pub fn next_holy_ip(&self) -> Option<HolyIp> {
         self.holy_ip_gen.next()
+    }
+
+    pub fn next_holy_ip_sticky(
+        &self,
+        account: &AccountPublicKey,
+        device_index: u32,
+    ) -> Option<HolyIp> {
+        let key = (account.clone(), device_index);
+        // Hard pin wins over both sticky-auto and the dynamic cursor: the reserved
+        // address is claimed directly and is never handed to anyone else.
+        if let Some(ip) = self.reservations.get(&key).map(|e| *e.value()) {
+            self.holy_ip_gen.try_take(&ip);
+            return Some(ip);
+        }
+        if let Some(prev) = self.sticky.get(&key).map(|e| *e.value())
+            && self.holy_ip_gen.try_take(&prev)
+        {
+            return Some(prev);
+        }
+        let ip = self.holy_ip_gen.next()?;
+        self.sticky.insert(key, ip);
+        Some(ip)
+    }
+
+    pub fn assign_holy_ip(&self, sid: &SessionId, ip: HolyIp) -> bool {
+        let Some(session) = self.map.get(sid) else {
+            self.holy_ip_gen.release(&ip);
+            return false;
+        };
+        if session.holy_ip.set(ip).is_err() {
+            self.holy_ip_gen.release(&ip);
+            return false;
+        }
+        self.holy_ip_map.insert(ip, *sid);
+        true
     }
 
     /// Only call if the SessionId was allocated via `next_session_id` but never passed to `add`.
@@ -132,13 +371,16 @@ impl Sessions {
         self.holy_ip_gen.release(holy_ip);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add(
         &self,
         sid: SessionId,
-        ip: HolyIp,
         sock_addr: SocketAddr,
         enc: Alg,
         state: StatelessTransportState,
+        peer_pk: PublicKey,
+        account_pub: AccountPublicKey,
+        device_index: u32,
     ) {
         let (ipv4_data, ipv6_data, is_ipv4) = match sock_addr {
             SocketAddr::V4(addr_v4) => {
@@ -169,7 +411,10 @@ impl Sessions {
             is_ipv4,
             last_seen: AtomicU64::from(sec_since_start()),
             created_at: Instant::now(),
-            holy_ip: ip,
+            holy_ip: OnceLock::new(),
+            peer_pk,
+            account_pub,
+            device_index,
             enc,
             state,
             send_nonce: AtomicU64::new(0),
@@ -177,7 +422,6 @@ impl Sessions {
         });
 
         self.map.insert(sid, session);
-        self.holy_ip_map.insert(ip, sid);
         self.expiry_queue
             .lock()
             .unwrap()
@@ -219,7 +463,9 @@ impl Sessions {
                     // Truly expired.
                     drop(session);
                     if let Some((_, session)) = self.map.remove(&sid) {
-                        if let Some((holy_ip, _)) = self.holy_ip_map.remove(&session.holy_ip) {
+                        if let Some(ip) = session.holy_ip.get()
+                            && let Some((holy_ip, _)) = self.holy_ip_map.remove(ip)
+                        {
                             self.holy_ip_gen.release(&holy_ip);
                         }
                         self.sid_gen.release(&sid);
@@ -245,12 +491,11 @@ impl Sessions {
     }
 
     pub fn release_by_sid(&self, sid: SessionId) {
-        let holy_ip = self.map.remove(&sid).map(|(_, session)| {
-            self.holy_ip_map.remove(&session.holy_ip);
-            session.holy_ip
-        });
-        if let Some(holy_ip) = holy_ip {
-            self.holy_ip_gen.release(&holy_ip);
+        if let Some((_, session)) = self.map.remove(&sid)
+            && let Some(ip) = session.holy_ip.get()
+        {
+            self.holy_ip_map.remove(ip);
+            self.holy_ip_gen.release(ip);
         }
         self.sid_gen.release(&sid);
     }
@@ -310,6 +555,8 @@ mod tests {
     use snow::StatelessTransportState;
 
     use super::*;
+    use crate::crypto::PublicKey;
+    use crate::identity::AccountKey;
     use crate::protocol::Alg;
     use crate::runtime::crypto::make_noise_pair_for_test;
     use crate::time::sec_since_start;
@@ -318,14 +565,28 @@ mod tests {
         Sessions::new(&"10.0.0.0".parse().unwrap(), 8)
     }
 
+    fn dummy_account() -> AccountPublicKey {
+        AccountKey::generate().public()
+    }
+
     fn add_one(
         sessions: &Sessions,
         addr: SocketAddr,
         state: StatelessTransportState,
     ) -> (SessionId, HolyIp) {
         let sid = sessions.next_session_id().unwrap();
+        let pk = PublicKey::try_from([0u8; 32].as_slice()).unwrap();
+        sessions.add(
+            sid,
+            addr,
+            Alg::ChaCha20Poly1305,
+            state,
+            pk,
+            dummy_account(),
+            0,
+        );
         let ip = sessions.next_holy_ip().unwrap();
-        sessions.add(sid, ip, addr, Alg::ChaCha20Poly1305, state);
+        sessions.assign_holy_ip(&sid, ip);
         (sid, ip)
     }
 
@@ -339,7 +600,7 @@ mod tests {
 
         let session = sessions.get_by_sid(&sid).unwrap();
         assert_eq!(session.id, sid);
-        assert_eq!(session.holy_ip, ip);
+        assert_eq!(session.holy_ip.get(), Some(&ip));
     }
 
     #[test]
@@ -356,6 +617,100 @@ mod tests {
     fn test_unknown_sid_returns_none() {
         let sessions = make_sessions();
         assert!(sessions.get_by_sid(&0xDEAD_BEEF).is_none());
+    }
+
+    // ── sticky allocation ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sticky_reassigns_same_ip_after_release() {
+        let sessions = make_sessions();
+        let acct = dummy_account();
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        sessions.release_holy_ip(&ip1);
+        let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        assert_eq!(ip1, ip2, "reconnect must reuse the same address");
+    }
+
+    #[test]
+    fn test_sticky_does_not_hand_out_held_ip_twice() {
+        let sessions = make_sessions();
+        let acct = dummy_account();
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        assert_ne!(ip1, ip2, "held address must not be handed out twice");
+    }
+
+    #[test]
+    fn test_node_list_snapshot() {
+        use crate::crypto::SecretKey;
+        let node = NodeEntry {
+            node_pk: PublicKey::from_secret(&SecretKey::generate_x25519()),
+            endpoint: "203.0.113.1:5000".parse().unwrap(),
+            subnet: "10.0.0.0".parse().unwrap(),
+            prefix: 24,
+            label: "ru".to_string(),
+        };
+        let sessions = Sessions::with_config(
+            &"10.0.0.0".parse().unwrap(),
+            24,
+            Vec::new(),
+            vec![node.clone()],
+            None,
+        );
+        assert_eq!(sessions.node_list(), vec![node]);
+        assert!(
+            Sessions::new(&"10.0.0.0".parse().unwrap(), 24)
+                .node_list()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_hard_pin_returns_reserved_and_dynamic_avoids_it() {
+        let acct = dummy_account();
+        let pinned: IpAddr = "10.0.0.7".parse().unwrap();
+        let sessions = Sessions::with_reservations(
+            &"10.0.0.0".parse().unwrap(),
+            24,
+            vec![((acct.clone(), 3), pinned)],
+        );
+        assert_eq!(sessions.next_holy_ip_sticky(&acct, 3), Some(pinned));
+        for _ in 0..300 {
+            if let Some(ip) = sessions.next_holy_ip() {
+                assert_ne!(ip, pinned, "dynamic pool must never hand out a reserved ip");
+            }
+        }
+    }
+
+    #[test]
+    fn test_hard_pin_stable_across_release() {
+        let acct = dummy_account();
+        let pinned: IpAddr = "10.0.0.9".parse().unwrap();
+        let sessions = Sessions::with_reservations(
+            &"10.0.0.0".parse().unwrap(),
+            24,
+            vec![((acct.clone(), 0), pinned)],
+        );
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        sessions.release_holy_ip(&ip1);
+        let ip2 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        assert_eq!(ip1, pinned);
+        assert_eq!(ip2, pinned);
+    }
+
+    #[test]
+    fn test_sticky_distinct_per_device_index() {
+        let sessions = make_sessions();
+        let acct = dummy_account();
+        let ip0 = sessions.next_holy_ip_sticky(&acct, 0).unwrap();
+        let ip1 = sessions.next_holy_ip_sticky(&acct, 1).unwrap();
+        assert_ne!(
+            ip0, ip1,
+            "different devices of one account get distinct ips"
+        );
+        sessions.release_holy_ip(&ip1);
+        let ip1b = sessions.next_holy_ip_sticky(&acct, 1).unwrap();
+        assert_eq!(ip1, ip1b, "device index keeps its sticky address");
     }
 
     // ── release ────────────────────────────────────────────────────────────────

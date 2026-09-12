@@ -23,7 +23,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use snow::StatelessTransportState;
 
-use crate::protocol::{DataClientBodyRef, DataServerBodyRef, EncryptedData};
+use crate::protocol::{DataClientBodyRef, DataServerBodyRef, EncryptedData, NodeEntry};
 
 thread_local! {
     /// Intermediate plaintext buffer: used for bincode encode (encrypt) or
@@ -124,6 +124,53 @@ fn write_ip_packet_plain(plain_buf: &mut [u8], payload: &[u8]) -> usize {
 pub(crate) const TYPE_DATA_SERVER: u8 = 3;
 /// `DataClient` wire type byte.
 pub(crate) const TYPE_DATA_CLIENT: u8 = 2;
+/// `NodeSync` wire type byte (node-to-node registry gossip).
+pub(crate) const TYPE_NODE_SYNC: u8 = 4;
+/// `NodePing` wire type byte (liveness probe, reflected verbatim).
+pub(crate) const TYPE_NODE_PING: u8 = 5;
+/// `RelayOpen` wire type byte (client asks a node to open a transparent relay).
+pub(crate) const TYPE_RELAY_OPEN: u8 = 6;
+/// `RelayOpened` wire type byte (relay open reply).
+pub(crate) const TYPE_RELAY_OPENED: u8 = 7;
+/// `RelayData` wire type byte (opaque relayed payload).
+pub(crate) const TYPE_RELAY_DATA: u8 = 8;
+/// `NodeEdges` wire type byte (node-to-node routing overlay gossip).
+pub(crate) const TYPE_NODE_EDGES: u8 = 9;
+/// Fixed `RelayData` header: `type(1) | relay_id(u32 BE)`.
+pub(crate) const RELAY_DATA_HDR_LEN: usize = 1 + 4;
+
+/// Build a 9-byte liveness-probe frame: `type(1) | nonce(u64 BE)`.
+pub(crate) fn node_ping_frame(nonce: u64) -> [u8; 9] {
+    let mut frame = [0u8; 9];
+    frame[0] = TYPE_NODE_PING;
+    frame[1..9].copy_from_slice(&nonce.to_be_bytes());
+    frame
+}
+
+/// Build a 33-byte `RelayOpen` request: `type(1) | dest_pk(32)`.
+pub(crate) fn relay_open_frame(dest_pk: &[u8; 32]) -> [u8; 33] {
+    let mut frame = [0u8; 33];
+    frame[0] = TYPE_RELAY_OPEN;
+    frame[1..33].copy_from_slice(dest_pk);
+    frame
+}
+
+/// Build a 5-byte `RelayOpened` reply: `type(1) | relay_id(u32 BE)`.
+pub(crate) fn relay_opened_frame(relay_id: u32) -> [u8; 5] {
+    let mut frame = [0u8; 5];
+    frame[0] = TYPE_RELAY_OPENED;
+    frame[1..5].copy_from_slice(&relay_id.to_be_bytes());
+    frame
+}
+
+/// Write a `RelayData` frame (`type | relay_id | payload`) into `out`. Returns
+/// the total length. Caller must ensure `out.len() >= RELAY_DATA_HDR_LEN + payload.len()`.
+pub(crate) fn write_relay_data(out: &mut [u8], relay_id: u32, payload: &[u8]) -> usize {
+    out[0] = TYPE_RELAY_DATA;
+    out[1..5].copy_from_slice(&relay_id.to_be_bytes());
+    out[RELAY_DATA_HDR_LEN..RELAY_DATA_HDR_LEN + payload.len()].copy_from_slice(payload);
+    RELAY_DATA_HDR_LEN + payload.len()
+}
 /// `DataServer` header length: `type(1) + nonce(8)`.
 pub(crate) const DATA_SERVER_HDR_LEN: usize = 1 + 8;
 /// `DataClient` header length: `type(1) + sid(4) + nonce(8)`.
@@ -234,6 +281,9 @@ pub(crate) enum DataClientActionRef<'p> {
     Forward(&'p [u8]),
     /// Keepalive timestamp (microseconds since client process start).
     KeepAlive(u128),
+    LeaseRequest,
+    NodeListRequest,
+    EdgeListRequest,
 }
 
 /// Result of decrypting a DataServerBody (client receives this from server).
@@ -247,6 +297,9 @@ pub(crate) enum DataServerActionRef<'p> {
     KeepAlive(u128),
     /// Server-initiated disconnect code.
     Disconnect(u8),
+    LeaseGrant(std::net::IpAddr),
+    NodeList(Vec<NodeEntry>),
+    EdgeList(Vec<crate::protocol::EdgeMetric>),
 }
 
 /// Decrypt a DataClientBody from raw ciphertext directly into `plain`.
@@ -273,6 +326,9 @@ pub(crate) fn noise_decrypt_data_client_into<'p>(
     Ok(match body {
         DataClientBodyRef::Packet(data) => DataClientActionRef::Forward(data),
         DataClientBodyRef::KeepAlive(ts) => DataClientActionRef::KeepAlive(ts),
+        DataClientBodyRef::LeaseRequest => DataClientActionRef::LeaseRequest,
+        DataClientBodyRef::NodeListRequest => DataClientActionRef::NodeListRequest,
+        DataClientBodyRef::EdgeListRequest => DataClientActionRef::EdgeListRequest,
     })
 }
 
@@ -294,6 +350,9 @@ pub(crate) fn noise_decrypt_data_server_into<'p>(
         DataServerBodyRef::Packet(data) => DataServerActionRef::Forward(data),
         DataServerBodyRef::KeepAlive(ts) => DataServerActionRef::KeepAlive(ts),
         DataServerBodyRef::Disconnect(code) => DataServerActionRef::Disconnect(code),
+        DataServerBodyRef::LeaseGrant(ip) => DataServerActionRef::LeaseGrant(ip),
+        DataServerBodyRef::NodeList(nodes) => DataServerActionRef::NodeList(nodes),
+        DataServerBodyRef::EdgeList(edges) => DataServerActionRef::EdgeList(edges),
     })
 }
 
@@ -571,5 +630,103 @@ mod tests {
                 _ => panic!("unexpected variant"),
             }
         }
+    }
+
+    /// The steady-state forward hot path (client encrypt frame -> parse -> server
+    /// decrypt) must not allocate after warm-up: `encode_data_client_packet` and
+    /// `noise_decrypt_data_client_into` both write into caller/thread-local
+    /// buffers. Uses the test-only thread-local allocation counter.
+    #[test]
+    fn hot_path_forward_zero_alloc_after_warmup() {
+        use crate::protocol::PacketRef;
+
+        let (tx, rx) = make_noise_pair_for_test();
+        let payload = vec![0x5Au8; 1200];
+        let mut out = [0u8; 65600];
+        let mut plain = [0u8; 65536];
+
+        let mut round = |nonce: u64, out: &mut [u8], plain: &mut [u8]| {
+            let n = encode_data_client_packet(&payload, 1, &tx, nonce, out).unwrap();
+            match PacketRef::from_bytes(&out[..n]) {
+                Some(PacketRef::DataClient {
+                    ciphertext,
+                    nonce: pn,
+                    ..
+                }) => match noise_decrypt_data_client_into(ciphertext, &rx, plain, pn).unwrap() {
+                    DataClientActionRef::Forward(p) => assert_eq!(p.len(), payload.len()),
+                    _ => panic!("expected forward"),
+                },
+                _ => panic!("parse"),
+            }
+        };
+
+        // Warm up thread-local PLAIN_BUF / CIPHER_POOL (first use allocates once).
+        for nonce in 0..8u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+
+        crate::test_alloc::reset();
+        for nonce in 8..1008u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+        let allocs = crate::test_alloc::count();
+        assert_eq!(
+            allocs, 0,
+            "steady-state forward hot path allocated {allocs} times over 1000 packets"
+        );
+    }
+
+    /// Reverse hot path (server encrypt frame -> parse -> client decrypt) must
+    /// also be allocation-free in steady state.
+    #[test]
+    fn hot_path_reverse_zero_alloc_after_warmup() {
+        use crate::protocol::PacketRef;
+
+        let (tx, rx) = make_noise_pair_for_test();
+        let payload = vec![0xA5u8; 1200];
+        let mut out = [0u8; 65600];
+        let mut plain = [0u8; 65536];
+
+        let mut round = |nonce: u64, out: &mut [u8], plain: &mut [u8]| {
+            let n = encode_data_server_packet(&payload, &tx, nonce, out).unwrap();
+            match PacketRef::from_bytes(&out[..n]) {
+                Some(PacketRef::DataServer {
+                    ciphertext,
+                    nonce: pn,
+                }) => match noise_decrypt_data_server_into(ciphertext, &rx, plain, pn).unwrap() {
+                    DataServerActionRef::Forward(p) => assert_eq!(p.len(), payload.len()),
+                    _ => panic!("expected forward"),
+                },
+                _ => panic!("parse"),
+            }
+        };
+
+        for nonce in 0..8u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+        crate::test_alloc::reset();
+        for nonce in 8..1008u64 {
+            round(nonce, &mut out, &mut plain);
+        }
+        let allocs = crate::test_alloc::count();
+        assert_eq!(
+            allocs, 0,
+            "steady-state reverse hot path allocated {allocs} times over 1000 packets"
+        );
+    }
+
+    /// Guard against a false zero-alloc pass: the thread-local counter must
+    /// actually observe allocations.
+    #[test]
+    fn alloc_counter_observes_allocations() {
+        crate::test_alloc::reset();
+        let before = crate::test_alloc::count();
+        let v = std::hint::black_box(vec![0u8; 4096]);
+        let after = crate::test_alloc::count();
+        drop(v);
+        assert!(
+            after > before,
+            "allocation counter did not observe a heap allocation"
+        );
     }
 }

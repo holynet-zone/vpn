@@ -1,11 +1,18 @@
+use std::net::IpAddr;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 use snow::StatelessTransportState;
 
-use crate::protocol::HandshakeResponderPayload;
+use crate::protocol::SessionId;
 use crate::runtime::error::RuntimeError;
 use crate::runtime::replay::ReplayWindow;
+
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    pub sid: SessionId,
+    pub ipaddr: IpAddr,
+}
 
 /// Per-session state shared by all client tasks (network, recv, keepalive).
 ///
@@ -33,7 +40,7 @@ impl ClientSession {
 #[derive(Debug, Clone)]
 pub enum RuntimeState {
     Connecting,
-    Connected((HandshakeResponderPayload, ClientSession)),
+    Connected((SessionInfo, ClientSession)),
     Error(RuntimeError),
     Listening,
 }

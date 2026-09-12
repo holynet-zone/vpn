@@ -5,6 +5,7 @@ use crate::style::{format_opaque_bytes, generate_qrcode};
 use crate::{success_err, success_ok};
 use clap::Args;
 use holynet_sdk::crypto::{PublicKey, SecretKey};
+use holynet_sdk::identity::AccountKey;
 use holynet_sdk::protocol::Alg;
 use inquire::required;
 use inquire::validator::Validation;
@@ -24,6 +25,9 @@ pub struct AddCmd {
     /// Pre-shared key (base64)
     #[arg(short, long)]
     psk: Option<String>,
+    /// Pin this device to a fixed tunnel address (held out of the dynamic pool)
+    #[arg(long)]
+    ip: Option<std::net::IpAddr>,
 }
 
 impl AddCmd {
@@ -63,31 +67,51 @@ impl AddCmd {
             None => SecretKey::generate_x25519(),
         };
 
+        let account = AccountKey::generate();
+        let device_index = 0;
+        let enrollment = account.issue(&pk, device_index, 0, 0);
+        let account_pub = account.public();
+
         println!();
-        success_ok!("PubKey", pk);
+        success_ok!("Account", account_pub);
+        success_ok!("DevicePubKey", pk);
         success_ok!("PrivKey", format_opaque_bytes(sk.as_slice()));
         success_ok!("SharedKey", format_opaque_bytes(psk.as_slice()));
+        if let Some(ip) = self.ip {
+            success_ok!("PinnedIP", ip);
+        }
         println!();
 
         let clients = Clients::new(database(&config.general.storage)?)?;
         clients
             .save(Client {
+                account_pub,
                 psk: psk.clone(),
-                peer_pk: pk.clone(),
+                device_index,
+                reserved_ip: self.ip,
                 created_at: chrono::Utc::now(),
             })
             .await;
+
+        // The network's owned subnet (server interface address masked by prefix),
+        // so a multi-network client routes only this subnet through the tunnel.
+        let network = Some(crate::config::connection::NetworkRoute {
+            subnet: mask_subnet(config.interface.address, config.interface.prefix),
+            prefix: config.interface.prefix,
+        });
 
         let connection_config = ConnectionConfig {
             general: GeneralConfig {
                 host,
                 port,
                 alg: Alg::default(),
+                network,
             },
             credentials: CredentialsConfig {
                 private_key: sk,
                 pre_shared_key: psk,
                 server_public_key: PublicKey::from_secret(&config.general.secret_key),
+                enrollment,
             },
             interface: None,
             runtime: None,
@@ -111,5 +135,30 @@ impl AddCmd {
         success_ok!("Key", "{}", connection_config.to_base64()?);
 
         Ok(())
+    }
+}
+
+/// Base address of the subnet containing `ip` at the given prefix length.
+fn mask_subnet(ip: std::net::IpAddr, prefix: u8) -> std::net::IpAddr {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let bits = u32::from(v4);
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u32::MAX << (32 - prefix.min(32))
+            };
+            IpAddr::V4((bits & mask).into())
+        }
+        IpAddr::V6(v6) => {
+            let bits = u128::from(v6);
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u128::MAX << (128 - prefix.min(128))
+            };
+            IpAddr::V6((bits & mask).into())
+        }
     }
 }

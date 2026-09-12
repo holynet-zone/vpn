@@ -2,6 +2,7 @@ pub mod connection;
 
 use crate::network::find_available_ifname;
 use holynet_sdk::crypto::SecretKey;
+use holynet_sdk::identity::AccountPublicKey;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,17 @@ pub struct GeneralConfig {
     pub port: u16,
     pub secret_key: SecretKey,
     pub storage: PathBuf,
+    /// Human label for this node in the multi-node registry (continent / site).
+    #[serde(default)]
+    pub label: String,
+    /// Trusted network authority public key. When set, the node runs the signed
+    /// multi-node registry (verifies operator-signed node records); when absent
+    /// it stays in unsigned single-network mode.
+    #[serde(default)]
+    pub authority: Option<AccountPublicKey>,
+    /// Registry gossip push interval in seconds. Absent keeps the SDK default.
+    #[serde(default)]
+    pub gossip_interval: Option<u64>,
 }
 
 fn default_offload() -> bool {
@@ -115,6 +127,9 @@ impl Default for GeneralConfig {
             port: 26256,
             secret_key: SecretKey::generate_x25519(),
             storage: PathBuf::from("database"),
+            label: String::new(),
+            authority: None,
+            gossip_interval: None,
         }
     }
 }

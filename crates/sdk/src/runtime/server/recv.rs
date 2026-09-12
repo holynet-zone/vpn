@@ -32,19 +32,40 @@ use crate::runtime::crypto::{
 };
 use crate::time::sec_since_start;
 
+const LEASE_UNAVAILABLE: u8 = 1;
+
+pub(super) fn lease_reply(
+    sessions: &Sessions,
+    session: &Session,
+    sid: SessionId,
+) -> DataServerBody {
+    let ip = match session.holy_ip.get() {
+        Some(ip) => Some(*ip),
+        None => match sessions.next_holy_ip_sticky(&session.account_pub, session.device_index) {
+            Some(ip) if sessions.assign_holy_ip(&sid, ip) => Some(ip),
+            _ => None,
+        },
+    };
+    match ip {
+        Some(ip) => DataServerBody::LeaseGrant(ip),
+        None => DataServerBody::Disconnect(LEASE_UNAVAILABLE),
+    }
+}
+
 /// Combined receive → decrypt → forward task.
 ///
 /// Reads encrypted UDP datagrams, decrypts them, and:
 /// - **Data packets** → batched and written to `network` via `send_multiple`.
 /// - **Keepalive** → response encrypted and sent back inline.
 /// - **Handshakes** → forwarded to `handshake_tx` (rare, may allocate).
-pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
+pub(super) async fn recv_decrypt_forward<T: Transport + 'static, N: Network>(
     mut stop: watch::Receiver<bool>,
     transport: Arc<T>,
     network: Arc<N>,
     sessions: Sessions,
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
     inf_sessions_timeout: bool,
+    relay_table: Arc<super::relay::RelayTable>,
 ) {
     let mut udp_buf = [0u8; 65536];
     let mut encode_buf = [0u8; 65600]; // for keepalive response encoding, reused in-place
@@ -64,6 +85,10 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
     // Per-task 1-entry session cache: eliminates DashMap lookup on every packet
     // when a single client dominates the worker's receive queue.
     let mut cached_session: Option<(SessionId, Arc<Session>)> = None;
+    // Relay-forward accumulation, flushed as one sendmmsg per flow after each
+    // drain. Empty (zero cost) on non-relay nodes.
+    let mut relay_scratch: Vec<u8> = Vec::new();
+    let mut relay_idx: Vec<(u32, usize, usize, SocketAddr)> = Vec::new();
 
     loop {
         // Await the first datagram (or a stop signal).
@@ -195,9 +220,118 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
                                             }
                                         }
                                     }
+                                    Ok(DataClientActionRef::LeaseRequest) => {
+                                        if session.sock_addr() != addr {
+                                            session.set_sock_addr(addr);
+                                        }
+                                        let reply = lease_reply(&sessions, &session, sid);
+                                        let send_nonce =
+                                            session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                                            Err(e) => {
+                                                error!("[{}] lease encrypt failed: {}", addr, e)
+                                            }
+                                            Ok(encrypted) => {
+                                                let m = encode_data_server_frame(
+                                                    send_nonce,
+                                                    &encrypted,
+                                                    &mut encode_buf,
+                                                );
+                                                if let Err(e) =
+                                                    transport.send_to(&encode_buf[..m], &addr).await
+                                                {
+                                                    error!("[{}] lease send failed: {}", addr, e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Ok(DataClientActionRef::NodeListRequest) => {
+                                        let reply = DataServerBody::NodeList(sessions.node_list());
+                                        let send_nonce =
+                                            session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                                            Err(e) => {
+                                                error!("[{}] node-list encrypt failed: {}", addr, e)
+                                            }
+                                            Ok(encrypted) => {
+                                                let m = encode_data_server_frame(
+                                                    send_nonce,
+                                                    &encrypted,
+                                                    &mut encode_buf,
+                                                );
+                                                if let Err(e) =
+                                                    transport.send_to(&encode_buf[..m], &addr).await
+                                                {
+                                                    error!(
+                                                        "[{}] node-list send failed: {}",
+                                                        addr, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Ok(DataClientActionRef::EdgeListRequest) => {
+                                        let reply =
+                                            DataServerBody::EdgeList(sessions.edge_snapshot());
+                                        let send_nonce =
+                                            session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                                            Err(e) => {
+                                                error!("[{}] edge-list encrypt failed: {}", addr, e)
+                                            }
+                                            Ok(encrypted) => {
+                                                let m = encode_data_server_frame(
+                                                    send_nonce,
+                                                    &encrypted,
+                                                    &mut encode_buf,
+                                                );
+                                                if let Err(e) =
+                                                    transport.send_to(&encode_buf[..m], &addr).await
+                                                {
+                                                    error!(
+                                                        "[{}] edge-list send failed: {}",
+                                                        addr, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    Some(PacketRef::NodeSync(payload)) => {
+                        let n = super::gossip::on_node_sync(&sessions, payload);
+                        if n > 0 {
+                            debug!("[{}] merged {} node record(s) from gossip", addr, n);
+                        }
+                    }
+
+                    Some(PacketRef::NodeEdges(payload)) => {
+                        let n = super::gossip::on_node_edges(&sessions, payload);
+                        if n > 0 {
+                            debug!("[{}] merged {} edge metric(s) from gossip", addr, n);
+                        }
+                    }
+
+                    Some(PacketRef::NodePing(nonce)) => {
+                        let frame = crate::runtime::crypto::node_ping_frame(nonce);
+                        if let Err(e) = transport.send_to(&frame, &addr).await {
+                            debug!("[{}] ping reflect failed: {}", addr, e);
+                        }
+                    }
+
+                    Some(PacketRef::RelayOpen(dest_pk)) => {
+                        super::relay::open(&relay_table, &sessions, &transport, dest_pk, addr)
+                            .await;
+                    }
+
+                    Some(PacketRef::RelayData { relay_id, payload }) => {
+                        // Accumulate; flushed as one sendmmsg per flow after the drain.
+                        let off = relay_scratch.len();
+                        relay_scratch.extend_from_slice(payload);
+                        relay_idx.push((relay_id, off, payload.len(), addr));
                     }
 
                     Some(_) => warn!("[{}] unexpected packet variant", addr),
@@ -226,6 +360,54 @@ pub(super) async fn recv_decrypt_forward<T: Transport, N: Network>(
         {
             error!("network send_multiple error: {}", e);
         }
+
+        // Flush accumulated relay-forward payloads: one sendmmsg per flow.
+        if !relay_idx.is_empty() {
+            super::relay::forward_batch(&relay_table, &relay_scratch, &relay_idx).await;
+            relay_scratch.clear();
+            relay_idx.clear();
+        }
     }
     debug!("recv_decrypt_forward stopped");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::PublicKey;
+    use crate::identity::AccountKey;
+    use crate::protocol::Alg;
+    use crate::runtime::crypto::make_noise_pair_for_test;
+
+    #[test]
+    fn lease_reply_assigns_and_is_idempotent() {
+        let sessions = Sessions::new(&"10.0.0.0".parse().unwrap(), 24);
+        let (_client, server_state) = make_noise_pair_for_test();
+        let addr = "127.0.0.1:1".parse().unwrap();
+        let sid = sessions.next_session_id().unwrap();
+        let pk = PublicKey::try_from([9u8; 32].as_slice()).unwrap();
+        let account = AccountKey::generate().public();
+        sessions.add(
+            sid,
+            addr,
+            Alg::ChaCha20Poly1305,
+            server_state,
+            pk,
+            account,
+            0,
+        );
+
+        let session = sessions.get_by_sid(&sid).unwrap();
+        let ip = match lease_reply(&sessions, &session, sid) {
+            DataServerBody::LeaseGrant(ip) => ip,
+            _ => panic!("expected lease grant"),
+        };
+        assert!(sessions.is_holy_ip_allocated(&ip));
+        assert_eq!(session.holy_ip.get(), Some(&ip));
+
+        match lease_reply(&sessions, &session, sid) {
+            DataServerBody::LeaseGrant(ip2) => assert_eq!(ip2, ip),
+            _ => panic!("expected lease grant"),
+        }
+    }
 }

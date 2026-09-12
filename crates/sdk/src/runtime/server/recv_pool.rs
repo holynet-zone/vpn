@@ -140,6 +140,7 @@ impl Batch {
 /// Spawn the reader + `workers` decrypt tasks + writer and run until stop.
 ///
 /// `workers` must be >= 2 (the caller uses the single-task path otherwise).
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network + 'static>(
     stop: watch::Receiver<bool>,
     transport: Arc<T>,
@@ -148,6 +149,7 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
     inf_sessions_timeout: bool,
     workers: usize,
+    relay_table: Arc<super::relay::RelayTable>,
 ) {
     let mtu = network.mtu() as usize;
     let seg = mtu + 128 + TUN_SEND_OFFSET;
@@ -181,6 +183,7 @@ pub(super) async fn recv_decrypt_forward_pool<T: Transport + 'static, N: Network
             handshake_tx.clone(),
             inf_sessions_timeout,
             seg,
+            relay_table.clone(),
         ));
     }
 
@@ -273,7 +276,8 @@ async fn reader<T: Transport>(
 /// the writer (skipped slots included, so the writer's rotation stays in lockstep
 /// with the batch `seq`). Data packets decrypt straight into the slot's `plain`
 /// buffer; keepalives are answered inline; handshakes go out of band.
-async fn worker<T: Transport>(
+#[allow(clippy::too_many_arguments)]
+async fn worker<T: Transport + 'static>(
     mut work_rx: mpsc::Receiver<Box<Batch>>,
     done_tx: mpsc::Sender<Box<Batch>>,
     transport: Arc<T>,
@@ -281,6 +285,7 @@ async fn worker<T: Transport>(
     handshake_tx: mpsc::Sender<(EncryptedHandshake, SocketAddr)>,
     inf_sessions_timeout: bool,
     seg: usize,
+    relay_table: Arc<super::relay::RelayTable>,
 ) {
     // Per-worker 1-entry session cache: a hot single flow hits it every packet,
     // skipping the DashMap lookup entirely.
@@ -298,6 +303,7 @@ async fn worker<T: Transport>(
                 seg,
                 &mut cached,
                 &mut encode_buf,
+                &relay_table,
             )
             .await;
         }
@@ -310,7 +316,7 @@ async fn worker<T: Transport>(
 
 /// Decrypt/dispatch a single slot in place, setting its `action` for the writer.
 #[allow(clippy::too_many_arguments)]
-async fn decrypt_one<T: Transport>(
+async fn decrypt_one<T: Transport + 'static>(
     slot: &mut Slot,
     transport: &Arc<T>,
     sessions: &Sessions,
@@ -319,6 +325,7 @@ async fn decrypt_one<T: Transport>(
     seg: usize,
     cached: &mut Option<(SessionId, Arc<Session>)>,
     encode_buf: &mut [u8],
+    relay_table: &Arc<super::relay::RelayTable>,
 ) {
     slot.action = SlotAction::Skip;
     slot.session = None;
@@ -405,6 +412,57 @@ async fn decrypt_one<T: Transport>(
                             }
                         }
                     }
+                    Ok(DataClientActionRef::LeaseRequest) => {
+                        if session.sock_addr() != slot.addr {
+                            session.set_sock_addr(slot.addr);
+                        }
+                        let reply = super::recv::lease_reply(sessions, &session, sid);
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                            Err(e) => error!("[{}] lease encrypt failed: {}", slot.addr, e),
+                            Ok(encrypted) => {
+                                let m =
+                                    encode_data_server_frame(send_nonce, &encrypted, encode_buf);
+                                if let Err(e) =
+                                    transport.send_to(&encode_buf[..m], &slot.addr).await
+                                {
+                                    error!("[{}] lease send failed: {}", slot.addr, e);
+                                }
+                            }
+                        }
+                    }
+                    Ok(DataClientActionRef::NodeListRequest) => {
+                        let reply = DataServerBody::NodeList(sessions.node_list());
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                            Err(e) => error!("[{}] node-list encrypt failed: {}", slot.addr, e),
+                            Ok(encrypted) => {
+                                let m =
+                                    encode_data_server_frame(send_nonce, &encrypted, encode_buf);
+                                if let Err(e) =
+                                    transport.send_to(&encode_buf[..m], &slot.addr).await
+                                {
+                                    error!("[{}] node-list send failed: {}", slot.addr, e);
+                                }
+                            }
+                        }
+                    }
+                    Ok(DataClientActionRef::EdgeListRequest) => {
+                        let reply = DataServerBody::EdgeList(sessions.edge_snapshot());
+                        let send_nonce = session.send_nonce.fetch_add(1, Ordering::Relaxed);
+                        match noise_encrypt(&reply, &session.state, send_nonce) {
+                            Err(e) => error!("[{}] edge-list encrypt failed: {}", slot.addr, e),
+                            Ok(encrypted) => {
+                                let m =
+                                    encode_data_server_frame(send_nonce, &encrypted, encode_buf);
+                                if let Err(e) =
+                                    transport.send_to(&encode_buf[..m], &slot.addr).await
+                                {
+                                    error!("[{}] edge-list send failed: {}", slot.addr, e);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -414,6 +472,35 @@ async fn decrypt_one<T: Transport>(
             if let Err(e) = handshake_tx.send((hs, slot.addr)).await {
                 error!("handshake_tx closed: {}", e);
             }
+        }
+
+        Some(PacketRef::NodeSync(payload)) => {
+            let n = super::gossip::on_node_sync(sessions, payload);
+            if n > 0 {
+                debug!("[{}] merged {} node record(s) from gossip", slot.addr, n);
+            }
+        }
+
+        Some(PacketRef::NodeEdges(payload)) => {
+            let n = super::gossip::on_node_edges(sessions, payload);
+            if n > 0 {
+                debug!("[{}] merged {} edge metric(s) from gossip", slot.addr, n);
+            }
+        }
+
+        Some(PacketRef::NodePing(nonce)) => {
+            let frame = crate::runtime::crypto::node_ping_frame(nonce);
+            if let Err(e) = transport.send_to(&frame, &slot.addr).await {
+                debug!("[{}] ping reflect failed: {}", slot.addr, e);
+            }
+        }
+
+        Some(PacketRef::RelayOpen(dest_pk)) => {
+            super::relay::open(relay_table, sessions, transport, dest_pk, slot.addr).await;
+        }
+
+        Some(PacketRef::RelayData { relay_id, payload }) => {
+            super::relay::forward(relay_table, relay_id, payload, slot.addr).await;
         }
 
         Some(_) => warn!("[{}] unexpected packet variant", slot.addr),
@@ -578,8 +665,19 @@ mod tests {
         let sessions = Sessions::new(&"10.0.0.0".parse().unwrap(), 8);
         let addr: SocketAddr = "127.0.0.1:10001".parse().unwrap();
         let sid = sessions.next_session_id().unwrap();
+        let pk = crate::crypto::PublicKey::try_from([0u8; 32].as_slice()).unwrap();
+        let account = crate::identity::AccountKey::generate().public();
+        sessions.add(
+            sid,
+            addr,
+            Alg::ChaCha20Poly1305,
+            server_state,
+            pk,
+            account,
+            0,
+        );
         let ip = sessions.next_holy_ip().unwrap();
-        sessions.add(sid, ip, addr, Alg::ChaCha20Poly1305, server_state);
+        sessions.assign_holy_ip(&sid, ip);
 
         let (client_tp, server_tp) = MockTransport::create_pair();
         let server_tp = Arc::new(server_tp);
@@ -601,6 +699,7 @@ mod tests {
             handshake_tx,
             true,
             WORKERS,
+            Arc::new(crate::runtime::server::relay::RelayTable::new()),
         ));
 
         // Each packet's payload starts with its sequence number, so we can check

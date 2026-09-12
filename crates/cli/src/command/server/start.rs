@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::network::set_ipv4_forwarding;
-use crate::storage::{Clients, database};
+use crate::storage::{Clients, Nodes, database};
 use crate::success_err;
 use crate::success_warn;
 use clap::Args;
@@ -51,25 +51,44 @@ impl StartCmd {
             config.interface.offload = false;
         }
 
-        let clients = match database(&config.general.storage) {
-            Ok(db) => match Clients::new(db) {
-                Ok(store) => store,
-                Err(e) => {
-                    success_err!("failed to create client storage: {}", e);
-                    process::exit(1);
-                }
-            },
+        let db = match database(&config.general.storage) {
+            Ok(db) => db,
             Err(e) => {
                 success_err!("load storage: {}", e);
                 process::exit(1);
             }
         };
+        let clients = match Clients::new(db.clone()) {
+            Ok(store) => store,
+            Err(e) => {
+                success_err!("failed to create client storage: {}", e);
+                process::exit(1);
+            }
+        };
+        let node_store = match Nodes::new(db) {
+            Ok(store) => store,
+            Err(e) => {
+                success_err!("failed to create node storage: {}", e);
+                process::exit(1);
+            }
+        };
 
-        let known_clients: Vec<_> = clients
-            .get_all()
-            .await
+        let node_records = match &config.general.authority {
+            Some(_) => node_store.get_all().await,
+            None => Vec::new(),
+        };
+
+        let all_clients = clients.get_all().await;
+        let reservations: Vec<_> = all_clients
+            .iter()
+            .filter_map(|cl| {
+                cl.reserved_ip
+                    .map(|ip| ((cl.account_pub.clone(), cl.device_index), ip))
+            })
+            .collect();
+        let known_accounts: Vec<_> = all_clients
             .into_iter()
-            .map(|cl| (cl.peer_pk, cl.psk))
+            .map(|cl| (cl.account_pub, cl.psk))
             .collect();
 
         let addr: SocketAddr =
@@ -124,14 +143,45 @@ impl StartCmd {
             .map(|s| Duration::from_secs(s.cleanup_interval as u64))
             .unwrap_or(Duration::from_secs(60));
 
-        let builder = ServerBuilder::new(transports, network)
+        let authority = config.general.authority.clone();
+        let label = config.general.label.clone();
+        let mut builder = ServerBuilder::new(transports, network)
             .secret_key(config.general.secret_key)
-            .known_clients(known_clients)
+            .known_accounts(known_accounts)
+            .reservations(reservations)
             .ip(config.interface.address, config.interface.prefix)
             .session_timeout(session_timeout)
             .session_cleanup_interval(cleanup_interval)
             .handshake_buf(runtime.handshake_buf)
             .decrypt_workers(crate::config::resolve_pool_workers(runtime.decrypt_workers));
+        if let Some(secs) = config.general.gossip_interval {
+            builder = builder.gossip_interval(Duration::from_secs(secs));
+        }
+        // Signed multi-node mode when an authority is configured (zero-trust
+        // relay: this node only verifies operator-signed records, including its
+        // own). Otherwise the unsigned single-network self-advertise.
+        let builder = match authority {
+            Some(auth) => {
+                // Persist gossip-learned records so the registry survives restart
+                // without waiting for the next gossip cycle.
+                let store = node_store.clone();
+                let reap_store = node_store.clone();
+                builder
+                    .trusted_authority(auth)
+                    .node_records(node_records)
+                    .on_registry_merge(move |recs| {
+                        for r in recs {
+                            store.save_blocking(r);
+                        }
+                    })
+                    .on_registry_reap(move |recs| {
+                        for r in recs {
+                            reap_store.delete_blocking(r);
+                        }
+                    })
+            }
+            None => builder.advertise(addr, label),
+        };
 
         let server = match builder.build() {
             Ok(s) => s,
