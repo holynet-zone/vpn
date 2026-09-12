@@ -5,6 +5,7 @@ use clap::Args;
 use holynet_sdk::gateway::network::tun::TunNetwork;
 use holynet_sdk::gateway::transport::ClientTransport;
 use holynet_sdk::gateway::transport::relay::RelayTransport;
+use holynet_sdk::crypto::PublicKey;
 use holynet_sdk::gateway::transport::udp::UdpTransport;
 use holynet_sdk::protocol::Alg;
 use holynet_sdk::runtime::client::ClientBuilder;
@@ -34,6 +35,11 @@ pub struct ConnectCmd {
     /// node (the config's server public key), which the relay never decrypts.
     #[arg(long, value_name = "HOST:PORT")]
     via: Option<String>,
+    /// Intermediate relay pubkey(s) to chain before the target (multi-hop).
+    /// `--via R1 --hop R2pk` gives client->R1->R2->target. Each relay must know
+    /// the next hop in its registry. Currently at most one `--hop` (3-hop total).
+    #[arg(long, value_name = "PUBKEY", requires = "via")]
+    hop: Vec<String>,
 }
 
 /// Mutually-exclusive connection source: exactly one must be provided.
@@ -171,18 +177,38 @@ impl ConnectCmd {
 
         let tun_arc = Arc::new(tun.clone());
         let alg = config.general.alg;
+        let hs_to = Duration::from_millis(runtime.handshake_timeout);
 
-        match self.via {
-            Some(_) => {
-                let relay = RelayTransport::new(
-                    Arc::new(udp),
-                    dest_pk,
-                    Duration::from_millis(runtime.handshake_timeout),
-                );
+        // Parse intermediate relay hop pubkeys (multi-hop chaining).
+        let hop_pks: Vec<PublicKey> = match self
+            .hop
+            .iter()
+            .map(|s| PublicKey::try_from(s.as_str()))
+            .collect()
+        {
+            Ok(v) => v,
+            Err(e) => {
+                success_err!("parse --hop pubkey: {}", e);
+                process::exit(1);
+            }
+        };
+
+        // Nesting a RelayTransport per hop gives multi-hop for free: each relay
+        // forwards opaque bytes, stripping exactly its own layer.
+        match (self.via.is_some(), hop_pks.as_slice()) {
+            (false, _) => run_client(udp, tun, tun_arc, cred, alg, runtime, routes).await,
+            (true, []) => {
+                let relay = RelayTransport::new(Arc::new(udp), dest_pk, hs_to);
                 run_client(relay, tun, tun_arc, cred, alg, runtime, routes).await;
             }
-            None => {
-                run_client(udp, tun, tun_arc, cred, alg, runtime, routes).await;
+            (true, [h1]) => {
+                let inner = RelayTransport::new(Arc::new(udp), h1.clone(), hs_to);
+                let outer = RelayTransport::new(Arc::new(inner), dest_pk, hs_to);
+                run_client(outer, tun, tun_arc, cred, alg, runtime, routes).await;
+            }
+            (true, _) => {
+                success_err!("at most one --hop (3-hop) is currently supported");
+                process::exit(1);
             }
         }
     }

@@ -35,6 +35,7 @@ SUBNET=10.77.0.0/24
 SRV_IP=10.77.0.2
 CLI_IP=10.77.0.3
 RELAY_IP=10.77.0.4
+RELAY2_IP=10.77.0.5
 PORT=26256
 BIN=${BIN:-target/release/holynet}
 
@@ -44,7 +45,8 @@ MTU=${MTU:-1420}
 OFFLOAD=${OFFLOAD:-1}
 
 TUN_SRV_IP=10.8.0.1          # server tunnel subnet 10.8.0.0/24
-TUN_RELAY_IP=10.10.0.1       # relay's own tunnel subnet (unused for traffic)
+TUN_RELAY_IP=10.10.0.1       # relay1's own tunnel subnet (unused for traffic)
+TUN_RELAY2_IP=10.11.0.1      # relay2's own tunnel subnet (unused for traffic)
 
 RUNDIR="$ROOT/bench/.run"
 SHARED=/shared
@@ -137,7 +139,13 @@ client_phase(){ # client_phase <label> <connect-args...>
   docker rm -f bench-cli >/dev/null 2>&1 || true
 }
 
-do_clean(){ docker rm -f bench-srv bench-relay bench-cli >/dev/null 2>&1 || true; c_grn "containers removed (network $NET kept)"; }
+do_clean(){ docker rm -f bench-srv bench-relay bench-relay2 bench-cli >/dev/null 2>&1 || true; c_grn "containers removed (network $NET kept)"; }
+
+# host-side: sign a node record and echo the base64 blob
+sign_record(){ # sign_record <node_pk> <endpoint> <subnet> <label>
+  "$ROOT/$BIN" authority sign --node-pk "$1" --endpoint "$2" --subnet "$3" --prefix 24 \
+    --label "$4" --key "$RUNDIR/authority.key" | strip | awk '$1=="Record"{print $2; exit}'
+}
 
 do_run(){
   [ -x "$ROOT/$BIN" ] || { c_red "missing $BIN — run: bench/run.sh build"; exit 1; }
@@ -145,9 +153,10 @@ do_run(){
   net_up
   spawn bench-srv "$SRV_IP"
   spawn bench-relay "$RELAY_IP"
+  spawn bench-relay2 "$RELAY2_IP"
 
-  local SPRIV RPRIV CPRIV PSK
-  SPRIV=$(b64key); RPRIV=$(b64key); CPRIV=$(b64key); PSK=$(b64key)
+  local SPRIV RPRIV RPRIV2 CPRIV PSK
+  SPRIV=$(b64key); RPRIV=$(b64key); RPRIV2=$(b64key); CPRIV=$(b64key); PSK=$(b64key)
 
   # --- server: account enrollment for the client (Phase 2), no node authority ---
   server_config bench-srv "$SPRIV" "$TUN_SRV_IP"
@@ -157,22 +166,31 @@ do_run(){
   local SRV_NODE_PK
   SRV_NODE_PK=$(dexec bench-srv /holynet server --config /conf/config.toml pubkey | strip | awk '$1=="PubKey"{print $2}')
 
-  # --- node authority (host): sign the server's registry record ---
-  local AUTH_PUB SRV_RECORD
+  # --- node authority (host) ---
+  local AUTH_PUB
   AUTH_PUB=$("$ROOT/$BIN" authority init --out "$RUNDIR/authority.key" | strip | awk '$1=="Authority"{print $2; exit}')
-  SRV_RECORD=$("$ROOT/$BIN" authority sign --node-pk "$SRV_NODE_PK" \
-    --endpoint "$SRV_IP:$PORT" --subnet 10.8.0.0 --prefix 24 --label ru \
-    --key "$RUNDIR/authority.key" | strip | awk '$1=="Record"{print $2; exit}')
 
-  # --- relay: signed registry that knows the server; no client accounts needed ---
+  # relay2 config first, so we can read its node key and sign its record
+  server_config bench-relay2 "$RPRIV2" "$TUN_RELAY2_IP" "$AUTH_PUB"
+  local R2_NODE_PK
+  R2_NODE_PK=$(dexec bench-relay2 /holynet server --config /conf/config.toml pubkey | strip | awk '$1=="PubKey"{print $2}')
+
+  local SRV_RECORD R2_RECORD
+  SRV_RECORD=$(sign_record "$SRV_NODE_PK" "$SRV_IP:$PORT" 10.8.0.0 ru)
+  R2_RECORD=$(sign_record "$R2_NODE_PK" "$RELAY2_IP:$PORT" 10.11.0.0 relay2)
+
+  # relay1 knows the server (2-hop dest) and relay2 (3-hop next hop)
   server_config bench-relay "$RPRIV" "$TUN_RELAY_IP" "$AUTH_PUB"
-  dexec bench-relay /holynet server --config /conf/config.toml nodes import "$SRV_RECORD" >/dev/null
+  dexec bench-relay  /holynet server --config /conf/config.toml nodes import "$SRV_RECORD" >/dev/null
+  dexec bench-relay  /holynet server --config /conf/config.toml nodes import "$R2_RECORD" >/dev/null
+  # relay2 knows the server (its own next hop)
+  dexec bench-relay2 /holynet server --config /conf/config.toml nodes import "$SRV_RECORD" >/dev/null
 
-  # start server + relay + iperf
-  dexec $( [ "$OFFLOAD" = 0 ] && echo "-e HOLYNET_DISABLE_OFFLOAD=1" ) -e RUST_LOG="${SRV_LOG:-holynet=warn}" \
-    -d bench-srv sh -c "/holynet server --config /conf/config.toml start > /tmp/srv.log 2>&1"
-  dexec $( [ "$OFFLOAD" = 0 ] && echo "-e HOLYNET_DISABLE_OFFLOAD=1" ) -e RUST_LOG="${RELAY_LOG:-holynet=warn}" \
-    -d bench-relay sh -c "/holynet server --config /conf/config.toml start > /tmp/relay.log 2>&1"
+  # start server + both relays + iperf
+  local off=(); [ "$OFFLOAD" = 0 ] && off=(-e HOLYNET_DISABLE_OFFLOAD=1)
+  dexec "${off[@]}" -e RUST_LOG="${SRV_LOG:-holynet=warn}"   -d bench-srv    sh -c "/holynet server --config /conf/config.toml start > /tmp/srv.log 2>&1"
+  dexec "${off[@]}" -e RUST_LOG="${RELAY_LOG:-holynet=warn}" -d bench-relay  sh -c "/holynet server --config /conf/config.toml start > /tmp/relay.log 2>&1"
+  dexec "${off[@]}" -e RUST_LOG="${RELAY_LOG:-holynet=warn}" -d bench-relay2 sh -c "/holynet server --config /conf/config.toml start > /tmp/relay.log 2>&1"
   sleep 2
   dexec -d bench-srv sh -c "iperf3 -s -B $TUN_SRV_IP >/tmp/iperf.log 2>&1"
   sleep 1
@@ -180,7 +198,7 @@ do_run(){
   c_hdr "HolyNet relay bench (offload=$OFFLOAD, mtu=$MTU, dur=${DUR}s)"
   client_phase baseline || true
   client_phase 2-hop --via "$RELAY_IP:$PORT" || true
-  printf '  %-8s (needs multi-hop chaining / source-routing — not built yet)\n' "3-hop"
+  client_phase 3-hop --via "$RELAY_IP:$PORT" --hop "$R2_NODE_PK" || true
 }
 
 trap 'do_clean' EXIT
