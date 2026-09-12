@@ -463,6 +463,13 @@ async fn decrypt_one<T: Transport + 'static>(
             }
         }
 
+        Some(PacketRef::NodeEdges(payload)) => {
+            let n = super::gossip::on_node_edges(sessions, payload);
+            if n > 0 {
+                debug!("[{}] merged {} edge metric(s) from gossip", slot.addr, n);
+            }
+        }
+
         Some(PacketRef::NodePing(nonce)) => {
             let frame = crate::runtime::crypto::node_ping_frame(nonce);
             if let Err(e) = transport.send_to(&frame, &slot.addr).await {

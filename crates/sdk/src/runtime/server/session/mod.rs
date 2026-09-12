@@ -1,7 +1,7 @@
 mod generator;
 pub mod worker;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{
     Mutex, Mutex as StdMutex, OnceLock, RwLock,
     atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering},
@@ -19,7 +19,7 @@ use tracing::debug;
 
 use crate::crypto::PublicKey;
 use crate::identity::AccountPublicKey;
-use crate::protocol::{Alg, NodeEntry, SessionId};
+use crate::protocol::{Alg, EdgeMetric, NodeEntry, SessionId};
 use crate::registry::{NodeRecord, NodeRegistry};
 use crate::runtime::replay::ReplayWindow;
 use crate::time::sec_since_start;
@@ -111,6 +111,10 @@ pub struct Sessions {
     /// takes precedence; `nodes` stays empty.
     nodes: Arc<Vec<NodeEntry>>,
     registry: Option<Arc<RwLock<NodeRegistry>>>,
+    /// Ephemeral inter-node routing overlay, keyed `(from, to)`, merged LWW on
+    /// `updated_ms`. Fed by this node's own probes and gossiped `NodeEdges`; only
+    /// present in signed (multi-node) mode. Not durable.
+    edges: Arc<RwLock<HashMap<(PublicKey, PublicKey), EdgeMetric>>>,
     /// Optional sink invoked with records newly applied by a gossip merge, so a
     /// host (CLI) can persist them. Set once after construction; shared by clones.
     #[allow(clippy::type_complexity)]
@@ -166,6 +170,7 @@ impl Sessions {
             reservations: Arc::new(res_map),
             nodes: Arc::new(nodes),
             registry: registry.map(|r| Arc::new(RwLock::new(r))),
+            edges: Arc::new(RwLock::new(HashMap::new())),
             on_merge: Arc::new(OnceLock::new()),
             on_reap: Arc::new(OnceLock::new()),
             expiry_queue: Arc::new(StdMutex::new(BTreeMap::new())),
@@ -265,6 +270,50 @@ impl Sessions {
                 .collect(),
             None => Vec::new(),
         }
+    }
+
+    /// Active peer nodes (pubkey + endpoint), excluding this node, for edge
+    /// probing.
+    pub fn peer_entries(&self, self_pk: &PublicKey) -> Vec<(PublicKey, SocketAddr)> {
+        match &self.registry {
+            Some(reg) => reg
+                .read()
+                .unwrap()
+                .active_entries()
+                .into_iter()
+                .filter(|e| &e.node_pk != self_pk)
+                .map(|e| (e.node_pk, e.endpoint))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Merge inter-node edge metrics into the routing overlay (LWW on
+    /// `updated_ms` per `(from, to)`). Returns how many entries changed.
+    pub fn merge_edges(&self, edges: Vec<EdgeMetric>) -> usize {
+        let mut w = self.edges.write().unwrap();
+        let mut applied = 0;
+        for e in edges {
+            let key = (e.from.clone(), e.to.clone());
+            match w.get(&key) {
+                Some(cur) if cur.updated_ms >= e.updated_ms => {}
+                _ => {
+                    w.insert(key, e);
+                    applied += 1;
+                }
+            }
+        }
+        applied
+    }
+
+    /// Snapshot of the routing overlay for gossip and for the client `EdgeList`
+    /// control reply. Sorted by `(from, to)` for a stable wire order.
+    pub fn edge_snapshot(&self) -> Vec<EdgeMetric> {
+        let mut out: Vec<EdgeMetric> = self.edges.read().unwrap().values().cloned().collect();
+        out.sort_by(|a, b| {
+            (a.from.as_bytes(), a.to.as_bytes()).cmp(&(b.from.as_bytes(), b.to.as_bytes()))
+        });
+        out
     }
 
     pub fn next_session_id(&self) -> Option<SessionId> {

@@ -15,12 +15,17 @@ use tracing::{debug, warn};
 use super::session::Sessions;
 use crate::crypto::PublicKey;
 use crate::gateway::transport::Transport;
-use crate::runtime::crypto::TYPE_NODE_SYNC;
+use crate::protocol::EdgeMetric;
+use crate::runtime::client::probe_node;
+use crate::runtime::crypto::{TYPE_NODE_EDGES, TYPE_NODE_SYNC};
 
 /// How long a revoked tombstone is retained before GC. It must exceed the
 /// longest survivable partition (a lagging peer still holding the pre-revocation
 /// record would otherwise resurrect the node), so this is deliberately weeks.
 const TOMBSTONE_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Per-peer timeout when a node probes its neighbours for the routing overlay.
+const EDGE_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -49,33 +54,89 @@ pub(super) async fn gossip_loop<T: Transport>(
                 if reaped > 0 {
                     debug!("reaped {} expired tombstone(s)", reaped);
                 }
+
+                // Measure this node's edges to its peers and fold them into the
+                // overlay so the snapshot we push carries fresh local metrics.
+                let local = probe_peers(&sessions, &self_pk).await;
+                if !local.is_empty() {
+                    sessions.merge_edges(local);
+                }
+
                 let snapshot = sessions.sync_snapshot();
                 let targets = sessions.gossip_targets(&self_pk);
                 if snapshot.is_empty() || targets.is_empty() {
                     continue;
                 }
-                let payload = match bincode::serde::encode_to_vec(
-                    &snapshot,
-                    bincode::config::standard(),
-                ) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        warn!("gossip encode failed: {}", e);
-                        continue;
-                    }
+                let frame = match frame_of(TYPE_NODE_SYNC, &snapshot) {
+                    Some(f) => f,
+                    None => continue,
                 };
-                let mut frame = Vec::with_capacity(1 + payload.len());
-                frame.push(TYPE_NODE_SYNC);
-                frame.extend_from_slice(&payload);
+                let edge_frame = frame_of(TYPE_NODE_EDGES, &sessions.edge_snapshot());
                 for addr in targets {
                     if let Err(e) = transport.send_to(&frame, &addr).await {
                         debug!("gossip send to {} failed: {}", addr, e);
+                    }
+                    if let Some(ef) = &edge_frame
+                        && let Err(e) = transport.send_to(ef, &addr).await
+                    {
+                        debug!("edge gossip send to {} failed: {}", addr, e);
                     }
                 }
             }
         }
     }
     debug!("gossip loop stopped");
+}
+
+/// Build a `type | bincode(items)` gossip frame, or `None` on encode failure.
+fn frame_of<S: serde::Serialize>(ty: u8, items: &S) -> Option<Vec<u8>> {
+    match bincode::serde::encode_to_vec(items, bincode::config::standard()) {
+        Ok(payload) => {
+            let mut frame = Vec::with_capacity(1 + payload.len());
+            frame.push(ty);
+            frame.extend_from_slice(&payload);
+            Some(frame)
+        }
+        Err(e) => {
+            warn!("gossip encode failed: {}", e);
+            None
+        }
+    }
+}
+
+/// Probe every active peer once from this node's vantage and return one
+/// `EdgeMetric` per peer (`from = self`), reachable or not.
+async fn probe_peers(sessions: &Sessions, self_pk: &PublicKey) -> Vec<EdgeMetric> {
+    let peers = sessions.peer_entries(self_pk);
+    if peers.is_empty() {
+        return Vec::new();
+    }
+    let now = now_millis();
+    let futs = peers.into_iter().map(|(to, endpoint)| {
+        let from = self_pk.clone();
+        async move {
+            let rtt = probe_node(endpoint, EDGE_PROBE_TIMEOUT).await;
+            EdgeMetric {
+                from,
+                to,
+                rtt_micros: rtt.map(|d| d.as_micros().min(u32::MAX as u128) as u32),
+                updated_ms: now,
+            }
+        }
+    });
+    futures::future::join_all(futs).await
+}
+
+/// Decode a `NodeEdges` payload (bincode `Vec<EdgeMetric>`) and merge it into the
+/// routing overlay. Returns the number of entries applied.
+pub(super) fn on_node_edges(sessions: &Sessions, payload: &[u8]) -> usize {
+    match bincode::serde::decode_from_slice(payload, bincode::config::standard()) {
+        Ok((edges, _)) => sessions.merge_edges(edges),
+        Err(e) => {
+            warn!("edge gossip decode failed: {}", e);
+            0
+        }
+    }
 }
 
 /// Decode a `NodeSync` payload (bincode `Vec<NodeRecord>`) and merge it into the
@@ -272,6 +333,41 @@ mod tests {
         // Idempotent: nothing left, sink not invoked again.
         assert_eq!(sessions.gc_tombstones(1000), 0);
         assert_eq!(reaped.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn on_node_edges_merges_lww() {
+        use crate::protocol::EdgeMetric;
+
+        let auth = AccountKey::generate();
+        let sessions = Sessions::with_config(
+            &"10.0.0.0".parse().unwrap(),
+            18,
+            Vec::new(),
+            Vec::new(),
+            Some(NodeRegistry::new(auth.public())),
+        );
+        let a = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let b = PublicKey::from_secret(&SecretKey::generate_x25519());
+        let edge = |rtt: Option<u32>, ts: u64| EdgeMetric {
+            from: a.clone(),
+            to: b.clone(),
+            rtt_micros: rtt,
+            updated_ms: ts,
+        };
+        let enc = |e: &[EdgeMetric]| {
+            bincode::serde::encode_to_vec(e, bincode::config::standard()).unwrap()
+        };
+
+        assert_eq!(on_node_edges(&sessions, &enc(&[edge(Some(1000), 10)])), 1);
+        // Newer wins.
+        assert_eq!(on_node_edges(&sessions, &enc(&[edge(Some(2000), 20)])), 1);
+        // Stale is a no-op.
+        assert_eq!(on_node_edges(&sessions, &enc(&[edge(Some(500), 5)])), 0);
+        let snap = sessions.edge_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].rtt_micros, Some(2000));
+        assert_eq!(snap[0].updated_ms, 20);
     }
 
     #[test]

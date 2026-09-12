@@ -1,4 +1,5 @@
 mod data;
+mod edge;
 pub mod handshake;
 mod node;
 mod primitives;
@@ -9,6 +10,7 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 pub use data::{DataClientBody, DataServerBody};
 pub(crate) use data::{DataClientBodyRef, DataServerBodyRef};
+pub use edge::EdgeMetric;
 pub use handshake::{HandshakeError, HandshakeResponderBody, HandshakeResponderPayload};
 pub use node::NodeEntry;
 use primitives::VecU16;
@@ -151,6 +153,11 @@ pub(crate) enum PacketRef<'a> {
         relay_id: u32,
         payload: &'a [u8],
     },
+    /// Node-to-node routing overlay (type 9): `type(1) | bincode(Vec<EdgeMetric>)`.
+    /// Unencrypted and unsigned — edges are soft routing hints that only bias
+    /// path selection, never data-plane correctness (end-to-end Noise protects
+    /// the payload).
+    NodeEdges(&'a [u8]),
 }
 
 impl<'a> PacketRef<'a> {
@@ -203,6 +210,7 @@ impl<'a> PacketRef<'a> {
                 let payload = buf.get(4..)?;
                 Some(PacketRef::RelayData { relay_id, payload })
             }
+            9 => Some(PacketRef::NodeEdges(buf)),
             _ => None,
         }
     }
@@ -308,6 +316,17 @@ mod tests {
         raw.extend_from_slice(&payload);
         match PacketRef::from_bytes(&raw).unwrap() {
             PacketRef::NodeSync(got) => assert_eq!(got, &payload[..]),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_packet_ref_node_edges() {
+        let payload = vec![0xAAu8, 0xBB, 0xCC];
+        let mut raw = vec![9u8];
+        raw.extend_from_slice(&payload);
+        match PacketRef::from_bytes(&raw).unwrap() {
+            PacketRef::NodeEdges(got) => assert_eq!(got, &payload[..]),
             _ => panic!("wrong variant"),
         }
     }

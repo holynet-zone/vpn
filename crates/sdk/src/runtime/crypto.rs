@@ -134,6 +134,8 @@ pub(crate) const TYPE_RELAY_OPEN: u8 = 6;
 pub(crate) const TYPE_RELAY_OPENED: u8 = 7;
 /// `RelayData` wire type byte (opaque relayed payload).
 pub(crate) const TYPE_RELAY_DATA: u8 = 8;
+/// `NodeEdges` wire type byte (node-to-node routing overlay gossip).
+pub(crate) const TYPE_NODE_EDGES: u8 = 9;
 /// Fixed `RelayData` header: `type(1) | relay_id(u32 BE)`.
 pub(crate) const RELAY_DATA_HDR_LEN: usize = 1 + 4;
 
