@@ -67,7 +67,7 @@ pub async fn fetch_topology<T: ClientTransport>(
 
 /// Measure round-trip time to a node's UDP endpoint with a single reflected
 /// liveness probe. Returns `None` if no reply arrives within `timeout`. Uses its
-/// own ephemeral socket — independent of any tunnel — so reachability is measured
+/// own ephemeral socket (independent of any tunnel), so reachability is measured
 /// from the client's own vantage point.
 pub async fn probe_node(
     endpoint: std::net::SocketAddr,

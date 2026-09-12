@@ -134,7 +134,7 @@ pub(crate) enum PacketRef<'a> {
         ciphertext: &'a [u8],
     },
     /// Node-to-node registry sync (type 4): `type(1) | bincode(Vec<NodeRecord>)`.
-    /// Unencrypted — records are self-authenticating (authority signature), so a
+    /// Unencrypted: records are self-authenticating (authority signature), so a
     /// forged sync is rejected on merge, not on transport.
     NodeSync(&'a [u8]),
     /// Liveness probe (type 5): `type(1) | nonce(u64 BE)`. Any node reflects it
@@ -154,7 +154,7 @@ pub(crate) enum PacketRef<'a> {
         payload: &'a [u8],
     },
     /// Node-to-node routing overlay (type 9): `type(1) | bincode(Vec<EdgeMetric>)`.
-    /// Unencrypted and unsigned — edges are soft routing hints that only bias
+    /// Unencrypted and unsigned: edges are soft routing hints that only bias
     /// path selection, never data-plane correctness (end-to-end Noise protects
     /// the payload).
     NodeEdges(&'a [u8]),

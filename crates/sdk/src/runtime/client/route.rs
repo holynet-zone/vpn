@@ -1,28 +1,16 @@
-//! Client-side multi-hop path planning (A+ routing model).
-//!
-//! The client fetches the node graph (`NodeList`) and the inter-node routing
-//! overlay (`EdgeList`) and probes each node itself for the first-hop weight it
-//! alone can measure. It then runs Dijkstra over `client + nodes` with RTT as the
-//! edge weight and returns the ordered hops to the target. Nodes stay dumb
-//! transparent relays; only the client decides the path, so onion per-hop
-//! unlinkability is preserved.
+//! Client-side multi-hop path planning: Dijkstra over `client + nodes` with RTT
+//! as the edge weight (client->node from the client's own probes, node->node from
+//! the gossiped overlay). The client alone picks the path; relays stay dumb.
 
 use std::collections::HashMap;
 
 use crate::crypto::PublicKey;
 use crate::protocol::{EdgeMetric, NodeEntry};
 
-/// Compute the lowest-latency path from the client to `target`.
-///
-/// - `nodes`: graph vertices (registry snapshot).
-/// - `edges`: directed inter-node links; only `rtt_micros = Some(_)` are usable.
-/// - `client_rtts`: the client's own measured RTT (micros) to each reachable
-///   node — the first-hop weights it cannot get from the overlay.
-/// - `target`: the final end-to-end peer.
-///
-/// Returns the ordered hop keys `[first_hop, ..., target]` (the caller dials
-/// `first_hop` and relays through the rest), or `None` if `target` is
-/// unreachable. A single-element result means a direct connection is best.
+/// Lowest-latency path to `target`. `client_rtts` are the client's own probes
+/// (micros) to reachable nodes; `edges` with `rtt_micros = None` are skipped.
+/// Returns `[first_hop, .., target]` (dial `first_hop`, relay through the rest),
+/// or `None` if unreachable. A one-element result means connect directly.
 pub fn plan_route(
     nodes: &[NodeEntry],
     edges: &[EdgeMetric],
@@ -37,7 +25,6 @@ pub fn plan_route(
         .collect();
     let target_i = *idx.get(target)?;
 
-    // Adjacency as (neighbour_idx, weight) for node->node links.
     let mut adj: Vec<Vec<(usize, u64)>> = vec![Vec::new(); n];
     for e in edges {
         if let (Some(&f), Some(&t), Some(w)) = (idx.get(&e.from), idx.get(&e.to), e.rtt_micros) {
@@ -47,19 +34,19 @@ pub fn plan_route(
 
     const INF: u64 = u64::MAX;
     let mut dist = vec![INF; n];
+    // `prev[i] == None` means the client is `i`'s predecessor (a direct probe).
     let mut prev: Vec<Option<usize>> = vec![None; n];
-    // Client is a virtual source; its edges are the direct probes.
     let mut visited = vec![false; n];
     for (pk, rtt) in client_rtts {
         if let Some(&i) = idx.get(pk)
             && (*rtt as u64) < dist[i]
         {
             dist[i] = *rtt as u64;
-            prev[i] = None; // predecessor is the client
+            prev[i] = None;
         }
     }
 
-    // O(V^2) Dijkstra — the node graph is tiny, so no heap needed.
+    // O(V^2) is fine: the node graph is tiny, so no binary heap.
     loop {
         let mut u = None;
         let mut best = INF;
@@ -86,7 +73,6 @@ pub fn plan_route(
     if dist[target_i] == INF {
         return None;
     }
-    // Reconstruct from target back to the first hop (whose prev is the client).
     let mut path = Vec::new();
     let mut cur = target_i;
     loop {
