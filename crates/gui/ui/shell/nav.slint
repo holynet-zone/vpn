@@ -48,6 +48,16 @@ export component NavIcon inherits Rectangle {
         border-color: root.tint;
         Rectangle { width: 6px; height: 6px; border-radius: 3px; border-width: 2px; border-color: root.tint; }
     }
+    // route: hop chain (diamond-line-diamond-exit)
+    if kind == 5: HorizontalLayout {
+        spacing: 2px;
+        alignment: center;
+        Rectangle { width: 5px; height: 5px; background: root.tint; transform-rotation: 45deg; }
+        Rectangle { width: 4px; height: 1.5px; background: root.tint; }
+        Rectangle { width: 5px; height: 5px; background: root.tint; transform-rotation: 45deg; }
+        Rectangle { width: 4px; height: 1.5px; background: root.tint; }
+        Rectangle { width: 7px; height: 7px; border-width: 1.5px; border-color: root.tint; transform-rotation: 45deg; }
+    }
 }
 
 export component BottomNavItem inherits Rectangle {

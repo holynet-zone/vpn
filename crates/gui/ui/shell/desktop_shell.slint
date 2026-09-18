@@ -47,6 +47,12 @@ export component DesktopShell inherits Rectangle {
                     clicked => { Screen.go(Page.home); }
                 }
                 SideNavItem {
+                    kind: 5;
+                    label: Str.nav-route;
+                    active: Screen.page == Page.route;
+                    clicked => { Screen.go(Page.route); }
+                }
+                SideNavItem {
                     kind: 1;
                     label: Str.nav-nodes;
                     active: Screen.page == Page.nodes;

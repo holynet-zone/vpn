@@ -6,7 +6,10 @@ use std::time::Duration;
 use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
 use crate::data;
-use crate::{Accent, AppState, AppWindow, ConnStatus, Lang, Screen, Str, Theme, ThemeMode};
+use crate::domain;
+use crate::{
+    Accent, AppState, AppWindow, ConnStatus, Lang, PrioTab, RouteTab, Screen, Str, Theme, ThemeMode,
+};
 
 const SPARK_LEN: usize = 34;
 
@@ -27,6 +30,13 @@ struct Core {
     lang: Lang,
     mode: ThemeMode,
     accent: Accent,
+    space_id: String,
+    exit_id: String,
+    hops: Vec<String>,
+    prio: i32,
+    route_tab: RouteTab,
+    manual_mode: bool,
+    probing: bool,
 }
 
 
@@ -62,6 +72,13 @@ impl Core {
             lang: detect_lang(),
             mode: ThemeMode::System,
             accent: Accent::Halo,
+            space_id: "core".into(),
+            exit_id: "us".into(),
+            hops: vec!["nl".into(), "de".into()],
+            prio: 1,
+            route_tab: RouteTab::Auto,
+            manual_mode: false,
+            probing: false,
         }
     }
 }
@@ -238,7 +255,75 @@ fn render_all(app: &AppWindow, c: &Core) {
         st.set_banner_text(text.into());
     }
 
+    render_route(app, c);
     render_live(app, c);
+}
+
+fn render_route(app: &AppWindow, c: &Core) {
+    let st = app.global::<AppState>();
+    let lang = c.lang;
+    let space = c.space_id.as_str();
+    let exit = domain::resolve_exit(space, &c.exit_id);
+
+    let auto_path = domain::plan(space, exit, c.prio);
+    let manual_path = domain::manual_path(space, &c.hops, exit);
+    let path: Vec<&str> = if c.manual_mode {
+        manual_path.iter().copied().collect()
+    } else {
+        auto_path.iter().copied().collect()
+    };
+
+    let ev = domain::exit_view(lang, exit);
+    st.set_exit_code(ev.code.into());
+    st.set_exit_city(ev.city.into());
+    st.set_exit_meta(ev.meta.into());
+    st.set_exit_ping(ev.ping.into());
+
+    let cost = domain::path_cost(space, &path);
+    let miss = domain::path_missing(space, &path);
+    st.set_path_hops(domain::path_hops(space, lang, &path));
+    st.set_path_sum(domain::path_sum(lang, cost, miss).into());
+    st.set_path_estimated(miss > 0);
+    st.set_path_warn(domain::path_warn(lang).into());
+    st.set_hops_count(domain::hops_count(lang, path.len()).into());
+
+    st.set_route_tab(c.route_tab);
+    st.set_prio(c.prio);
+    let names = domain::prio_names(lang);
+    let prios: Vec<PrioTab> = (0..3)
+        .map(|i| PrioTab {
+            name: names[i].into(),
+            selected: i as i32 == c.prio,
+        })
+        .collect();
+    st.set_prios(model(prios));
+    let auto_cost = domain::path_cost(space, &auto_path);
+    let extra = auto_cost - ev.rtt.max(0);
+    st.set_prio_effect(domain::prio_effect(lang, auto_path.len().saturating_sub(1), extra).into());
+    st.set_plan_reason(
+        domain::plan_reason(lang, c.prio, auto_path.len(), domain::node_count(space)).into(),
+    );
+
+    let manual_view: Vec<&str> = manual_path.iter().copied().collect();
+    st.set_draft_hops(domain::draft_hops(space, lang, &manual_view));
+    st.set_add_hop_list(domain::add_hop_list(space, lang, exit, &c.hops));
+    let relays = manual_path.len().saturating_sub(1);
+    st.set_no_relays(relays == 0);
+    st.set_has_relays(relays > 0);
+    st.set_can_add_hop(manual_path.len() < domain::MAX_HOPS);
+    st.set_empty_title(domain::empty_title(lang).into());
+    st.set_empty_body(domain::empty_body(lang).into());
+
+    st.set_node_list(domain::node_rows(space, lang, &c.query, exit, &c.hops, c.probing));
+    st.set_edge_list(domain::edge_rows(space, lang));
+    st.set_topo_counts(domain::topo_counts(lang, space, if c.probing { 0 } else { 12 }).into());
+    st.set_probe_label(domain::probe_label(lang, c.probing).into());
+    st.set_probing(c.probing);
+    st.set_globe_nodes(domain::globe_nodes(space, lang));
+
+    st.set_visibility(domain::visibility(space, lang, &path, &c.transport_id));
+    st.set_factors(domain::factors(lang, &path, c.toggles[2], c.toggles[0]));
+    st.set_privacy_note(domain::privacy_note(lang, path.len()).into());
 }
 
 fn render_live(app: &AppWindow, c: &Core) {
@@ -479,6 +564,251 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                 app.global::<Str>().set_lang(l);
                 render_all(&app, &cc.borrow());
             }
+        });
+    }
+
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_select_route_tab(move |tab: RouteTab| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.route_tab = tab;
+                    match tab {
+                        RouteTab::Auto => c.manual_mode = false,
+                        RouteTab::Manual => c.manual_mode = true,
+                        RouteTab::Graph => {}
+                    }
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_set_prio(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.prio = i.clamp(0, 2);
+                    c.manual_mode = false;
+                    c.route_tab = RouteTab::Auto;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_hop_up(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let i = i as usize;
+                    if i > 0 && i < c.hops.len() {
+                        c.hops.swap(i - 1, i);
+                        c.manual_mode = true;
+                    }
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_hop_down(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let i = i as usize;
+                    if i + 1 < c.hops.len() {
+                        c.hops.swap(i, i + 1);
+                        c.manual_mode = true;
+                    }
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_hop_drop(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let i = i as usize;
+                    if i < c.hops.len() {
+                        c.hops.remove(i);
+                        c.manual_mode = true;
+                    }
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        st.on_hop_swap(move || {
+            if let Some(app) = w.upgrade() {
+                app.global::<Screen>().invoke_go(crate::Page::Nodes);
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_add_hop(move |id: SharedString| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.hops.push(id.to_string());
+                    let cap = domain::MAX_HOPS - 1;
+                    if c.hops.len() > cap {
+                        c.hops.truncate(cap);
+                    }
+                    c.manual_mode = true;
+                    c.route_tab = RouteTab::Manual;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_reset_draft(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.hops.clear();
+                    c.manual_mode = true;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_draft_from_plan(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let exit = domain::resolve_exit(&c.space_id, &c.exit_id);
+                    let mut plan = domain::plan(&c.space_id, exit, c.prio);
+                    plan.pop();
+                    c.hops = plan.iter().map(|s| s.to_string()).collect();
+                    c.manual_mode = true;
+                    c.route_tab = RouteTab::Manual;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_fill_fast(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let exit = domain::resolve_exit(&c.space_id, &c.exit_id);
+                    let mut plan = domain::plan(&c.space_id, exit, c.prio);
+                    plan.pop();
+                    c.hops = plan.iter().map(|s| s.to_string()).collect();
+                    c.manual_mode = true;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_select_exit(move |id: SharedString| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().exit_id = id.to_string();
+                app.global::<Screen>().invoke_go(crate::Page::Route);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_pick_node(move |id: SharedString| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().exit_id = id.to_string();
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_apply_route(move || {
+            let Some(app) = w.upgrade() else { return };
+            let restart = {
+                let mut c = cc.borrow_mut();
+                match c.status {
+                    ConnStatus::Off => {
+                        c.status = ConnStatus::Connecting;
+                        true
+                    }
+                    _ => {
+                        c.status = ConnStatus::Off;
+                        c.banner = None;
+                        false
+                    }
+                }
+            };
+            render_all(&app, &cc.borrow());
+            if restart {
+                let w = app.as_weak();
+                let cc2 = cc.clone();
+                Timer::single_shot(Duration::from_millis(1500), move || {
+                    if let Some(app) = w.upgrade() {
+                        {
+                            let mut c = cc2.borrow_mut();
+                            if c.status == ConnStatus::Connecting {
+                                c.status = ConnStatus::On;
+                                c.sec = 0;
+                                c.down = 0.0;
+                                c.up = 0.0;
+                            }
+                        }
+                        render_all(&app, &cc2.borrow());
+                    }
+                });
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_reprobe(move || {
+            let Some(app) = w.upgrade() else { return };
+            {
+                let mut c = cc.borrow_mut();
+                if c.probing {
+                    return;
+                }
+                c.probing = true;
+            }
+            render_all(&app, &cc.borrow());
+            let w = app.as_weak();
+            let cc2 = cc.clone();
+            Timer::single_shot(Duration::from_millis(1600), move || {
+                if let Some(app) = w.upgrade() {
+                    cc2.borrow_mut().probing = false;
+                    render_all(&app, &cc2.borrow());
+                }
+            });
         });
     }
 }

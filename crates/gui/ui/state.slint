@@ -1,8 +1,68 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitApp, DeviceInfo, KeyValue, PaletteCard } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitApp, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, RouteTab, AddStep } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
     in property <ConnStatus> status: ConnStatus.off;
+
+    in property <RouteTab> route-tab: RouteTab.auto;
+    in property <bool> route-auto: true;
+    in property <bool> route-manual: false;
+    in property <bool> route-graph: false;
+    in property <int> prio: 1;
+    in property <[RouteSeg]> route-segs;
+    in property <[PrioTab]> prios;
+    in property <string> prio-effect;
+    in property <string> plan-reason;
+
+    in property <string> exit-code;
+    in property <string> exit-city;
+    in property <string> exit-meta;
+    in property <string> exit-ping;
+
+    in property <[RouteHop]> path-hops;
+    in property <[RouteHop]> draft-hops;
+    in property <[AddHopChip]> add-hop-list;
+    in property <string> path-sum;
+    in property <bool> path-estimated: false;
+    in property <string> path-warn;
+    in property <string> hops-count;
+    in property <bool> no-relays: false;
+    in property <bool> has-relays: false;
+    in property <bool> can-add-hop: true;
+    in property <string> empty-title;
+    in property <string> empty-body;
+
+    in property <[NodeRow]> node-list;
+    in property <[EdgeRow]> edge-list;
+    in property <string> topo-counts;
+    in property <bool> probing: false;
+    in property <string> probe-label;
+    in property <[GlobeNode]> globe-nodes;
+
+    in property <[Visibility]> visibility;
+    in property <[Factor]> factors;
+    in property <string> privacy-note;
+
+    in property <bool> cold: false;
+    in property <string> space-name;
+    in property <string> space-note;
+    in property <string> space-ctl;
+    in property <string> space-count;
+    in property <[SpaceRow]> space-rows;
+    in property <bool> space-sheet-open: false;
+    in property <bool> add-open: false;
+    in property <AddStep> add-step: AddStep.idle;
+    in property <string> parsed-name;
+    in property <string> parsed-ctl;
+    in property <string> parsed-note;
+    in property <string> parsed-alg;
+    in property <string> parsed-fp;
+    in property <bool> can-add-space: true;
+
+    in property <string> qr-exit-line;
+    in property <string> qr-endpoint;
+    in property <bool> qr-parsed: false;
+    in property <bool> qr-shown: false;
 
     in property <string> server-code;
     in property <string> server-city;
@@ -57,4 +117,34 @@ export global AppState {
     callback select-palette(int);
     callback set-mode(ThemeMode);
     callback set-lang(Lang);
+
+    callback select-route-tab(RouteTab);
+    callback set-prio(int);
+    callback apply-route();
+    callback hop-up(int);
+    callback hop-down(int);
+    callback hop-drop(int);
+    callback hop-swap();
+    callback add-hop(string);
+    callback reset-draft();
+    callback fill-fast();
+    callback draft-from-plan();
+    callback reprobe();
+    callback pick-node(string);
+    callback select-exit(string);
+
+    callback open-spaces();
+    callback close-spaces();
+    callback select-space(string);
+    callback leave-space();
+    callback open-add-space();
+    callback close-add-space();
+    callback parse-cfg();
+    callback fail-cfg();
+    callback reset-cfg();
+    callback join-parsed();
+
+    callback qr-parse();
+    callback qr-reset();
+    callback qr-reveal();
 }

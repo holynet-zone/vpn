@@ -1,5 +1,90 @@
 export enum ConnStatus { off, connecting, on }
-export enum Page { home, nodes, shield, more, proto, devices, settings }
+export enum Page { home, route, nodes, shield, more, proto, devices, settings }
+export enum RouteTab { auto, manual, graph }
+export enum AddStep { idle, parsed, error }
+
+export struct NodeRow {
+    id: string,
+    code: string,
+    city: string,
+    group: string,
+    meta: string,
+    ping: string,
+    node-state: int,
+    quality: int,
+    tag: string,
+    selected: bool,
+    alive: bool,
+}
+
+export struct RouteHop {
+    num: int,
+    code: string,
+    label: string,
+    note: string,
+    rtt: string,
+    rtt-warn: bool,
+    is-exit: bool,
+    can-up: bool,
+    can-down: bool,
+    can-drop: bool,
+    can-swap: bool,
+}
+
+export struct EdgeRow {
+    pair: string,
+    val: string,
+    edge-state: int,
+}
+
+export struct PrioTab {
+    name: string,
+    selected: bool,
+}
+
+export struct RouteSeg {
+    id: string,
+    name: string,
+    selected: bool,
+}
+
+export struct SpaceRow {
+    id: string,
+    name: string,
+    note: string,
+    ctl: string,
+    fp: string,
+    current: bool,
+}
+
+export struct Visibility {
+    who: string,
+    what: string,
+    level: int,
+}
+
+export struct Factor {
+    mark: string,
+    name: string,
+    level: int,
+}
+
+export struct AddHopChip {
+    id: string,
+    code: string,
+    label: string,
+    rtt: string,
+}
+
+export struct GlobeNode {
+    id: string,
+    code: string,
+    lat: float,
+    lon: float,
+    rtt: int,
+    stale: bool,
+    is-me: bool,
+}
 
 export struct ServerInfo {
     id: string,

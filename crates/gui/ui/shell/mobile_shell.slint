@@ -51,6 +51,12 @@ export component MobileShell inherits Rectangle {
                     clicked => { Screen.go(Page.home); }
                 }
                 BottomNavItem {
+                    kind: 5;
+                    label: Str.nav-route;
+                    active: Screen.page == Page.route;
+                    clicked => { Screen.go(Page.route); }
+                }
+                BottomNavItem {
                     kind: 1;
                     label: Str.nav-nodes;
                     active: Screen.page == Page.nodes;

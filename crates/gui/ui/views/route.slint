@@ -1,0 +1,395 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { RouteTab, RouteHop, PrioTab, AddHopChip, EdgeRow, Page } from "../models.slint";
+import { Card, Chip, Chevron } from "../widgets/card.slint";
+import { ScreenTitle } from "../widgets/tiles.slint";
+
+export component Seg inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    horizontal-stretch: 1;
+    height: 34px;
+    border-radius: 11px;
+    background: active ? Theme.sf : transparent;
+    border-width: 1px;
+    border-color: active ? Theme.ln : transparent;
+    Text {
+        text: root.label;
+        font-size: 12px;
+        font-weight: 600;
+        color: active ? Theme.t : Theme.t2;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component GradBtn inherits Rectangle {
+    in property <string> label;
+    in property <length> weight: 13px;
+    callback clicked();
+    horizontal-stretch: 1;
+    height: 46px;
+    border-radius: 15px;
+    background: @linear-gradient(135deg, Theme.a1, Theme.a2);
+    Text {
+        text: root.label;
+        font-size: root.weight;
+        font-weight: 700;
+        color: Theme.on;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component GhostBtn inherits Rectangle {
+    in property <string> label;
+    in property <brush> tint: Theme.t2;
+    in property <brush> stroke: Theme.ln;
+    callback clicked();
+    horizontal-stretch: 1;
+    height: 46px;
+    border-radius: 15px;
+    background: Theme.sf;
+    border-width: 1px;
+    border-color: stroke;
+    Text {
+        text: root.label;
+        font-size: 12px;
+        font-weight: 600;
+        color: root.tint;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+component HopDot inherits Rectangle {
+    in property <bool> exit;
+    width: 8px;
+    height: 8px;
+    Rectangle {
+        width: 8px;
+        height: 8px;
+        background: exit ? Theme.a1 : Theme.a2;
+        transform-rotation: 45deg;
+    }
+}
+
+component PathHopLine inherits HorizontalLayout {
+    in property <RouteHop> hop;
+    spacing: 10px;
+    VerticalLayout { alignment: start; padding-top: 3px; HopDot { exit: hop.is-exit; } }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 3px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: hop.code; font-size: 12px; font-weight: 600; font-family: "IBM Plex Mono"; color: Theme.t; }
+            Text {
+                text: hop.label;
+                font-size: 12.5px;
+                font-weight: 600;
+                color: Theme.t;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: hop.rtt;
+                font-size: 10.5px;
+                font-family: "IBM Plex Mono";
+                color: hop.rtt-warn ? Theme.wn : Theme.t2;
+            }
+        }
+        Text { text: hop.note; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
+    }
+}
+
+component StepBtn inherits Rectangle {
+    in property <string> glyph;
+    in property <float> op: 1.0;
+    callback clicked();
+    width: 24px;
+    height: 18px;
+    border-radius: 6px;
+    background: Theme.sf2;
+    opacity: op;
+    Text { text: glyph; font-size: 11px; color: Theme.t2; }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+component DraftHopCard inherits Card {
+    in property <RouteHop> hop;
+    in property <int> idx;
+    HorizontalLayout {
+        padding: 13px;
+        spacing: 11px;
+        VerticalLayout { alignment: center; Text { text: hop.num; width: 18px; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; } }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 3px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: hop.label; font-size: 12.5px; font-weight: 700; color: Theme.t; overflow: elide; horizontal-stretch: 1; }
+                Text { text: hop.code; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+            }
+            Text { text: hop.note; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
+        }
+        VerticalLayout { alignment: center; Text { text: hop.rtt; font-size: 10.5px; font-family: "IBM Plex Mono"; color: hop.rtt-warn ? Theme.wn : Theme.t2; } }
+        if hop.can-drop || !hop.is-exit: HorizontalLayout {
+            spacing: 5px;
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                StepBtn { glyph: "▲"; op: hop.can-up ? 1.0 : 0.25; clicked => { AppState.hop-up(idx); } }
+                StepBtn { glyph: "▼"; op: hop.can-down ? 1.0 : 0.25; clicked => { AppState.hop-down(idx); } }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: Theme.ln;
+                    Text { text: "✕"; font-size: 12px; color: Theme.t2; }
+                    TouchArea { clicked => { AppState.hop-drop(idx); } }
+                }
+            }
+        }
+        if hop.can-swap: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: 30px;
+                border-radius: 9px;
+                background: Theme.sf2;
+                HorizontalLayout {
+                    padding-left: 11px;
+                    padding-right: 11px;
+                    Text { text: Str.swap-exit; font-size: 11px; font-weight: 600; color: Theme.t2; vertical-alignment: center; }
+                }
+                TouchArea { clicked => { AppState.hop-swap(); } }
+            }
+        }
+    }
+}
+
+component AddChip inherits Rectangle {
+    in property <AddHopChip> chip;
+    callback clicked();
+    height: 34px;
+    border-radius: 999px;
+    background: Theme.sf2;
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 11px;
+        spacing: 7px;
+        Text { text: chip.code; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.a1; vertical-alignment: center; }
+        Text { text: chip.label; font-size: 11px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
+        Text { text: chip.rtt; font-size: 9.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component RouteView inherits VerticalLayout {
+    spacing: 16px;
+
+    ScreenTitle { text: Str.route; }
+
+    Rectangle {
+        height: 42px;
+        border-radius: 14px;
+        background: Theme.sf2;
+        HorizontalLayout {
+            padding: 4px;
+            spacing: 4px;
+            Seg { label: Str.route-auto; active: AppState.route-tab == RouteTab.auto; clicked => { AppState.select-route-tab(RouteTab.auto); } }
+            Seg { label: Str.route-manual; active: AppState.route-tab == RouteTab.manual; clicked => { AppState.select-route-tab(RouteTab.manual); } }
+            Seg { label: Str.route-graph; active: AppState.route-tab == RouteTab.graph; clicked => { AppState.select-route-tab(RouteTab.graph); } }
+        }
+    }
+
+    if AppState.route-tab != RouteTab.graph: Card {
+        HorizontalLayout {
+            padding: 15px;
+            spacing: 12px;
+            Rectangle {
+                width: 44px;
+                height: 36px;
+                border-radius: 11px;
+                background: Theme.sf2;
+                Text { text: AppState.exit-code; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.a1; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text { text: Str.exit-node; font-size: 10px; letter-spacing: 1px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+                Text { text: AppState.exit-city; font-size: 13.5px; font-weight: 700; color: Theme.t; }
+                Text { text: AppState.exit-meta; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+            }
+            VerticalLayout { alignment: center; Text { text: AppState.exit-ping; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.ok; } }
+            VerticalLayout { alignment: center; Chevron {} }
+        }
+        TouchArea { clicked => { Screen.go(Page.nodes); } }
+    }
+
+    if AppState.route-tab == RouteTab.auto: VerticalLayout {
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 6px;
+            for p[i] in AppState.prios: Rectangle {
+                horizontal-stretch: 1;
+                height: 40px;
+                border-radius: 13px;
+                background: p.selected ? Theme.sf2 : transparent;
+                border-width: 1px;
+                border-color: p.selected ? Theme.a1 : Theme.ln;
+                Text { text: p.name; font-size: 11.5px; font-weight: 600; color: p.selected ? Theme.t : Theme.t2; }
+                TouchArea { clicked => { AppState.set-prio(i); } }
+            }
+        }
+        Text { text: AppState.prio-effect; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; horizontal-alignment: center; }
+
+        Card {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+                HorizontalLayout {
+                    Text { text: AppState.hops-count; font-size: 12px; font-weight: 600; color: Theme.t2; horizontal-stretch: 1; }
+                    Text { text: AppState.path-sum; font-size: 13px; font-weight: 600; font-family: "IBM Plex Mono"; color: Theme.ok; }
+                }
+                for hop in AppState.path-hops: PathHopLine { hop: hop; }
+                Text {
+                    text: Str.why-path + ": " + AppState.plan-reason;
+                    font-size: 11.5px;
+                    color: Theme.t2;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            GhostBtn { label: Str.route-manual; clicked => { AppState.draft-from-plan(); } }
+            GradBtn { label: Str.apply-route; clicked => { AppState.apply-route(); } }
+        }
+    }
+
+    if AppState.route-tab == RouteTab.manual: VerticalLayout {
+        spacing: 12px;
+        HorizontalLayout {
+            padding-left: 2px;
+            padding-right: 2px;
+            Text { text: AppState.hops-count; font-size: 12px; font-weight: 600; color: Theme.t2; horizontal-stretch: 1; }
+            Text { text: AppState.path-sum; font-size: 13px; font-weight: 600; font-family: "IBM Plex Mono"; color: Theme.ok; }
+        }
+        Rectangle {
+            height: 44px;
+            border-radius: 14px;
+            background: Theme.sf2;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 9px;
+                Rectangle { width: 8px; height: 8px; border-radius: 4px; border-width: 2px; border-color: Theme.t2; }
+                Text { text: Str.first-hop-mask; font-size: 11.5px; color: Theme.t2; vertical-alignment: center; horizontal-stretch: 1; }
+                Text { text: AppState.transport-code; font-size: 10px; font-weight: 700; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+            }
+        }
+        if AppState.no-relays: Rectangle {
+            border-radius: 18px;
+            background: Theme.sf;
+            border-width: 1px;
+            border-color: Theme.wn;
+            VerticalLayout {
+                padding: 15px;
+                spacing: 9px;
+                Text { text: AppState.empty-title; font-size: 12.5px; font-weight: 700; color: Theme.wn; }
+                Text { text: AppState.empty-body; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                Rectangle {
+                    height: 32px;
+                    horizontal-stretch: 0;
+                    border-radius: 11px;
+                    border-width: 1px;
+                    border-color: Theme.a1;
+                    HorizontalLayout {
+                        padding-left: 13px;
+                        padding-right: 13px;
+                        Text { text: Str.take-plan; font-size: 11px; font-weight: 600; color: Theme.a1; vertical-alignment: center; }
+                    }
+                    TouchArea { clicked => { AppState.fill-fast(); } }
+                }
+            }
+        }
+        for hop[i] in AppState.draft-hops: DraftHopCard { hop: hop; idx: i; }
+        if AppState.path-estimated: HorizontalLayout {
+            spacing: 10px;
+            Rectangle { width: 7px; height: 7px; y: 5px; border-radius: 3.5px; background: Theme.wn; }
+            Text { text: AppState.path-warn; font-size: 11.5px; color: Theme.wn; wrap: word-wrap; horizontal-stretch: 1; }
+        }
+        if AppState.can-add-hop: Rectangle {
+            border-radius: 18px;
+            background: Theme.sf;
+            border-width: 1px;
+            border-color: Theme.ln;
+            VerticalLayout {
+                padding: 14px;
+                spacing: 9px;
+                Text { text: Str.hop-add-title; font-size: 11.5px; font-weight: 600; color: Theme.t2; }
+                Flickable {
+                    height: 34px;
+                    content-width: addrow.preferred-width;
+                    addrow := HorizontalLayout {
+                        spacing: 6px;
+                        for chip in AppState.add-hop-list: AddChip { chip: chip; clicked => { AppState.add-hop(chip.id); } }
+                    }
+                }
+            }
+        }
+        if AppState.has-relays: Rectangle {
+            height: 34px;
+            Text { text: Str.reset-hops; font-size: 11px; font-weight: 600; color: Theme.t2; }
+            TouchArea { clicked => { AppState.reset-draft(); } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            GhostBtn { label: Str.route-auto; clicked => { AppState.select-route-tab(RouteTab.auto); } }
+            GradBtn { label: Str.apply-route; clicked => { AppState.apply-route(); } }
+        }
+    }
+
+    if AppState.route-tab == RouteTab.graph: VerticalLayout {
+        spacing: 13px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text { text: AppState.topo-counts; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; horizontal-stretch: 1; }
+            Rectangle {
+                height: 34px;
+                horizontal-stretch: 0;
+                border-radius: 999px;
+                border-width: 1px;
+                border-color: Theme.a1;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    Text { text: AppState.probe-label; font-size: 10.5px; font-weight: 600; color: Theme.a1; vertical-alignment: center; }
+                }
+                TouchArea { clicked => { AppState.reprobe(); } }
+            }
+        }
+        Card {
+            VerticalLayout {
+                padding: 15px;
+                spacing: 9px;
+                Text { text: Str.edges-title; font-size: 11.5px; font-weight: 600; color: Theme.t2; }
+                for e in AppState.edge-list: HorizontalLayout {
+                    Text { text: e.pair; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t; horizontal-stretch: 1; }
+                    Text {
+                        text: e.val;
+                        font-size: 11px;
+                        font-family: "IBM Plex Mono";
+                        color: e.edge-state == 2 ? Theme.t2 : e.edge-state == 1 ? Theme.wn : Theme.t2;
+                    }
+                }
+            }
+        }
+    }
+}

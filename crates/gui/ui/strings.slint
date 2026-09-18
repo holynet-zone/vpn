@@ -89,4 +89,58 @@ export global Str {
     out property <string> soon: root.tr("soon", "скоро", "即将推出", "近日公開");
 
     out property <string> simulate: root.tr("Simulate blocking", "Симулировать блокировку", "模拟封锁", "ブロックをシミュレート");
+
+    out property <string> route: root.tr("Route", "Маршрут", "路由", "ルート");
+    out property <string> nav-route: root.tr("Route", "Маршрут", "路由", "ルート");
+    out property <string> route-auto: root.tr("Auto", "Авто", "自动", "自動");
+    out property <string> route-manual: root.tr("Builder", "Ручной", "手动", "ビルダー");
+    out property <string> route-graph: root.tr("Graph", "Граф", "图", "グラフ");
+    out property <string> exit-node: root.tr("Exit node", "Exit-узел", "出口节点", "出口ノード");
+    out property <string> why-path: root.tr("Why this path", "Почему так", "为何如此", "この経路の理由");
+    out property <string> apply-route: root.tr("Apply route", "Применить путь", "应用路由", "ルートを適用");
+    out property <string> first-hop-mask: root.tr("Transport masks the first hop only", "Транспорт маскирует только первый хоп", "传输仅掩盖第一跳", "トランスポートは最初のホップのみ隠す");
+    out property <string> hop-add-title: root.tr("Available nodes", "Свободные узлы", "可用节点", "利用可能なノード");
+    out property <string> take-plan: root.tr("Take the planner's path", "Взять путь планировщика", "采用规划器路径", "プランナーの経路を採用");
+    out property <string> reset-hops: root.tr("Remove all hops", "Убрать все хопы", "移除所有跳", "全ホップを削除");
+    out property <string> swap-exit: root.tr("Replace", "Заменить", "替换", "置き換え");
+    out property <string> reprobe: root.tr("Re-probe RTT", "Пробить RTT заново", "重新测量 RTT", "RTT を再測定");
+    out property <string> probing: root.tr("Probing…", "Проба идёт…", "测量中…", "測定中…");
+    out property <string> edges-title: root.tr("Edges and RTT", "Рёбра и RTT", "边与 RTT", "エッジと RTT");
+    out property <string> map-legend: root.tr("Drag to rotate · wheel to zoom · number by a node is RTT from you, on an arc the inter-node RTT · dashed = stale metric · tap a node to make it the exit", "Тяните, чтобы вращать · колесо — масштаб · число у узла — RTT от вас, на дуге — RTT между узлами · пунктир — метрика устарела · тап по узлу делает его exit", "拖动旋转 · 滚轮缩放 · 节点旁数字是与你的 RTT，弧线上是节点间 RTT · 虚线表示指标过期 · 点按节点将其设为出口", "ドラッグで回転 · ホイールで拡大 · ノード横の数値はあなたからの RTT、弧はノード間 RTT · 破線は古い指標 · ノードをタップで出口に");
+    out property <string> who-sees: root.tr("Who sees what", "Кто что видит", "谁看到什么", "誰が何を見るか");
+    out property <string> factors-title: root.tr("Factors", "Факторы", "因素", "要素");
+    out property <string> smart-exit: root.tr("Fastest exit", "Быстрейший exit", "最快出口", "最速の出口");
+    out property <string> smart-exit-hint: root.tr("Lowest measured RTT; the planner picks the path", "Узел с минимальным измеренным RTT, путь подберёт планировщик", "测得 RTT 最低；由规划器选择路径", "測定 RTT が最小；経路はプランナーが選択");
+
+    out property <string> spaces: root.tr("Spaces", "Пространства", "空间", "スペース");
+    out property <string> space-active: root.tr("active", "активно", "使用中", "アクティブ");
+    out property <string> space-add: root.tr("+ Add space", "+ Добавить пространство", "+ 添加空间", "+ スペースを追加");
+    out property <string> space-leave: root.tr("Leave space", "Выйти из пространства", "退出空间", "スペースを離脱");
+    out property <string> space-switch-warn: root.tr("Switching drops the session and resets the route: another space has its own nodes and edges.", "Переключение разорвёт сессию и сбросит маршрут: у другого пространства свои узлы и рёбра.", "切换将中断会话并重置路由：另一空间有自己的节点和边。", "切り替えるとセッションが切れ経路がリセットされます：別スペースには独自のノードとエッジがあります。");
+    out property <string> space-ctl: root.tr("Control channel", "Control-канал", "控制通道", "コントロールチャネル");
+    out property <string> space-key: root.tr("Key", "Ключ", "密钥", "鍵");
+    out property <string> add-title: root.tr("New space", "Новое пространство", "新空间", "新しいスペース");
+    out property <string> add-lead: root.tr("Scan the QR code or paste the config string issued by the space owner.", "Отсканируйте QR или вставьте строку конфига, выданную владельцем пространства.", "扫描二维码或粘贴空间所有者提供的配置字符串。", "スペース所有者が発行した QR をスキャンするか、設定文字列を貼り付けてください。");
+    out property <string> all-joined: root.tr("Every known config is already added. A new space appears once you import a new config.", "Все известные конфиги уже добавлены. Новое пространство появится после импорта нового конфига.", "所有已知配置均已添加。导入新配置后会出现新空间。", "既知の設定はすべて追加済みです。新しい設定をインポートすると新スペースが現れます。");
+    out property <string> cfg-recognized: root.tr("Config recognized", "Конфиг распознан", "已识别配置", "設定を認識");
+    out property <string> cfg-join: root.tr("Join space", "Войти в пространство", "加入空间", "スペースに参加");
+    out property <string> cfg-err: root.tr("Could not parse", "Строка не разобрана", "无法解析", "解析できません");
+    out property <string> cfg-err-body: root.tr("Not a HolyNet config, or it is damaged. Check that the whole string was copied.", "Это не конфиг HolyNet или он повреждён. Проверьте, что скопирована вся строка целиком.", "这不是 HolyNet 配置或已损坏。请检查是否复制了完整字符串。", "HolyNet の設定でないか破損しています。文字列全体をコピーしたか確認してください。");
+    out property <string> cfg-retry: root.tr("Enter again", "Ввести заново", "重新输入", "再入力");
+    out property <string> cold-title: root.tr("No space yet", "Нет пространства", "尚无空间", "スペースがありません");
+    out property <string> cold-lead: root.tr("The client is empty: no nodes, no keys, no routes. A space is a separate node registry with its own keys and its own onion mesh. Get a config from whoever runs the space.", "Клиент пустой: узлов, ключей и маршрутов ещё нет. Пространство — это отдельный реестр узлов со своими ключами и своей onion-сетью. Получите конфиг у владельца пространства.", "客户端为空：没有节点、密钥或路由。空间是拥有自己密钥和洋葱网络的独立节点注册表。请向空间管理者获取配置。", "クライアントは空です：ノードも鍵も経路もありません。スペースは独自の鍵と onion メッシュを持つ別個のノードレジストリです。運用者から設定を入手してください。");
+    out property <string> qr-scan-hint: root.tr("Point the camera at the space owner's QR code", "Наведите камеру на QR-код владельца пространства", "将相机对准空间所有者的二维码", "スペース所有者の QR にカメラを向けてください");
+    out property <string> cold-scan: root.tr("Scan QR", "Сканировать QR", "扫描二维码", "QR をスキャン");
+    out property <string> cold-paste: root.tr("Paste config string", "Вставить строку конфига", "粘贴配置字符串", "設定文字列を貼り付け");
+    out property <string> cold-file: root.tr("Open file", "Открыть файл", "打开文件", "ファイルを開く");
+    out property <string> cold-why: root.tr("Spaces are isolated: the nodes, keys and log of one are invisible to another. A device can hold several and switch between them.", "Пространства изолированы: узлы, ключи и журнал одного не видны другому. На устройстве можно держать несколько и переключаться.", "空间彼此隔离：一个空间的节点、密钥和日志对另一个不可见。设备可保存多个并在其间切换。", "スペースは隔離されています：あるスペースのノード・鍵・ログは別スペースから見えません。端末は複数保持し切り替えられます。");
+
+    out property <string> qr-title: root.tr("Connection config", "Конфиг подключения", "连接配置", "接続設定");
+    out property <string> qr-warn: root.tr("This code grants full account access. Share only with your own device.", "Код даёт полный доступ к аккаунту. Передавайте только своему устройству.", "此码授予完整账户访问权限。仅与自己的设备共享。", "このコードはアカウントへの完全アクセスを与えます。自分の端末とのみ共有してください。");
+    out property <string> qr-reveal: root.tr("Hold to reveal", "Удерживать: показать", "按住以显示", "長押しで表示");
+    out property <string> qr-recv: root.tr("Receive config", "Принять конфиг", "接收配置", "設定を受信");
+    out property <string> qr-parse-btn: root.tr("Parse base64", "Разобрать base64", "解析 base64", "base64 を解析");
+    out property <string> qr-parsed-title: root.tr("Recognized", "Распознано", "已识别", "認識済み");
+    out property <string> qr-import: root.tr("Import", "Импортировать", "导入", "インポート");
+    out property <string> qr-no-log: root.tr("Code contents are never written to the log.", "Содержимое кода не записывается в журнал.", "代码内容绝不会写入日志。", "コード内容はログに記録されません。");
 }
