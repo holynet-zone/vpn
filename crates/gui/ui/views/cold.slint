@@ -1,0 +1,132 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { AddStep } from "../models.slint";
+import { Card } from "../widgets/card.slint";
+import { GradBtn, GhostBtn } from "route.slint";
+
+component QrPlaceholder inherits Rectangle {
+    in property <length> box: 132px;
+    width: box;
+    height: box;
+    border-radius: 16px;
+    background: Theme.sf2;
+    border-width: 1px;
+    border-color: Theme.ln;
+    Rectangle {
+        width: root.box * 0.4;
+        height: root.box * 0.4;
+        border-radius: 10px;
+        border-width: 2px;
+        border-color: Theme.a1;
+        opacity: 0.5;
+    }
+}
+
+component KvRow inherits HorizontalLayout {
+    in property <string> k;
+    in property <string> v;
+    spacing: 10px;
+    Text { text: k; font-size: 10.5px; color: Theme.t2; horizontal-stretch: 1; }
+    Text { text: v; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t; }
+}
+
+export component ColdView inherits VerticalLayout {
+    spacing: 16px;
+
+    HorizontalLayout {
+        spacing: 9px;
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
+            background: @conic-gradient(Theme.a1 0deg, Theme.a2 180deg, Theme.a1 360deg);
+            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.bg; }
+        }
+        Text { text: Str.brand; font-size: 17px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; vertical-alignment: center; }
+    }
+
+    if AppState.add-step == AddStep.idle: VerticalLayout {
+        spacing: 16px;
+        VerticalLayout {
+            spacing: 9px;
+            Text { text: Str.cold-title; font-size: 25px; font-weight: 800; letter-spacing: -0.8px; color: Theme.t; }
+            Text { text: Str.cold-lead; font-size: 12.5px; color: Theme.t2; wrap: word-wrap; }
+        }
+        Card {
+            border-radius: 22px;
+            stroke: Theme.ln;
+            VerticalLayout {
+                padding: 22px;
+                spacing: 13px;
+                alignment: center;
+                HorizontalLayout { alignment: center; QrPlaceholder {} }
+                Text { text: Str.qr-scan-hint; font-size: 11.5px; color: Theme.t2; horizontal-alignment: center; wrap: word-wrap; }
+                GradBtn { label: Str.cold-scan; clicked => { AppState.parse-cfg(); } }
+            }
+        }
+        Rectangle {
+            border-radius: 14px;
+            background: Theme.sf;
+            border-width: 1px;
+            border-color: Theme.ln;
+            HorizontalLayout {
+                padding: 12px;
+                Text {
+                    text: "holynet://space?v=2&ctl=ctl.holynet.example:8443&k=…";
+                    font-size: 10.5px;
+                    font-family: "IBM Plex Mono";
+                    color: Theme.t2;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            GhostBtn { label: Str.cold-paste; tint: Theme.a1; stroke: Theme.a1; clicked => { AppState.parse-cfg(); } }
+            GhostBtn { label: Str.cold-file; clicked => { AppState.fail-cfg(); } }
+        }
+        Text { text: Str.cold-why; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+    }
+
+    if AppState.add-step == AddStep.parsed: VerticalLayout {
+        spacing: 14px;
+        Text { text: Str.cfg-recognized; font-size: 22px; font-weight: 800; letter-spacing: -0.8px; color: Theme.t; }
+        Card {
+            stroke: Theme.a1;
+            border-radius: 20px;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 11px;
+                Text { text: AppState.parsed-name; font-size: 15px; font-weight: 700; color: Theme.t; }
+                Text { text: AppState.parsed-note; font-size: 11.5px; color: Theme.t2; }
+                Rectangle { height: 1px; background: Theme.ln; }
+                KvRow { k: Str.space-ctl; v: AppState.parsed-ctl; }
+                KvRow { k: Str.cipher-short; v: AppState.parsed-alg; }
+                KvRow { k: Str.space-key; v: AppState.parsed-fp; }
+            }
+        }
+        Text { text: Str.qr-warn; font-size: 11px; color: Theme.wn; wrap: word-wrap; }
+        GradBtn { label: Str.cfg-join; clicked => { AppState.join-parsed(); } }
+        Rectangle {
+            height: 40px;
+            Text { text: Str.back; font-size: 11.5px; font-weight: 600; color: Theme.t2; }
+            TouchArea { clicked => { AppState.reset-cfg(); } }
+        }
+    }
+
+    if AppState.add-step == AddStep.error: VerticalLayout {
+        spacing: 14px;
+        Card {
+            stroke: Theme.wn;
+            border-radius: 20px;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+                Text { text: Str.cfg-err; font-size: 14px; font-weight: 700; color: Theme.wn; }
+                Text { text: Str.cfg-err-body; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+            }
+        }
+        GhostBtn { label: Str.cfg-retry; tint: Theme.a1; stroke: Theme.a1; clicked => { AppState.reset-cfg(); } }
+    }
+}

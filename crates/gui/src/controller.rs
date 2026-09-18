@@ -8,7 +8,8 @@ use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use crate::data;
 use crate::domain;
 use crate::{
-    Accent, AppState, AppWindow, ConnStatus, Lang, PrioTab, RouteTab, Screen, Str, Theme, ThemeMode,
+    Accent, AddStep, AppState, AppWindow, ConnStatus, Lang, PrioTab, RouteTab, Screen, Str, Theme,
+    ThemeMode,
 };
 
 const SPARK_LEN: usize = 34;
@@ -31,12 +32,18 @@ struct Core {
     mode: ThemeMode,
     accent: Accent,
     space_id: String,
+    joined: Vec<String>,
     exit_id: String,
     hops: Vec<String>,
     prio: i32,
     route_tab: RouteTab,
     manual_mode: bool,
     probing: bool,
+    add_step: AddStep,
+    add_open: bool,
+    space_sheet: bool,
+    qr_parsed: bool,
+    qr_shown: bool,
 }
 
 
@@ -73,12 +80,18 @@ impl Core {
             mode: ThemeMode::System,
             accent: Accent::Halo,
             space_id: "core".into(),
+            joined: vec!["core".into()],
             exit_id: "us".into(),
             hops: vec!["nl".into(), "de".into()],
             prio: 1,
             route_tab: RouteTab::Auto,
             manual_mode: false,
             probing: false,
+            add_step: AddStep::Idle,
+            add_open: false,
+            space_sheet: false,
+            qr_parsed: false,
+            qr_shown: false,
         }
     }
 }
@@ -256,7 +269,39 @@ fn render_all(app: &AppWindow, c: &Core) {
     }
 
     render_route(app, c);
+    render_spaces(app, c);
     render_live(app, c);
+}
+
+fn render_spaces(app: &AppWindow, c: &Core) {
+    let st = app.global::<AppState>();
+    let lang = c.lang;
+    st.set_cold(c.joined.is_empty());
+    st.set_space_name(domain::space_name(lang, &c.space_id).into());
+    st.set_space_note(domain::space_note(lang, &c.space_id).into());
+    st.set_space_ctl(domain::space_ctl(&c.space_id).into());
+    st.set_space_count(domain::space_count_label(lang, c.joined.len()).into());
+    st.set_space_rows(domain::space_rows(lang, &c.joined, &c.space_id));
+    st.set_space_sheet_open(c.space_sheet);
+    st.set_add_open(c.add_open);
+    st.set_add_step(c.add_step);
+
+    let preview = domain::first_unjoined(lang, &c.joined);
+    st.set_can_add_space(preview.is_some());
+    if let Some(p) = preview {
+        st.set_parsed_name(p.name.into());
+        st.set_parsed_ctl(p.ctl.into());
+        st.set_parsed_note(p.note.into());
+        st.set_parsed_alg(p.alg.into());
+        st.set_parsed_fp(p.fp.into());
+    }
+
+    let exit = domain::resolve_exit(&c.space_id, &c.exit_id);
+    let ev = domain::exit_view(lang, exit);
+    st.set_qr_exit_line(format!("{} · {}", ev.code, ev.city).into());
+    st.set_qr_endpoint(ev.endpoint.into());
+    st.set_qr_parsed(c.qr_parsed);
+    st.set_qr_shown(c.qr_shown);
 }
 
 fn render_route(app: &AppWindow, c: &Core) {
@@ -834,6 +879,191 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                     render_all(&app, &cc2.borrow());
                 }
             });
+        });
+    }
+
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_open_spaces(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.space_sheet = true;
+                    c.add_open = false;
+                    c.add_step = AddStep::Idle;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_close_spaces(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.space_sheet = false;
+                    c.add_open = false;
+                    c.add_step = AddStep::Idle;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_open_add_space(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.add_open = true;
+                    c.add_step = AddStep::Idle;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_close_add_space(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.add_open = false;
+                    c.add_step = AddStep::Idle;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_select_space(move |id: SharedString| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.space_id = id.to_string();
+                    c.space_sheet = false;
+                    c.hops.clear();
+                    c.manual_mode = false;
+                    c.route_tab = RouteTab::Auto;
+                    c.status = ConnStatus::Off;
+                    c.banner = None;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_leave_space(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let cur = c.space_id.clone();
+                    c.joined.retain(|s| s != &cur);
+                    c.space_id = c.joined.first().cloned().unwrap_or_default();
+                    c.space_sheet = false;
+                    c.hops.clear();
+                    c.manual_mode = false;
+                    c.route_tab = RouteTab::Auto;
+                    c.status = ConnStatus::Off;
+                    c.banner = None;
+                }
+                app.global::<Screen>().invoke_go(crate::Page::Home);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_parse_cfg(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().add_step = AddStep::Parsed;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_fail_cfg(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().add_step = AddStep::Error;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_reset_cfg(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().add_step = AddStep::Idle;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_join_parsed(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    if let Some(p) = domain::first_unjoined(c.lang, &c.joined) {
+                        c.joined.push(p.id.clone());
+                        c.space_id = p.id;
+                    }
+                    c.space_sheet = false;
+                    c.add_open = false;
+                    c.add_step = AddStep::Idle;
+                    c.hops.clear();
+                    c.manual_mode = false;
+                    c.route_tab = RouteTab::Auto;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_qr_parse(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().qr_parsed = true;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_qr_reset(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().qr_parsed = false;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_qr_reveal(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.qr_shown = !c.qr_shown;
+                }
+                render_all(&app, &cc.borrow());
+            }
         });
     }
 }

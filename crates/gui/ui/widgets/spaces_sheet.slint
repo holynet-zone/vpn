@@ -1,0 +1,160 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { AddStep } from "../models.slint";
+import { Card } from "card.slint";
+import { GradBtn, GhostBtn } from "../views/route.slint";
+
+component KvRow inherits HorizontalLayout {
+    in property <string> k;
+    in property <string> v;
+    spacing: 10px;
+    Text { text: k; font-size: 10px; color: Theme.t2; horizontal-stretch: 1; }
+    Text { text: v; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.t; }
+}
+
+export component SpacesSheet inherits Rectangle {
+    visible: AppState.space-sheet-open;
+
+    Rectangle {
+        background: #0a0c10;
+        opacity: 0.45;
+        TouchArea { clicked => { AppState.close-spaces(); } }
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height;
+        width: min(parent.width, 460px);
+        height: min(parent.height * 0.82, content.preferred-height + 36px);
+        background: Theme.bg;
+        border-radius: 26px;
+        border-width: 1px;
+        border-color: Theme.ln;
+
+        content := VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+
+            Rectangle { height: 4px; width: 38px; border-radius: 2px; background: Theme.ln; }
+
+            if !AppState.add-open: VerticalLayout {
+                spacing: 12px;
+                HorizontalLayout {
+                    Text { text: Str.spaces; font-size: 18px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; horizontal-stretch: 1; }
+                    Text { text: AppState.space-count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+                }
+                for sp in AppState.space-rows: Rectangle {
+                    border-radius: 17px;
+                    background: sp.current ? Theme.sf2 : Theme.sf;
+                    border-width: 1px;
+                    border-color: sp.current ? Theme.a1 : Theme.ln;
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: sp.name; font-size: 13.5px; font-weight: 700; color: Theme.t; horizontal-stretch: 1; }
+                            if sp.current: Text { text: Str.space-active; font-size: 9.5px; font-family: "IBM Plex Mono"; color: Theme.a1; vertical-alignment: center; }
+                        }
+                        Text { text: sp.note; font-size: 11px; color: Theme.t2; }
+                        Text { text: sp.ctl + " · " + sp.fp; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+                    }
+                    TouchArea { clicked => { AppState.select-space(sp.id); } }
+                }
+                Text { text: Str.space-switch-warn; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
+                Rectangle { height: 1px; background: Theme.ln; }
+                GradBtn { label: Str.space-add; clicked => { AppState.open-add-space(); } }
+                HorizontalLayout {
+                    spacing: 8px;
+                    GhostBtn { label: Str.space-leave; tint: Theme.wn; stroke: Theme.wn; clicked => { AppState.leave-space(); } }
+                    GhostBtn { label: Str.back; clicked => { AppState.close-spaces(); } }
+                }
+            }
+
+            if AppState.add-open: VerticalLayout {
+                spacing: 12px;
+                HorizontalLayout {
+                    Text { text: Str.add-title; font-size: 18px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; horizontal-stretch: 1; }
+                    Rectangle {
+                        Text { text: Str.back; font-size: 11px; font-weight: 600; color: Theme.t2; }
+                        TouchArea { clicked => { AppState.close-add-space(); } }
+                    }
+                }
+                if AppState.add-step == AddStep.idle: VerticalLayout {
+                    spacing: 11px;
+                    Text { text: Str.add-lead; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                    if AppState.can-add-space: VerticalLayout {
+                        spacing: 11px;
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 112px;
+                                height: 112px;
+                                border-radius: 14px;
+                                background: Theme.sf2;
+                                border-width: 1px;
+                                border-color: Theme.ln;
+                            }
+                        }
+                        GradBtn { label: Str.cold-scan; clicked => { AppState.parse-cfg(); } }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            GhostBtn { label: Str.cold-paste; tint: Theme.a1; stroke: Theme.a1; clicked => { AppState.parse-cfg(); } }
+                            GhostBtn { label: Str.cold-file; clicked => { AppState.fail-cfg(); } }
+                        }
+                    }
+                    if !AppState.can-add-space: Rectangle {
+                        border-radius: 14px;
+                        background: Theme.sf;
+                        border-width: 1px;
+                        border-color: Theme.ln;
+                        HorizontalLayout {
+                            padding: 13px;
+                            Text { text: Str.all-joined; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+                        }
+                    }
+                }
+                if AppState.add-step == AddStep.parsed: VerticalLayout {
+                    spacing: 11px;
+                    Card {
+                        stroke: Theme.a1;
+                        border-radius: 16px;
+                        VerticalLayout {
+                            padding: 15px;
+                            spacing: 8px;
+                            Text { text: "✓ " + Str.cfg-recognized; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.ok; }
+                            Text { text: AppState.parsed-name; font-size: 14px; font-weight: 700; color: Theme.t; }
+                            Text { text: AppState.parsed-note; font-size: 11px; color: Theme.t2; }
+                            Rectangle { height: 1px; background: Theme.ln; }
+                            KvRow { k: Str.space-ctl; v: AppState.parsed-ctl; }
+                            KvRow { k: Str.cipher-short; v: AppState.parsed-alg; }
+                            KvRow { k: Str.space-key; v: AppState.parsed-fp; }
+                        }
+                    }
+                    Text { text: Str.qr-warn; font-size: 10.5px; color: Theme.wn; wrap: word-wrap; }
+                    GradBtn { label: Str.cfg-join; clicked => { AppState.join-parsed(); } }
+                    Rectangle {
+                        height: 34px;
+                        Text { text: Str.cfg-retry; font-size: 11px; font-weight: 600; color: Theme.t2; }
+                        TouchArea { clicked => { AppState.reset-cfg(); } }
+                    }
+                }
+                if AppState.add-step == AddStep.error: VerticalLayout {
+                    spacing: 10px;
+                    Card {
+                        stroke: Theme.wn;
+                        border-radius: 15px;
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 7px;
+                            Text { text: Str.cfg-err; font-size: 13px; font-weight: 700; color: Theme.wn; }
+                            Text { text: Str.cfg-err-body; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+                        }
+                    }
+                    GhostBtn { label: Str.cfg-retry; tint: Theme.a1; stroke: Theme.a1; clicked => { AppState.reset-cfg(); } }
+                }
+            }
+        }
+    }
+}

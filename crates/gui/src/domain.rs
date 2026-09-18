@@ -806,6 +806,31 @@ pub fn space_ctl(id: &str) -> String {
     space(id).ctl.to_string()
 }
 
+pub fn space_note(lang: Lang, id: &str) -> String {
+    tr(lang, space(id).note).to_string()
+}
+
+pub fn space_count_label(lang: Lang, n: usize) -> String {
+    match lang {
+        Lang::Ru => {
+            if n == 1 {
+                "1 пространство".to_string()
+            } else {
+                format!("{} пространства", n)
+            }
+        }
+        Lang::Zh => format!("{} 个空间", n),
+        Lang::Ja => format!("{} スペース", n),
+        _ => {
+            if n == 1 {
+                "1 space".to_string()
+            } else {
+                format!("{} spaces", n)
+            }
+        }
+    }
+}
+
 pub struct SpacePreview {
     pub id: String,
     pub name: String,

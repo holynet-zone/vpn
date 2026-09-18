@@ -38,6 +38,102 @@ export component DevicesView inherits VerticalLayout {
         }
     }
 
+    Card {
+        border-radius: 20px;
+        VerticalLayout {
+            padding: 16px;
+            spacing: 13px;
+            Text { text: Str.qr-title; font-size: 13.5px; font-weight: 700; color: Theme.t; }
+            HorizontalLayout {
+                spacing: 13px;
+                Rectangle {
+                    width: 78px;
+                    height: 78px;
+                    border-radius: 12px;
+                    background: @linear-gradient(45deg, Theme.t 0%, Theme.sf 50%, Theme.t 100%);
+                    border-width: 1px;
+                    border-color: Theme.ln;
+                    Rectangle {
+                        background: Theme.sf;
+                        opacity: AppState.qr-shown ? 0 : 0.82;
+                        border-radius: 12px;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    horizontal-stretch: 1;
+                    Text { text: Str.qr-warn; font-size: 11px; color: Theme.wn; wrap: word-wrap; }
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: Theme.ln;
+                        Text { text: Str.qr-reveal; font-size: 11px; font-weight: 600; color: Theme.t2; }
+                        TouchArea { clicked => { AppState.qr-reveal(); } }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.ln; }
+            Text { text: Str.qr-recv; font-size: 11.5px; font-weight: 600; color: Theme.t2; }
+            if !AppState.qr-parsed: VerticalLayout {
+                spacing: 9px;
+                Rectangle {
+                    border-radius: 13px;
+                    background: Theme.sf2;
+                    HorizontalLayout {
+                        padding: 12px;
+                        Text { text: "aG9seW5ldDovL2NvbmZpZz92PTImZXhpdD1VUy1F…"; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; wrap: word-wrap; }
+                    }
+                }
+                Rectangle {
+                    height: 40px;
+                    border-radius: 13px;
+                    border-width: 1px;
+                    border-color: Theme.a1;
+                    Text { text: Str.qr-parse-btn; font-size: 11.5px; font-weight: 600; color: Theme.a1; }
+                    TouchArea { clicked => { AppState.qr-parse(); } }
+                }
+            }
+            if AppState.qr-parsed: VerticalLayout {
+                spacing: 8px;
+                padding: 4px;
+                Rectangle {
+                    border-radius: 14px;
+                    background: Theme.sf2;
+                    VerticalLayout {
+                        padding: 13px;
+                        spacing: 6px;
+                        Text { text: "✓ " + Str.qr-parsed-title; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.ok; }
+                        Text { text: AppState.qr-exit-line; font-size: 12.5px; font-weight: 700; color: Theme.t; }
+                        Text { text: AppState.qr-endpoint + " · noise-xk"; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+                        HorizontalLayout {
+                            spacing: 7px;
+                            Rectangle {
+                                height: 36px;
+                                horizontal-stretch: 1;
+                                border-radius: 11px;
+                                border-width: 1px;
+                                border-color: Theme.ln;
+                                Text { text: Str.back; font-size: 11px; font-weight: 600; color: Theme.t2; }
+                                TouchArea { clicked => { AppState.qr-reset(); } }
+                            }
+                            Rectangle {
+                                height: 36px;
+                                horizontal-stretch: 1;
+                                border-radius: 11px;
+                                background: @linear-gradient(135deg, Theme.a1, Theme.a2);
+                                Text { text: Str.qr-import; font-size: 11px; font-weight: 700; color: Theme.on; }
+                                TouchArea { clicked => { AppState.qr-reset(); } }
+                            }
+                        }
+                    }
+                }
+            }
+            Text { text: Str.qr-no-log; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
+        }
+    }
+
     VerticalLayout {
         spacing: 8px;
         for d in AppState.devices: Card {
