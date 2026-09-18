@@ -136,23 +136,83 @@ const NODES: &[Node] = &[
 ];
 
 const EDGES: &[Edge] = &[
-    Edge { a: "nl", b: "de", rtt: 31, stale: false },
-    Edge { a: "nl", b: "fi", rtt: 14, stale: false },
-    Edge { a: "fi", b: "se", rtt: 11, stale: false },
-    Edge { a: "de", b: "se", rtt: 26, stale: false },
-    Edge { a: "nl", b: "us", rtt: 82, stale: false },
-    Edge { a: "de", b: "us", rtt: 95, stale: false },
-    Edge { a: "us", b: "ca", rtt: 44, stale: true },
-    Edge { a: "nl", b: "ca", rtt: 96, stale: false },
-    Edge { a: "us", b: "sg", rtt: 168, stale: false },
-    Edge { a: "de", b: "sg", rtt: 152, stale: false },
-    Edge { a: "sg", b: "jp", rtt: -1, stale: false },
+    Edge {
+        a: "nl",
+        b: "de",
+        rtt: 31,
+        stale: false,
+    },
+    Edge {
+        a: "nl",
+        b: "fi",
+        rtt: 14,
+        stale: false,
+    },
+    Edge {
+        a: "fi",
+        b: "se",
+        rtt: 11,
+        stale: false,
+    },
+    Edge {
+        a: "de",
+        b: "se",
+        rtt: 26,
+        stale: false,
+    },
+    Edge {
+        a: "nl",
+        b: "us",
+        rtt: 82,
+        stale: false,
+    },
+    Edge {
+        a: "de",
+        b: "us",
+        rtt: 95,
+        stale: false,
+    },
+    Edge {
+        a: "us",
+        b: "ca",
+        rtt: 44,
+        stale: true,
+    },
+    Edge {
+        a: "nl",
+        b: "ca",
+        rtt: 96,
+        stale: false,
+    },
+    Edge {
+        a: "us",
+        b: "sg",
+        rtt: 168,
+        stale: false,
+    },
+    Edge {
+        a: "de",
+        b: "sg",
+        rtt: 152,
+        stale: false,
+    },
+    Edge {
+        a: "sg",
+        b: "jp",
+        rtt: -1,
+        stale: false,
+    },
 ];
 
 const SPACES: &[Space] = &[
     Space {
         id: "core",
-        name: ("HolyNet Core", "HolyNet Core", "HolyNet Core", "HolyNet Core"),
+        name: (
+            "HolyNet Core",
+            "HolyNet Core",
+            "HolyNet Core",
+            "HolyNet Core",
+        ),
         ctl: "ctl.holynet.example:8443",
         fp: "…c8",
         alg: "noise-xk · chacha20",
@@ -207,7 +267,13 @@ fn tr(lang: Lang, l: L4) -> &'static str {
     }
 }
 
-fn t4(lang: Lang, en: &'static str, ru: &'static str, zh: &'static str, ja: &'static str) -> &'static str {
+fn t4(
+    lang: Lang,
+    en: &'static str,
+    ru: &'static str,
+    zh: &'static str,
+    ja: &'static str,
+) -> &'static str {
     tr(lang, (en, ru, zh, ja))
 }
 
@@ -228,10 +294,6 @@ fn space(id: &str) -> &'static Space {
 
 fn in_space(space_id: &str, id: &str) -> bool {
     space(space_id).nodes.contains(&id)
-}
-
-pub fn space_ids() -> Vec<&'static str> {
-    SPACES.iter().map(|sp| sp.id).collect()
 }
 
 pub fn node_count(space_id: &str) -> usize {
@@ -388,15 +450,6 @@ fn model<T: Clone + 'static>(v: Vec<T>) -> ModelRc<T> {
     ModelRc::new(VecModel::from(v))
 }
 
-fn li(lang: Lang) -> usize {
-    match lang {
-        Lang::Ru => 1,
-        Lang::Zh => 2,
-        Lang::Ja => 3,
-        _ => 0,
-    }
-}
-
 pub fn node_state(space_id: &str, id: &str, probing: bool) -> i32 {
     let _ = space_id;
     let n = node(id);
@@ -484,7 +537,11 @@ fn hop_row(space_id: &str, lang: Lang, path: &[&str], i: usize) -> RouteHop {
 }
 
 pub fn path_hops(space_id: &str, lang: Lang, path: &[&str]) -> ModelRc<RouteHop> {
-    model((0..path.len()).map(|i| hop_row(space_id, lang, path, i)).collect())
+    model(
+        (0..path.len())
+            .map(|i| hop_row(space_id, lang, path, i))
+            .collect(),
+    )
 }
 
 pub fn draft_hops(space_id: &str, lang: Lang, path: &[&str]) -> ModelRc<RouteHop> {
@@ -555,7 +612,14 @@ pub fn node_rows(
             } else if st == 2 {
                 rtt_txt(lang, -1)
             } else if n.id == exit {
-                t4(lang, "current exit", "текущий exit", "当前出口", "現在の出口").to_string()
+                t4(
+                    lang,
+                    "current exit",
+                    "текущий exit",
+                    "当前出口",
+                    "現在の出口",
+                )
+                .to_string()
             } else if hops.iter().any(|h| h == n.id) {
                 t4(lang, "in chain", "в цепочке", "在链中", "チェーン内").to_string()
             } else {
@@ -617,19 +681,30 @@ pub fn edge_rows(space_id: &str, lang: Lang) -> ModelRc<EdgeRow> {
     model(rows)
 }
 
-pub fn visibility(
-    space_id: &str,
-    lang: Lang,
-    path: &[&str],
-    transport: &str,
-) -> ModelRc<Visibility> {
+pub fn visibility(lang: Lang, path: &[&str], transport: &str) -> ModelRc<Visibility> {
     let exit = *path.last().unwrap();
     let first = node(path[0]);
     let isp_what = match lang {
-        Lang::Ru => format!("{}-трафик к {}. Адресат не виден.", transport.to_uppercase(), first.code),
-        Lang::Zh => format!("{} 流量到 {}。目标不可见。", transport.to_uppercase(), first.code),
-        Lang::Ja => format!("{} トラフィックが {} へ。宛先は非表示。", transport.to_uppercase(), first.code),
-        _ => format!("{} traffic to {}. Destination hidden.", transport.to_uppercase(), first.code),
+        Lang::Ru => format!(
+            "{}-трафик к {}. Адресат не виден.",
+            transport.to_uppercase(),
+            first.code
+        ),
+        Lang::Zh => format!(
+            "{} 流量到 {}。目标不可见。",
+            transport.to_uppercase(),
+            first.code
+        ),
+        Lang::Ja => format!(
+            "{} トラフィックが {} へ。宛先は非表示。",
+            transport.to_uppercase(),
+            first.code
+        ),
+        _ => format!(
+            "{} traffic to {}. Destination hidden.",
+            transport.to_uppercase(),
+            first.code
+        ),
     };
     let mut rows = vec![Visibility {
         who: s(t4(lang, "ISP", "Провайдер", "运营商", "プロバイダ")),
@@ -728,7 +803,13 @@ pub fn factors(lang: Lang, path: &[&str], blocker: bool, kill: bool) -> ModelRc<
         },
         Factor {
             mark: s(if kill { "✓" } else { "✕" }),
-            name: s(t4(lang, "kill switch on", "kill switch включён", "已启用断网保护", "キルスイッチ有効")),
+            name: s(t4(
+                lang,
+                "kill switch on",
+                "kill switch включён",
+                "已启用断网保护",
+                "キルスイッチ有効",
+            )),
             level: if kill { 1 } else { 0 },
         },
     ];
@@ -738,22 +819,49 @@ pub fn factors(lang: Lang, path: &[&str], blocker: bool, kill: bool) -> ModelRc<
 pub fn plan_reason(lang: Lang, prio: i32, len: usize, node_total: usize) -> String {
     match prio {
         0 => match lang {
-            Lang::Ru => format!("Минимальный RTT из {} узлов реестра, прямой путь до exit.", node_total),
+            Lang::Ru => format!(
+                "Минимальный RTT из {} узлов реестра, прямой путь до exit.",
+                node_total
+            ),
             Lang::Zh => format!("在 {} 个注册节点中 RTT 最低，直达出口。", node_total),
-            Lang::Ja => format!("レジストリ {} ノード中で最小 RTT、出口まで直行。", node_total),
-            _ => format!("Lowest RTT across {} registry nodes, direct path to the exit.", node_total),
+            Lang::Ja => format!(
+                "レジストリ {} ノード中で最小 RTT、出口まで直行。",
+                node_total
+            ),
+            _ => format!(
+                "Lowest RTT across {} registry nodes, direct path to the exit.",
+                node_total
+            ),
         },
         1 => match lang {
-            Lang::Ru => format!("{} хопа: задержка в пределах двойной прямой, ребро с устаревшей метрикой исключено.", len),
+            Lang::Ru => format!(
+                "{} хопа: задержка в пределах двойной прямой, ребро с устаревшей метрикой исключено.",
+                len
+            ),
             Lang::Zh => format!("{} 跳：延迟在直连两倍以内，已排除指标过期的边。", len),
-            Lang::Ja => format!("{} ホップ：遅延は直行の 2 倍以内、古い指標のエッジを除外。", len),
-            _ => format!("{} hops: latency within 2x of direct; an edge with a stale metric was excluded.", len),
+            Lang::Ja => format!(
+                "{} ホップ：遅延は直行の 2 倍以内、古い指標のエッジを除外。",
+                len
+            ),
+            _ => format!(
+                "{} hops: latency within 2x of direct; an edge with a stale metric was excluded.",
+                len
+            ),
         },
         _ => match lang {
-            Lang::Ru => format!("{} хопа в разных подсетях; путь выбран по максимальной глубине при допустимой задержке.", len),
+            Lang::Ru => format!(
+                "{} хопа в разных подсетях; путь выбран по максимальной глубине при допустимой задержке.",
+                len
+            ),
             Lang::Zh => format!("{} 跳位于不同子网；在可接受延迟内选择最大深度路径。", len),
-            Lang::Ja => format!("{} ホップが別サブネット；許容遅延内で最大の深さを選択。", len),
-            _ => format!("{} hops in distinct subnets; deepest path within the latency budget.", len),
+            Lang::Ja => format!(
+                "{} ホップが別サブネット；許容遅延内で最大の深さを選択。",
+                len
+            ),
+            _ => format!(
+                "{} hops in distinct subnets; deepest path within the latency budget.",
+                len
+            ),
         },
     }
 }
@@ -924,7 +1032,14 @@ pub fn probe_label(lang: Lang, probing: bool) -> String {
     if probing {
         t4(lang, "Probing…", "Проба идёт…", "测量中…", "測定中…").to_string()
     } else {
-        t4(lang, "Re-probe RTT", "Пробить RTT заново", "重新测量 RTT", "RTT を再測定").to_string()
+        t4(
+            lang,
+            "Re-probe RTT",
+            "Пробить RTT заново",
+            "重新测量 RTT",
+            "RTT を再測定",
+        )
+        .to_string()
     }
 }
 

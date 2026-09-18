@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
-use jni::objects::{JClass, JObject, JValue};
 use jni::JavaVM;
+use jni::objects::{JClass, JObject, JValue};
 use slint::android::AndroidApp;
 
 static VM_PTR: OnceLock<usize> = OnceLock::new();
@@ -60,14 +60,22 @@ where
     let activity = unsafe { JObject::from_raw(act_ptr as jni::sys::jobject) };
 
     let ctx_loader = env
-        .call_method(&activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?
+        .call_method(
+            &activity,
+            "getClassLoader",
+            "()Ljava/lang/ClassLoader;",
+            &[],
+        )?
         .l()?;
 
     let dex_buf = unsafe { env.new_direct_byte_buffer(DEX.as_ptr() as *mut u8, DEX.len()) }?;
     let dex_loader = env.new_object(
         "dalvik/system/InMemoryDexClassLoader",
         "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V",
-        &[JValue::Object(dex_buf.as_ref()), JValue::Object(&ctx_loader)],
+        &[
+            JValue::Object(dex_buf.as_ref()),
+            JValue::Object(&ctx_loader),
+        ],
     )?;
 
     let name = env.new_string("dev.holynet.gui.HolyNetAndroid")?;

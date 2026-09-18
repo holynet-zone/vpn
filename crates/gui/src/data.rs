@@ -1,8 +1,8 @@
 use slint::{Brush, Color, SharedString};
 
 use crate::{
-    Accent, ChainStep, CipherInfo, DeviceInfo, KeyValue, Lang, PaletteCard, ServerInfo, SplitApp,
-    ToggleInfo, TransportInfo,
+    Accent, ChainStep, CipherInfo, DeviceInfo, KeyValue, Lang, PaletteCard, SplitApp, ToggleInfo,
+    TransportInfo,
 };
 
 fn s(v: &str) -> SharedString {
@@ -24,75 +24,6 @@ fn tr<'a>(lang: Lang, en: &'a str, ru: &'a str, zh: &'a str, ja: &'a str) -> &'a
         _ => en,
     }
 }
-
-type Loc = (&'static str, &'static str, &'static str, &'static str);
-type ServerDef = (&'static str, &'static str, Loc, Loc, u32, u32);
-const SERVERS: &[ServerDef] = &[
-    (
-        "nl",
-        "NL",
-        ("Amsterdam", "Амстердам", "阿姆斯特丹", "アムステルダム"),
-        ("Netherlands", "Нидерланды", "荷兰", "オランダ"),
-        24,
-        31,
-    ),
-    (
-        "de",
-        "DE",
-        ("Frankfurt", "Франкфурт", "法兰克福", "フランクフルト"),
-        ("Germany", "Германия", "德国", "ドイツ"),
-        31,
-        44,
-    ),
-    (
-        "fi",
-        "FI",
-        ("Helsinki", "Хельсинки", "赫尔辛基", "ヘルシンキ"),
-        ("Finland", "Финляндия", "芬兰", "フィンランド"),
-        18,
-        22,
-    ),
-    (
-        "se",
-        "SE",
-        ("Stockholm", "Стокгольм", "斯德哥尔摩", "ストックホルム"),
-        ("Sweden", "Швеция", "瑞典", "スウェーデン"),
-        27,
-        58,
-    ),
-    (
-        "tr",
-        "TR",
-        ("Istanbul", "Стамбул", "伊斯坦布尔", "イスタンブール"),
-        ("Türkiye", "Турция", "土耳其", "トルコ"),
-        46,
-        67,
-    ),
-    (
-        "us",
-        "US",
-        ("New York", "Нью-Йорк", "纽约", "ニューヨーク"),
-        ("USA", "США", "美国", "アメリカ"),
-        92,
-        39,
-    ),
-    (
-        "jp",
-        "JP",
-        ("Tokyo", "Токио", "东京", "東京"),
-        ("Japan", "Япония", "日本", "日本"),
-        138,
-        51,
-    ),
-    (
-        "ae",
-        "AE",
-        ("Dubai", "Дубай", "迪拜", "ドバイ"),
-        ("UAE", "ОАЭ", "阿联酋", "アラブ首長国連邦"),
-        74,
-        28,
-    ),
-];
 
 type L4 = (&'static str, &'static str, &'static str, &'static str);
 const TRANSPORTS: &[(&str, &str, L4, L4)] = &[
@@ -390,71 +321,6 @@ const PALETTES: &[PaletteDef] = &[
     ),
 ];
 
-fn quality(ping: u32) -> i32 {
-    if ping < 30 {
-        4
-    } else if ping < 60 {
-        3
-    } else if ping < 100 {
-        2
-    } else {
-        1
-    }
-}
-
-fn ping_text(ping: u32, lang: Lang) -> String {
-    format!("{} {}", ping, tr(lang, "ms", "мс", "ms", "ms"))
-}
-
-pub struct ServerRow {
-    pub code: String,
-    pub city: String,
-    pub meta: String,
-    pub ping: String,
-}
-
-pub fn server_rows(lang: Lang, current: &str, query: &str) -> (Vec<ServerInfo>, ServerRow) {
-    let q = query.trim().to_lowercase();
-    let mut rows = Vec::new();
-    let mut selected = None;
-    for &(id, code, city_l, country_l, ping, load) in SERVERS {
-        let city = tr(lang, city_l.0, city_l.1, city_l.2, city_l.3).to_string();
-        let country = tr(lang, country_l.0, country_l.1, country_l.2, country_l.3).to_string();
-        let meta = format!("{} · {}%", country, load);
-        let ping_s = ping_text(ping, lang);
-        let hit = q.is_empty()
-            || format!("{}{}{}", city, country, code)
-                .to_lowercase()
-                .contains(&q);
-        if id == current {
-            selected = Some(ServerRow {
-                code: code.to_string(),
-                city: city.clone(),
-                meta: meta.clone(),
-                ping: ping_s.clone(),
-            });
-        }
-        if hit {
-            rows.push(ServerInfo {
-                id: s(id),
-                code: s(code),
-                city: s(&city),
-                meta: s(&meta),
-                ping: s(&ping_s),
-                quality: quality(ping),
-                selected: id == current,
-            });
-        }
-    }
-    let sel = selected.unwrap_or(ServerRow {
-        code: String::new(),
-        city: String::new(),
-        meta: String::new(),
-        ping: String::new(),
-    });
-    (rows, sel)
-}
-
 pub struct TransportRow {
     pub name: String,
     pub title: String,
@@ -576,7 +442,10 @@ pub fn proto_rows(lang: Lang, cipher: &str, transport: &str) -> Vec<KeyValue> {
             tr(lang, "Key exchange", "Обмен ключами", "密钥交换", "鍵交換"),
             "X25519".to_string(),
         ),
-        (tr(lang, "Cipher", "Шифр", "密码", "暗号"), cipher.to_string()),
+        (
+            tr(lang, "Cipher", "Шифр", "密码", "暗号"),
+            cipher.to_string(),
+        ),
         (
             tr(
                 lang,
@@ -638,8 +507,4 @@ pub fn transport_name(id: &str) -> &'static str {
 pub fn next_transport(id: &str) -> &'static str {
     let i = TRANSPORTS.iter().position(|t| t.0 == id).unwrap_or(0);
     TRANSPORTS[(i + 1) % TRANSPORTS.len()].0
-}
-
-pub fn is_vk(id: &str) -> bool {
-    id == "vk"
 }

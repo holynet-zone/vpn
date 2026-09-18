@@ -1,6 +1,6 @@
 use crate::land::LAND;
 use crate::{GlobeArc, GlobeDot};
-use crate::{domain, Lang};
+use crate::{Lang, domain};
 use slint::{ModelRc, SharedString, VecModel};
 
 pub const W: f32 = 340.0;
@@ -168,15 +168,16 @@ pub fn render(
         });
     }
 
-    if let Some(me) = nodes.iter().find(|n| n.is_me).cloned() {
-        if let Some(first) = path.first().and_then(|id| find(id)) {
-            arcs.push(GlobeArc {
-                d: arc_path((me.lon, me.lat), (first.lon, first.lat), lon0, lat0, r).into(),
-                kind: 1,
-                width: 2.0,
-                dash: 2,
-            });
-        }
+    if let (Some(me), Some(first)) = (
+        nodes.iter().find(|n| n.is_me).cloned(),
+        path.first().and_then(|id| find(id)),
+    ) {
+        arcs.push(GlobeArc {
+            d: arc_path((me.lon, me.lat), (first.lon, first.lat), lon0, lat0, r).into(),
+            kind: 1,
+            width: 2.0,
+            dash: 2,
+        });
     }
 
     let mut dots: Vec<GlobeDot> = Vec::new();

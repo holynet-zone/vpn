@@ -17,7 +17,6 @@ const SPARK_LEN: usize = 34;
 
 struct Core {
     status: ConnStatus,
-    server_id: String,
     transport_id: String,
     auto_transport: bool,
     cipher: usize,
@@ -50,7 +49,6 @@ struct Core {
     globe_zoom: f32,
 }
 
-
 fn detect_lang() -> Lang {
     let loc = sys_locale::get_locale().unwrap_or_default().to_lowercase();
     if loc.starts_with("ru") {
@@ -68,7 +66,6 @@ impl Core {
     fn new() -> Self {
         Self {
             status: ConnStatus::Off,
-            server_id: "nl".into(),
             transport_id: "udp".into(),
             auto_transport: true,
             cipher: 0,
@@ -119,7 +116,6 @@ impl Controller {
             window.global::<Str>().set_lang(c.lang);
         }
 
-
         window
             .global::<Screen>()
             .set_mobile_target(cfg!(target_os = "android"));
@@ -139,26 +135,6 @@ impl Controller {
 
 fn model<T: Clone + 'static>(v: Vec<T>) -> ModelRc<T> {
     ModelRc::new(VecModel::from(v))
-}
-
-fn privacy(c: &Core) -> i32 {
-    let mut s = 40;
-    if c.toggles[0] {
-        s += 25;
-    }
-    if c.toggles[2] {
-        s += 20;
-    }
-    if c.toggles[1] {
-        s += 15;
-    }
-    if c.toggles[3] {
-        s -= 10;
-    }
-    if data::is_vk(&c.transport_id) {
-        s += 5;
-    }
-    s.min(100)
 }
 
 fn fmt_time(sec: u64) -> String {
@@ -206,11 +182,9 @@ fn render_all(app: &AppWindow, c: &Core) {
     #[cfg(target_os = "android")]
     crate::android_ext::set_light_system_bars(!dark);
 
-    let (servers, sel) = data::server_rows(lang, &c.server_id, &c.query);
     let (transports, tr) = data::transport_rows(lang, &c.transport_id);
     let (ciphers, cipher_name) = data::cipher_rows(lang, c.cipher);
 
-    st.set_servers(model(servers));
     st.set_transports(model(transports));
     st.set_ciphers(model(ciphers));
     st.set_chain(model(data::chain(&c.transport_id)));
@@ -220,26 +194,12 @@ fn render_all(app: &AppWindow, c: &Core) {
     st.set_proto_rows(model(data::proto_rows(lang, &cipher_name, &c.transport_id)));
     st.set_palettes(model(data::palette_rows(lang, dark, c.accent)));
 
-    st.set_server_code(sel.code.into());
-    st.set_server_meta(sel.meta.into());
-    st.set_server_ping(sel.ping.into());
-
     st.set_transport_code(tr.name.clone().into());
     st.set_transport_title(tr.title.into());
     st.set_transport_desc(tr.desc.into());
     st.set_auto_transport(c.auto_transport);
 
-    let sub = match lang {
-        Lang::Ru => format!("Трафик идёт через {}, транспорт {}", sel.city, tr.name),
-        Lang::Zh => format!("流量经 {}，传输 {}", sel.city, tr.name),
-        Lang::Ja => format!("{} 経由で通信中・トランスポート {}", sel.city, tr.name),
-        _ => format!("Traffic flows through {} over {}", sel.city, tr.name),
-    };
-    st.set_server_city(sel.city.into());
-    st.set_status_sub(sub.into());
-
     st.set_kill_on(c.toggles[0]);
-    st.set_privacy_score(privacy(c));
 
     let cipher_short = cipher_name.split('-').next().unwrap_or(&cipher_name);
     st.set_cipher_name(cipher_short.into());
@@ -290,7 +250,7 @@ fn render_globe(app: &AppWindow, c: &Core) {
     } else {
         domain::plan(space, exit, c.prio)
     };
-    let pv: Vec<&str> = path.iter().copied().collect();
+    let pv: Vec<&str> = path.to_vec();
     let f = globe::render(
         space,
         &pv,
@@ -347,9 +307,9 @@ fn render_route(app: &AppWindow, c: &Core) {
     let auto_path = domain::plan(space, exit, c.prio);
     let manual_path = domain::manual_path(space, &c.hops, exit);
     let path: Vec<&str> = if c.manual_mode {
-        manual_path.iter().copied().collect()
+        manual_path.to_vec()
     } else {
-        auto_path.iter().copied().collect()
+        auto_path.to_vec()
     };
 
     let ev = domain::exit_view(lang, exit);
@@ -375,10 +335,22 @@ fn render_route(app: &AppWindow, c: &Core) {
     }
 
     let sub = match lang {
-        Lang::Ru => format!("Трафик идёт через {}, транспорт {}", ev.city, c.transport_id.to_uppercase()),
+        Lang::Ru => format!(
+            "Трафик идёт через {}, транспорт {}",
+            ev.city,
+            c.transport_id.to_uppercase()
+        ),
         Lang::Zh => format!("流量经 {}，传输 {}", ev.city, c.transport_id.to_uppercase()),
-        Lang::Ja => format!("{} 経由で通信中・トランスポート {}", ev.city, c.transport_id.to_uppercase()),
-        _ => format!("Traffic flows through {} over {}", ev.city, c.transport_id.to_uppercase()),
+        Lang::Ja => format!(
+            "{} 経由で通信中・トランスポート {}",
+            ev.city,
+            c.transport_id.to_uppercase()
+        ),
+        _ => format!(
+            "Traffic flows through {} over {}",
+            ev.city,
+            c.transport_id.to_uppercase()
+        ),
     };
     st.set_status_sub(sub.into());
 
@@ -401,7 +373,7 @@ fn render_route(app: &AppWindow, c: &Core) {
         domain::plan_reason(lang, c.prio, auto_path.len(), domain::node_count(space)).into(),
     );
 
-    let manual_view: Vec<&str> = manual_path.iter().copied().collect();
+    let manual_view: Vec<&str> = manual_path.to_vec();
     st.set_draft_hops(domain::draft_hops(space, lang, &manual_view));
     st.set_add_hop_list(domain::add_hop_list(space, lang, exit, &c.hops));
     let relays = manual_path.len().saturating_sub(1);
@@ -411,14 +383,16 @@ fn render_route(app: &AppWindow, c: &Core) {
     st.set_empty_title(domain::empty_title(lang).into());
     st.set_empty_body(domain::empty_body(lang).into());
 
-    st.set_node_list(domain::node_rows(space, lang, &c.query, exit, &c.hops, c.probing));
+    st.set_node_list(domain::node_rows(
+        space, lang, &c.query, exit, &c.hops, c.probing,
+    ));
     st.set_edge_list(domain::edge_rows(space, lang));
     st.set_topo_counts(domain::topo_counts(lang, space, if c.probing { 0 } else { 12 }).into());
     st.set_probe_label(domain::probe_label(lang, c.probing).into());
     st.set_probing(c.probing);
     st.set_globe_nodes(domain::globe_nodes(space, lang));
 
-    st.set_visibility(domain::visibility(space, lang, &path, &c.transport_id));
+    st.set_visibility(domain::visibility(lang, &path, &c.transport_id));
     st.set_factors(domain::factors(lang, &path, c.toggles[2], c.toggles[0]));
     st.set_privacy_note(domain::privacy_note(lang, path.len()).into());
 }
@@ -434,7 +408,11 @@ fn render_live(app: &AppWindow, c: &Core) {
         st.set_up_text(fmt_bytes(c.up, lang).into());
         let last = *c.spark.back().unwrap_or(&0.0);
         let mbps = 12 + (last * 2.4) as i32;
-        let unit = if matches!(lang, Lang::Ru) { " Мбит/с" } else { " Mbps" };
+        let unit = if matches!(lang, Lang::Ru) {
+            " Мбит/с"
+        } else {
+            " Mbps"
+        };
         st.set_speed_now(format!("{}{}", mbps, unit).into());
     } else {
         st.set_session_time("—".into());
@@ -553,16 +531,6 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
         });
     }
 
-    {
-        let w = window.as_weak();
-        let cc = core.clone();
-        st.on_select_server(move |id: SharedString| {
-            if let Some(app) = w.upgrade() {
-                cc.borrow_mut().server_id = id.to_string();
-                render_all(&app, &cc.borrow());
-            }
-        });
-    }
     {
         let w = window.as_weak();
         let cc = core.clone();
@@ -951,7 +919,15 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 let hit = {
                     let c = cc.borrow();
-                    globe::hit_test(&c.space_id, c.lang, c.globe_rot_x, c.globe_rot_y, c.globe_zoom, x, y)
+                    globe::hit_test(
+                        &c.space_id,
+                        c.lang,
+                        c.globe_rot_x,
+                        c.globe_rot_y,
+                        c.globe_zoom,
+                        x,
+                        y,
+                    )
                 };
                 if let Some(id) = hit {
                     cc.borrow_mut().exit_id = id;
