@@ -1,0 +1,115 @@
+import { Theme } from "../theme.slint";
+import { AppState } from "../state.slint";
+import { GlobeArc, GlobeDot } from "../models.slint";
+
+export component GlobeView inherits Rectangle {
+    width: 340px;
+    height: 300px;
+
+    function arc-color(kind: int) -> brush {
+        kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.ln : Theme.t2
+    }
+    function dot-fill(kind: int) -> brush {
+        kind == 1 ? Theme.a1 : kind == 2 ? Theme.a2 : kind == 3 ? Theme.t : Theme.sf
+    }
+    function dot-stroke(kind: int) -> brush {
+        kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.t : kind == 4 ? Theme.t2 : Theme.a1
+    }
+
+    Rectangle {
+        x: 170px - AppState.globe-radius * 1px;
+        y: 150px - AppState.globe-radius * 1px;
+        width: AppState.globe-radius * 2px;
+        height: AppState.globe-radius * 2px;
+        border-radius: self.width / 2;
+        background: Theme.sf;
+        border-width: 1px;
+        border-color: Theme.ln;
+    }
+
+    Path {
+        width: 340px;
+        height: 300px;
+        viewbox-width: 340;
+        viewbox-height: 300;
+        commands: AppState.globe-graticule;
+        fill: transparent;
+        stroke: Theme.ln;
+        stroke-width: 0.5px;
+        opacity: 0.7;
+    }
+
+    Path {
+        width: 340px;
+        height: 300px;
+        viewbox-width: 340;
+        viewbox-height: 300;
+        commands: AppState.globe-land;
+        fill: transparent;
+        stroke: Theme.t2;
+        stroke-width: 0.8px;
+        opacity: 0.55;
+    }
+
+    for a in AppState.globe-arcs: Path {
+        width: 340px;
+        height: 300px;
+        viewbox-width: 340;
+        viewbox-height: 300;
+        commands: a.d;
+        fill: transparent;
+        stroke: arc-color(a.kind);
+        stroke-width: a.width * 1px;
+        opacity: a.kind == 3 ? 0.45 : a.kind == 1 ? 1.0 : 0.55;
+    }
+
+    for d in AppState.globe-dots: Rectangle {
+        x: d.x * 1px - d.r * 1px;
+        y: d.y * 1px - d.r * 1px;
+        width: d.r * 2px;
+        height: d.r * 2px;
+        border-radius: self.width / 2;
+        background: dot-fill(d.fill);
+        border-width: 2px;
+        border-color: dot-stroke(d.stroke);
+        opacity: d.dead ? 0.55 : 1.0;
+    }
+
+    for d in AppState.globe-dots: Text {
+        x: d.lx * 1px;
+        y: d.ly * 1px - 8px;
+        text: d.is-me ? d.code : d.code + " " + d.rtt;
+        font-size: d.is-exit ? 11px : 10px;
+        font-weight: d.is-exit ? 700 : 600;
+        font-family: "IBM Plex Mono";
+        color: Theme.t;
+    }
+
+    ta := TouchArea {
+        property <length> lx;
+        property <length> ly;
+        property <bool> dragging;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                ta.lx = ta.mouse-x;
+                ta.ly = ta.mouse-y;
+                ta.dragging = true;
+            }
+            if (e.kind == PointerEventKind.up) {
+                ta.dragging = false;
+            }
+        }
+        moved => {
+            if (ta.dragging) {
+                AppState.globe-drag((ta.mouse-x - ta.lx) / 1px, (ta.mouse-y - ta.ly) / 1px);
+                ta.lx = ta.mouse-x;
+                ta.ly = ta.mouse-y;
+            }
+        }
+        clicked => { AppState.globe-tap(ta.mouse-x / 1px, ta.mouse-y / 1px); }
+        scroll-event(e) => {
+            AppState.globe-zoom(e.delta-y / 1px);
+            accept
+        }
+    }
+}

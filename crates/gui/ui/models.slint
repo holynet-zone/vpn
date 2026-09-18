@@ -86,6 +86,29 @@ export struct GlobeNode {
     is-me: bool,
 }
 
+export struct GlobeArc {
+    d: string,
+    kind: int,
+    width: float,
+    dash: int,
+}
+
+export struct GlobeDot {
+    id: string,
+    x: float,
+    y: float,
+    r: float,
+    fill: int,
+    stroke: int,
+    code: string,
+    rtt: string,
+    lx: float,
+    ly: float,
+    is-me: bool,
+    is-exit: bool,
+    dead: bool,
+}
+
 export struct ServerInfo {
     id: string,
     code: string,

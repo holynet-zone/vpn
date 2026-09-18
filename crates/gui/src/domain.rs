@@ -994,6 +994,65 @@ pub fn empty_body(lang: Lang) -> String {
     .to_string()
 }
 
+#[derive(Clone)]
+pub struct GlobePoint {
+    pub id: String,
+    pub code: String,
+    pub lon: f32,
+    pub lat: f32,
+    pub rtt: i32,
+    pub stale: bool,
+    pub is_me: bool,
+}
+
+pub fn globe_points(space_id: &str, lang: Lang) -> Vec<GlobePoint> {
+    let mut out: Vec<GlobePoint> = space(space_id)
+        .nodes
+        .iter()
+        .map(|id| node(id))
+        .map(|n| GlobePoint {
+            id: n.id.to_string(),
+            code: n.code.to_string(),
+            lon: n.lon,
+            lat: n.lat,
+            rtt: n.rtt,
+            stale: n.age > 60,
+            is_me: false,
+        })
+        .collect();
+    out.push(GlobePoint {
+        id: "__me".to_string(),
+        code: t4(lang, "you", "вы", "你", "あなた").to_string(),
+        lon: 37.62,
+        lat: 55.75,
+        rtt: 0,
+        stale: false,
+        is_me: true,
+    });
+    out
+}
+
+#[derive(Clone)]
+pub struct GlobeEdge {
+    pub a: String,
+    pub b: String,
+    pub rtt: i32,
+    pub stale: bool,
+}
+
+pub fn globe_edges(space_id: &str) -> Vec<GlobeEdge> {
+    EDGES
+        .iter()
+        .filter(|e| in_space(space_id, e.a) && in_space(space_id, e.b))
+        .map(|e| GlobeEdge {
+            a: e.a.to_string(),
+            b: e.b.to_string(),
+            rtt: e.rtt,
+            stale: e.stale,
+        })
+        .collect()
+}
+
 pub fn globe_nodes(space_id: &str, lang: Lang) -> ModelRc<GlobeNode> {
     let mut rows: Vec<GlobeNode> = space(space_id)
         .nodes

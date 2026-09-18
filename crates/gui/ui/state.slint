@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitApp, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, RouteTab, AddStep } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitApp, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -40,6 +40,11 @@ export global AppState {
     in property <bool> probing: false;
     in property <string> probe-label;
     in property <[GlobeNode]> globe-nodes;
+    in property <string> globe-graticule;
+    in property <string> globe-land;
+    in property <[GlobeArc]> globe-arcs;
+    in property <[GlobeDot]> globe-dots;
+    in property <float> globe-radius: 138;
 
     in property <[Visibility]> visibility;
     in property <[Factor]> factors;
@@ -134,6 +139,9 @@ export global AppState {
     callback reprobe();
     callback pick-node(string);
     callback select-exit(string);
+    callback globe-drag(float, float);
+    callback globe-zoom(float);
+    callback globe-tap(float, float);
 
     callback open-spaces();
     callback close-spaces();

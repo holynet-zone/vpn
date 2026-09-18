@@ -3,6 +3,8 @@ slint::include_modules!();
 mod controller;
 mod data;
 mod domain;
+mod globe;
+mod land;
 
 #[cfg(target_os = "android")]
 mod android_ext;

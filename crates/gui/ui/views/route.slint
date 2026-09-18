@@ -5,6 +5,7 @@ import { Screen } from "../screen.slint";
 import { RouteTab, RouteHop, PrioTab, AddHopChip, EdgeRow, Page } from "../models.slint";
 import { Card, Chip, Chevron } from "../widgets/card.slint";
 import { ScreenTitle } from "../widgets/tiles.slint";
+import { GlobeView } from "../widgets/globe.slint";
 
 export component Seg inherits Rectangle {
     in property <string> label;
@@ -373,6 +374,14 @@ export component RouteView inherits VerticalLayout {
                     Text { text: AppState.probe-label; font-size: 10.5px; font-weight: 600; color: Theme.a1; vertical-alignment: center; }
                 }
                 TouchArea { clicked => { AppState.reprobe(); } }
+            }
+        }
+        Card {
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                HorizontalLayout { alignment: center; GlobeView {} }
+                Text { text: Str.map-legend; font-size: 10px; color: Theme.t2; wrap: word-wrap; }
             }
         }
         Card {

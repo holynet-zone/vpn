@@ -7,6 +7,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
 use crate::data;
 use crate::domain;
+use crate::globe;
 use crate::{
     Accent, AddStep, AppState, AppWindow, ConnStatus, Lang, PrioTab, RouteTab, Screen, Str, Theme,
     ThemeMode,
@@ -44,6 +45,9 @@ struct Core {
     space_sheet: bool,
     qr_parsed: bool,
     qr_shown: bool,
+    globe_rot_x: f32,
+    globe_rot_y: f32,
+    globe_zoom: f32,
 }
 
 
@@ -92,6 +96,9 @@ impl Core {
             space_sheet: false,
             qr_parsed: false,
             qr_shown: false,
+            globe_rot_x: -15.0,
+            globe_rot_y: -18.0,
+            globe_zoom: 1.0,
         }
     }
 }
@@ -270,7 +277,34 @@ fn render_all(app: &AppWindow, c: &Core) {
 
     render_route(app, c);
     render_spaces(app, c);
+    render_globe(app, c);
     render_live(app, c);
+}
+
+fn render_globe(app: &AppWindow, c: &Core) {
+    let st = app.global::<AppState>();
+    let space = c.space_id.as_str();
+    let exit = domain::resolve_exit(space, &c.exit_id);
+    let path = if c.manual_mode {
+        domain::manual_path(space, &c.hops, exit)
+    } else {
+        domain::plan(space, exit, c.prio)
+    };
+    let pv: Vec<&str> = path.iter().copied().collect();
+    let f = globe::render(
+        space,
+        &pv,
+        c.lang,
+        c.globe_rot_x,
+        c.globe_rot_y,
+        c.globe_zoom,
+        c.probing,
+    );
+    st.set_globe_graticule(f.graticule);
+    st.set_globe_land(f.land);
+    st.set_globe_arcs(f.arcs);
+    st.set_globe_dots(f.dots);
+    st.set_globe_radius(f.radius);
 }
 
 fn render_spaces(app: &AppWindow, c: &Core) {
@@ -879,6 +913,51 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                     render_all(&app, &cc2.borrow());
                 }
             });
+        });
+    }
+
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_globe_drag(move |dx: f32, dy: f32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.globe_rot_x += dx * 0.32;
+                    c.globe_rot_y = (c.globe_rot_y - dy * 0.32).clamp(-78.0, 78.0);
+                }
+                render_globe(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_globe_zoom(move |delta: f32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let factor = if delta > 0.0 { 0.94 } else { 1.06 };
+                    c.globe_zoom = (c.globe_zoom * factor).clamp(0.82, 1.9);
+                }
+                render_globe(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_globe_tap(move |x: f32, y: f32| {
+            if let Some(app) = w.upgrade() {
+                let hit = {
+                    let c = cc.borrow();
+                    globe::hit_test(&c.space_id, c.lang, c.globe_rot_x, c.globe_rot_y, c.globe_zoom, x, y)
+                };
+                if let Some(id) = hit {
+                    cc.borrow_mut().exit_id = id;
+                    render_all(&app, &cc.borrow());
+                }
+            }
         });
     }
 
