@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { Screen } from "../screen.slint";
 
 // Вертикальный скролл на форкнутом Flickable с резиновым overscroll (rubber-band),
 // как в iOS / Amnezia. Весь родной арбитраж жеста tap/drag, инерция и клики по
@@ -21,6 +22,7 @@ export component BouncyScroll inherits Rectangle {
 
     fl := Flickable {
         overshoot-enabled: true;
+        interactive: !Screen.lock-scroll;
         // content-height задаём явно: при наполнении через `for` авто-расчёт не работает.
         content-height: root.content-h;
         inner := VerticalLayout {

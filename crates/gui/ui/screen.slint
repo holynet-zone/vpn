@@ -16,6 +16,9 @@ export global Screen {
     in-out property <Page> page: Page.home;
     in-out property <bool> transport-sheet: false;
     in-out property <bool> desk-transport-open: false;
+    // Пока пользователь крутит глобус, гасим внешний скролл, чтобы жест не
+    // перехватывался Flickable/ScrollView.
+    in-out property <bool> lock-scroll: false;
 
     public function go(p: Page) {
         self.page = p;

@@ -3,8 +3,8 @@ use crate::{GlobeArc, GlobeDot};
 use crate::{Lang, domain};
 use slint::{ModelRc, SharedString, VecModel};
 
-pub const W: f32 = 340.0;
-pub const H: f32 = 300.0;
+pub const W: f32 = 300.0;
+pub const H: f32 = 280.0;
 const CX: f32 = W / 2.0;
 const CY: f32 = H / 2.0;
 

@@ -1,10 +1,14 @@
 import { Theme } from "../theme.slint";
 import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
 import { GlobeArc, GlobeDot } from "../models.slint";
 
 export component GlobeView inherits Rectangle {
-    width: 340px;
-    height: 300px;
+    min-width: 300px;
+    min-height: 280px;
+    max-width: 300px;
+    max-height: 280px;
+    clip: true;
 
     function arc-color(kind: int) -> brush {
         kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.ln : Theme.t2
@@ -17,8 +21,8 @@ export component GlobeView inherits Rectangle {
     }
 
     Rectangle {
-        x: 170px - AppState.globe-radius * 1px;
-        y: 150px - AppState.globe-radius * 1px;
+        x: 150px - AppState.globe-radius * 1px;
+        y: 140px - AppState.globe-radius * 1px;
         width: AppState.globe-radius * 2px;
         height: AppState.globe-radius * 2px;
         border-radius: self.width / 2;
@@ -28,10 +32,10 @@ export component GlobeView inherits Rectangle {
     }
 
     Path {
-        width: 340px;
-        height: 300px;
-        viewbox-width: 340;
-        viewbox-height: 300;
+        width: 300px;
+        height: 280px;
+        viewbox-width: 300;
+        viewbox-height: 280;
         commands: AppState.globe-graticule;
         fill: transparent;
         stroke: Theme.ln;
@@ -40,10 +44,10 @@ export component GlobeView inherits Rectangle {
     }
 
     Path {
-        width: 340px;
-        height: 300px;
-        viewbox-width: 340;
-        viewbox-height: 300;
+        width: 300px;
+        height: 280px;
+        viewbox-width: 300;
+        viewbox-height: 280;
         commands: AppState.globe-land;
         fill: transparent;
         stroke: Theme.t2;
@@ -52,10 +56,10 @@ export component GlobeView inherits Rectangle {
     }
 
     for a in AppState.globe-arcs: Path {
-        width: 340px;
-        height: 300px;
-        viewbox-width: 340;
-        viewbox-height: 300;
+        width: 300px;
+        height: 280px;
+        viewbox-width: 300;
+        viewbox-height: 280;
         commands: a.d;
         fill: transparent;
         stroke: arc-color(a.kind);
@@ -94,9 +98,11 @@ export component GlobeView inherits Rectangle {
                 ta.lx = ta.mouse-x;
                 ta.ly = ta.mouse-y;
                 ta.dragging = true;
+                Screen.lock-scroll = true;
             }
-            if (e.kind == PointerEventKind.up) {
+            if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
                 ta.dragging = false;
+                Screen.lock-scroll = false;
             }
         }
         moved => {
@@ -110,6 +116,33 @@ export component GlobeView inherits Rectangle {
         scroll-event(e) => {
             AppState.globe-zoom(e.delta-y / 1px);
             accept
+        }
+    }
+
+    VerticalLayout {
+        x: root.width - 40px;
+        y: root.height - 84px;
+        spacing: 8px;
+        width: 32px;
+        zoom-btn := Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: Theme.glass;
+            border-width: 1px;
+            border-color: Theme.ln;
+            Text { text: "+"; font-size: 18px; font-weight: 600; color: Theme.t; }
+            TouchArea { clicked => { AppState.globe-zoom(-1); } }
+        }
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: Theme.glass;
+            border-width: 1px;
+            border-color: Theme.ln;
+            Text { text: "−"; font-size: 18px; font-weight: 600; color: Theme.t; }
+            TouchArea { clicked => { AppState.globe-zoom(1); } }
         }
     }
 }
