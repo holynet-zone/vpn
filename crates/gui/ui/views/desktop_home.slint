@@ -153,23 +153,34 @@ export component DesktopHomeView inherits VerticalLayout {
 
             Card {
                 vertical-stretch: 0;
-                HorizontalLayout {
+                VerticalLayout {
                     padding: 16px;
-                    spacing: 12px;
-                    IconTag { text: AppState.server-code; width: 38px; height: 38px; }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 3px;
-                        Text { text: AppState.server-city; font-size: 13.5px; font-weight: 700; color: Theme.t; }
-                        Text { text: AppState.server-meta; font-size: 11.5px; color: Theme.t2; }
+                    spacing: 10px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        IconTag { text: AppState.exit-code; width: 38px; height: 38px; }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            Text { text: Str.exit-node; font-size: 9.5px; letter-spacing: 1px; color: Theme.t2; font-family: "IBM Plex Mono"; }
+                            Text { text: AppState.exit-city; font-size: 13.5px; font-weight: 700; color: Theme.t; }
+                            Text { text: AppState.exit-meta; font-size: 11px; color: Theme.t2; font-family: "IBM Plex Mono"; }
+                        }
+                        Rectangle {}
+                        VerticalLayout {
+                            alignment: center;
+                            Text { text: AppState.exit-ping; font-size: 11px; color: Theme.ok; font-family: "IBM Plex Mono"; }
+                        }
                     }
-                    Rectangle {}
-                    VerticalLayout {
-                        alignment: center;
-                        Text { text: AppState.server-ping; font-size: 11px; color: Theme.ok; font-family: "IBM Plex Mono"; }
+                    Rectangle { height: 1px; background: Theme.ln; }
+                    HorizontalLayout {
+                        spacing: 9px;
+                        Text { text: AppState.route-mode-label; font-size: 10px; font-weight: 600; color: AppState.route-manual ? Theme.a1 : Theme.ok; font-family: "IBM Plex Mono"; vertical-alignment: center; }
+                        Text { text: AppState.hops-count; font-size: 11px; color: Theme.t2; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: AppState.path-sum; font-size: 11px; color: Theme.ok; font-family: "IBM Plex Mono"; vertical-alignment: center; }
                     }
                 }
-                TouchArea { clicked => { Screen.go(Page.nodes); } }
+                TouchArea { clicked => { Screen.go(Page.route); } }
             }
 
             Card {

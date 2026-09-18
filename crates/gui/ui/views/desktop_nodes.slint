@@ -2,37 +2,42 @@ import { Theme } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
-import { Page, ServerInfo } from "../models.slint";
+import { Page, NodeRow } from "../models.slint";
 import { Card } from "../widgets/card.slint";
 import { SignalBars } from "../widgets/signal_bars.slint";
 import { ScreenTitle, IconTag } from "../widgets/tiles.slint";
 
 component NodeCard inherits Card {
-    in property <ServerInfo> server;
+    in property <NodeRow> node;
     elevated: false;
     border-radius: 16px;
-    stroke: server.selected ? Theme.a1 : Theme.ln;
+    stroke: node.selected ? Theme.a1 : Theme.ln;
+    opacity: node.node-state == 2 ? 0.5 : 1.0;
     HorizontalLayout {
         padding-left: 13px;
         padding-right: 13px;
         padding-top: 12px;
         padding-bottom: 12px;
         spacing: 11px;
-        IconTag { text: server.code; width: 34px; height: 34px; }
+        IconTag { text: node.code; width: 34px; height: 34px; }
         VerticalLayout {
             alignment: center;
             spacing: 2px;
-            Text { text: server.city; font-size: 13px; font-weight: 600; color: Theme.t; }
-            Text { text: server.meta; font-size: 11px; color: Theme.t2; }
+            HorizontalLayout {
+                spacing: 7px;
+                Text { text: node.city; font-size: 13px; font-weight: 600; color: Theme.t; }
+                Text { text: node.tag; font-size: 9px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+            }
+            Text { text: node.meta; font-size: 10.5px; color: Theme.t2; font-family: "IBM Plex Mono"; }
         }
         Rectangle {}
-        VerticalLayout { alignment: center; SignalBars { quality: server.quality; } }
+        VerticalLayout { alignment: center; SignalBars { quality: node.quality; } }
         VerticalLayout {
             alignment: center;
-            Text { text: server.ping; width: 44px; horizontal-alignment: right; font-size: 10.5px; color: Theme.t2; font-family: "IBM Plex Mono"; }
+            Text { text: node.ping; width: 50px; horizontal-alignment: right; font-size: 10.5px; color: node.node-state == 1 ? Theme.wn : node.node-state == 2 ? Theme.t2 : Theme.ok; font-family: "IBM Plex Mono"; }
         }
     }
-    TouchArea { clicked => { AppState.select-server(server.id); Screen.go(Page.home); } }
+    TouchArea { clicked => { if (node.alive) { AppState.select-exit(node.id); } } }
 }
 
 export component DesktopNodesView inherits VerticalLayout {
@@ -98,11 +103,11 @@ export component DesktopNodesView inherits VerticalLayout {
             VerticalLayout {
                 alignment: center;
                 spacing: 3px;
-                Text { text: Str.smart; font-size: 13.5px; font-weight: 700; color: Theme.on; }
-                Text { text: Str.smart-hint; font-size: 11.5px; color: Theme.on; opacity: 0.82; wrap: word-wrap; }
+                Text { text: Str.smart-exit; font-size: 13.5px; font-weight: 700; color: Theme.on; }
+                Text { text: Str.smart-exit-hint; font-size: 11.5px; color: Theme.on; opacity: 0.82; wrap: word-wrap; }
             }
         }
-        TouchArea { clicked => { AppState.smart-pick(); Screen.go(Page.home); } }
+        TouchArea { clicked => { AppState.smart-pick(); } }
     }
 
     // Двухколоночная сетка. Репитер нельзя класть прямо в GridLayout
@@ -113,9 +118,9 @@ export component DesktopNodesView inherits VerticalLayout {
         property <length> gap: 9px;
         property <length> card-h: 58px;
         property <length> col-w: (self.width - self.gap) / 2;
-        height: floor((AppState.servers.length + 1) / 2) * (self.card-h + self.gap) - self.gap;
-        for s[i] in AppState.servers: NodeCard {
-            server: s;
+        height: floor((AppState.node-list.length + 1) / 2) * (self.card-h + self.gap) - self.gap;
+        for s[i] in AppState.node-list: NodeCard {
+            node: s;
             width: grid.col-w;
             height: grid.card-h;
             x: mod(i, 2) * (grid.col-w + grid.gap);

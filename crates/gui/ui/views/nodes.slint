@@ -56,7 +56,6 @@ export component NodesView inherits VerticalLayout {
         }
     }
 
-    // smart pick
     Rectangle {
         border-radius: Theme.radius-lg;
         background: @linear-gradient(135deg, Theme.a1, Theme.a2);
@@ -76,19 +75,20 @@ export component NodesView inherits VerticalLayout {
             VerticalLayout {
                 alignment: center;
                 spacing: 3px;
-                Text { text: Str.smart; font-size: 14px; font-weight: 700; color: Theme.on; }
-                Text { text: Str.smart-hint; font-size: 11.5px; color: Theme.on; opacity: 0.82; wrap: word-wrap; }
+                Text { text: Str.smart-exit; font-size: 14px; font-weight: 700; color: Theme.on; }
+                Text { text: Str.smart-exit-hint; font-size: 11.5px; color: Theme.on; opacity: 0.82; wrap: word-wrap; }
             }
         }
-        TouchArea { clicked => { AppState.smart-pick(); Screen.go(Page.home); } }
+        TouchArea { clicked => { AppState.smart-pick(); } }
     }
 
     VerticalLayout {
         spacing: 8px;
-        for s in AppState.servers: Card {
+        for s in AppState.node-list: Card {
             elevated: false;
             border-radius: 18px;
             stroke: s.selected ? Theme.a1 : Theme.ln;
+            opacity: s.node-state == 2 ? 0.5 : 1.0;
             HorizontalLayout {
                 padding: 14px;
                 spacing: 12px;
@@ -96,8 +96,12 @@ export component NodesView inherits VerticalLayout {
                 VerticalLayout {
                     alignment: center;
                     spacing: 2px;
-                    Text { text: s.city; font-size: 13.5px; font-weight: 600; color: Theme.t; }
-                    Text { text: s.meta; font-size: 11.5px; color: Theme.t2; }
+                    HorizontalLayout {
+                        spacing: 7px;
+                        Text { text: s.city; font-size: 13.5px; font-weight: 600; color: Theme.t; }
+                        Text { text: s.tag; font-size: 9.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+                    }
+                    Text { text: s.meta; font-size: 11px; color: Theme.t2; font-family: "IBM Plex Mono"; }
                 }
                 Rectangle {}
                 VerticalLayout { alignment: center; SignalBars { quality: s.quality; } }
@@ -105,15 +109,15 @@ export component NodesView inherits VerticalLayout {
                     alignment: center;
                     Text {
                         text: s.ping;
-                        width: 46px;
+                        width: 52px;
                         horizontal-alignment: right;
                         font-size: 11px;
-                        color: Theme.t2;
+                        color: s.node-state == 1 ? Theme.wn : s.node-state == 2 ? Theme.t2 : Theme.ok;
                         font-family: "IBM Plex Mono";
                     }
                 }
             }
-            TouchArea { clicked => { AppState.select-server(s.id); Screen.go(Page.home); } }
+            TouchArea { clicked => { if (s.alive) { AppState.select-exit(s.id); } } }
         }
     }
 }

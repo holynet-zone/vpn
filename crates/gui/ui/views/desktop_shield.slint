@@ -51,32 +51,39 @@ export component DesktopShieldView inherits VerticalLayout {
             horizontal-stretch: 1;
             VerticalLayout {
                 padding: 18px;
-                spacing: 13px;
+                spacing: 12px;
                 HorizontalLayout {
-                    Text { text: Str.privacy-index; font-size: 13.5px; font-weight: 700; color: Theme.t; }
-                    Rectangle {}
-                    Text { text: AppState.privacy-score; font-size: 22px; font-weight: 700; color: Theme.ok; font-family: "IBM Plex Mono"; }
+                    Text { text: Str.who-sees; font-size: 13.5px; font-weight: 700; color: Theme.t; horizontal-stretch: 1; }
+                    Text { text: AppState.hops-count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
                 }
-                Rectangle {
-                    height: 6px;
-                    border-radius: 3px;
-                    background: Theme.sf2;
-                    clip: true;
-                    Rectangle {
-                        x: 0;
-                        width: parent.width * (AppState.privacy-score / 100);
-                        border-radius: 3px;
-                        background: @linear-gradient(90deg, Theme.a2, Theme.a1);
-                        animate width { duration: 400ms; easing: ease; }
+                for v in AppState.visibility: HorizontalLayout {
+                    spacing: 10px;
+                    Text {
+                        text: v.who;
+                        width: 70px;
+                        font-size: 10.5px;
+                        font-weight: 600;
+                        font-family: "IBM Plex Mono";
+                        color: v.level == 0 ? Theme.wn : v.level == 1 ? Theme.ok : Theme.t2;
+                        wrap: word-wrap;
                     }
+                    Text { text: v.what; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; horizontal-stretch: 1; }
                 }
-                Text {
-                    text: AppState.kill-on ? Str.privacy-ok : Str.privacy-bad;
-                    font-size: 12px;
-                    color: Theme.t2;
-                    wrap: word-wrap;
+                Text { text: AppState.privacy-note; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                Rectangle { height: 1px; background: Theme.ln; }
+                for f in AppState.factors: HorizontalLayout {
+                    spacing: 9px;
+                    Text {
+                        text: f.mark;
+                        width: 12px;
+                        font-size: 12px;
+                        font-weight: 700;
+                        font-family: "IBM Plex Mono";
+                        color: f.level == 0 ? Theme.wn : f.level == 1 ? Theme.ok : Theme.t2;
+                    }
+                    Text { text: f.name; font-size: 11.5px; font-weight: 500; color: Theme.t; wrap: word-wrap; horizontal-stretch: 1; }
                 }
-                Rectangle {}
+                Rectangle { height: 8px; }
                 Rectangle {
                     height: 42px;
                     border-radius: 13px;

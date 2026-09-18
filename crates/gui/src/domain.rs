@@ -245,6 +245,17 @@ pub fn edge_count(space_id: &str) -> usize {
         .count()
 }
 
+pub fn fastest_exit(space_id: &str) -> &'static str {
+    space(space_id)
+        .nodes
+        .iter()
+        .map(|id| node(id))
+        .filter(|n| n.rtt >= 0)
+        .min_by_key(|n| n.rtt)
+        .map(|n| n.id)
+        .unwrap_or_else(|| first_alive(space_id))
+}
+
 pub fn first_alive(space_id: &str) -> &'static str {
     space(space_id)
         .nodes
@@ -848,6 +859,40 @@ pub fn topo_counts(lang: Lang, space_id: &str, age: u32) -> String {
         Lang::Ja => format!("{} ノード · {} エッジ · 指標 {} 秒前", n, e, age),
         _ => format!("{} nodes · {} edges · metrics {} s old", n, e, age),
     }
+}
+
+pub fn mode_label(lang: Lang, manual: bool) -> String {
+    if manual {
+        t4(lang, "MANUAL", "ВРУЧНУЮ", "手动", "手動").to_string()
+    } else {
+        t4(lang, "AUTO", "АВТО", "自动", "自動").to_string()
+    }
+}
+
+pub fn chain_log(lang: Lang, first_code: &str, exit_code: &str) -> ModelRc<SharedString> {
+    let lines = match lang {
+        Lang::Ru => vec![
+            format!("· хоп 1 {}: RTT стабилен", first_code),
+            "· хоп 2 заменён, сессия сохранена".to_string(),
+            format!("· путь применён до {}", exit_code),
+        ],
+        Lang::Zh => vec![
+            format!("· 第 1 跳 {}: RTT 稳定", first_code),
+            "· 第 2 跳已替换，会话保持".to_string(),
+            format!("· 路径已应用至 {}", exit_code),
+        ],
+        Lang::Ja => vec![
+            format!("· ホップ 1 {}: RTT 安定", first_code),
+            "· ホップ 2 を置換、セッション維持".to_string(),
+            format!("· 経路を {} まで適用", exit_code),
+        ],
+        _ => vec![
+            format!("· hop 1 {}: RTT stable", first_code),
+            "· hop 2 replaced, session preserved".to_string(),
+            format!("· path applied to {}", exit_code),
+        ],
+    };
+    model(lines.iter().map(|l| s(l)).collect())
 }
 
 pub fn probe_label(lang: Lang, probing: bool) -> String {

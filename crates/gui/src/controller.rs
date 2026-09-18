@@ -274,10 +274,10 @@ fn render_route(app: &AppWindow, c: &Core) {
     };
 
     let ev = domain::exit_view(lang, exit);
-    st.set_exit_code(ev.code.into());
-    st.set_exit_city(ev.city.into());
-    st.set_exit_meta(ev.meta.into());
-    st.set_exit_ping(ev.ping.into());
+    st.set_exit_code(ev.code.clone().into());
+    st.set_exit_city(ev.city.clone().into());
+    st.set_exit_meta(ev.meta.clone().into());
+    st.set_exit_ping(ev.ping.clone().into());
 
     let cost = domain::path_cost(space, &path);
     let miss = domain::path_missing(space, &path);
@@ -286,8 +286,26 @@ fn render_route(app: &AppWindow, c: &Core) {
     st.set_path_estimated(miss > 0);
     st.set_path_warn(domain::path_warn(lang).into());
     st.set_hops_count(domain::hops_count(lang, path.len()).into());
+    st.set_route_mode_label(domain::mode_label(lang, c.manual_mode).into());
+
+    let first_code = domain::exit_view(lang, path[0]).code;
+    if c.status == ConnStatus::On {
+        st.set_chain_log(domain::chain_log(lang, &first_code, &ev.code));
+    } else {
+        st.set_chain_log(model::<slint::SharedString>(vec![]));
+    }
+
+    let sub = match lang {
+        Lang::Ru => format!("Трафик идёт через {}, транспорт {}", ev.city, c.transport_id.to_uppercase()),
+        Lang::Zh => format!("流量经 {}，传输 {}", ev.city, c.transport_id.to_uppercase()),
+        Lang::Ja => format!("{} 経由で通信中・トランスポート {}", ev.city, c.transport_id.to_uppercase()),
+        _ => format!("Traffic flows through {} over {}", ev.city, c.transport_id.to_uppercase()),
+    };
+    st.set_status_sub(sub.into());
 
     st.set_route_tab(c.route_tab);
+    st.set_route_auto(!c.manual_mode);
+    st.set_route_manual(c.manual_mode);
     st.set_prio(c.prio);
     let names = domain::prio_names(lang);
     let prios: Vec<PrioTab> = (0..3)
@@ -403,7 +421,14 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
         let cc = core.clone();
         st.on_smart_pick(move || {
             if let Some(app) = w.upgrade() {
-                cc.borrow_mut().server_id = "fi".into();
+                {
+                    let mut c = cc.borrow_mut();
+                    let fastest = domain::fastest_exit(&c.space_id);
+                    c.exit_id = fastest.to_string();
+                    c.manual_mode = false;
+                    c.route_tab = RouteTab::Auto;
+                }
+                app.global::<Screen>().invoke_go(crate::Page::Route);
                 render_all(&app, &cc.borrow());
             }
         });
