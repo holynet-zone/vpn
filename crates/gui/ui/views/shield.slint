@@ -2,102 +2,170 @@ import { Theme } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
-import { Page } from "../models.slint";
+import { Page, ToggleInfo } from "../models.slint";
 import { Card } from "../widgets/card.slint";
-import { ScreenTitle, ToggleRow } from "../widgets/tiles.slint";
+import { ScreenTitle, SectionLabel } from "../widgets/tiles.slint";
+
+component GroupHead inherits HorizontalLayout {
+    in property <string> caption;
+    in property <string> count;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 7px;
+    SectionLabel { text: root.caption; font-size: 11px; horizontal-stretch: 1; }
+    Text { text: root.count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: bottom; }
+}
+
+component Switch inherits Rectangle {
+    in property <bool> on;
+    width: 46px;
+    height: 28px;
+    border-radius: 14px;
+    background: on ? Theme.ok : Theme.ln;
+    Rectangle {
+        width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: #ffffff;
+        x: on ? parent.width - self.width - 2px : 2px;
+        y: 2px;
+        animate x { duration: 200ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    }
+}
+
+component ToggleLine inherits Rectangle {
+    in property <ToggleInfo> tg;
+    in property <bool> top-border;
+    callback toggled();
+    background: t.pressed ? Theme.sf2 : transparent;
+    if root.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text { text: tg.name; font-size: 14px; font-weight: 600; color: Theme.t; }
+            Text { text: tg.hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+        }
+        VerticalLayout { alignment: center; Switch { on: tg.on; } }
+    }
+    t := TouchArea { clicked => { root.toggled(); } }
+}
 
 export component ShieldView inherits VerticalLayout {
-    spacing: 18px;
+    spacing: 22px;
 
     ScreenTitle { text: Str.protection; }
 
-    Card {
-        border-radius: 22px;
-        VerticalLayout {
-            padding: 17px;
-            spacing: 13px;
-            HorizontalLayout {
-                Text { text: Str.who-sees; font-size: 14px; font-weight: 700; color: Theme.t; horizontal-stretch: 1; }
-                Text { text: AppState.hops-count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
-            }
-            for v in AppState.visibility: HorizontalLayout {
-                spacing: 10px;
-                Text {
-                    text: v.who;
-                    width: 66px;
-                    font-size: 10.5px;
-                    font-weight: 600;
-                    font-family: "IBM Plex Mono";
-                    color: v.level == 0 ? Theme.wn : v.level == 1 ? Theme.ok : Theme.t2;
-                    wrap: word-wrap;
+    if AppState.sh-has-issues: VerticalLayout {
+        spacing: 0px;
+        GroupHead { caption: AppState.sh-attention; count: AppState.sh-issue-count; }
+        Card {
+            elevated: false;
+            border-radius: 16px;
+            VerticalLayout {
+                for iss in AppState.sh-issues: Rectangle {
+                    if iss.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 12px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: iss.serious ? Theme.wn : Theme.t2;
+                            y: 6px;
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            Text { text: iss.title; font-size: 13.5px; font-weight: 600; color: Theme.t; wrap: word-wrap; }
+                            Text { text: iss.desc; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                border-radius: 999px;
+                                background: Theme.sf2;
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    padding-top: 9px;
+                                    padding-bottom: 9px;
+                                    Text { text: iss.fix-label; font-size: 12px; font-weight: 700; color: Theme.a1; }
+                                }
+                                TouchArea { clicked => { AppState.shield-fix(iss.fix-kind); } }
+                            }
+                        }
+                    }
                 }
-                Text { text: v.what; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; horizontal-stretch: 1; }
-            }
-            Text { text: AppState.privacy-note; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
-        }
-    }
-
-    Card {
-        elevated: false;
-        border-radius: 20px;
-        VerticalLayout {
-            padding: 16px;
-            spacing: 10px;
-            Text { text: Str.factors-title; font-size: 11.5px; font-weight: 600; color: Theme.t2; }
-            for f in AppState.factors: HorizontalLayout {
-                spacing: 9px;
-                Text {
-                    text: f.mark;
-                    width: 12px;
-                    font-size: 12px;
-                    font-weight: 700;
-                    font-family: "IBM Plex Mono";
-                    color: f.level == 0 ? Theme.wn : f.level == 1 ? Theme.ok : Theme.t2;
-                }
-                Text { text: f.name; font-size: 12px; font-weight: 500; color: Theme.t; wrap: word-wrap; horizontal-stretch: 1; }
             }
         }
     }
 
     VerticalLayout {
-        spacing: 8px;
-        for tg in AppState.toggles: ToggleRow {
-            title: tg.name;
-            hint: tg.hint;
-            on: tg.on;
-            toggled => { AppState.flip-toggle(tg.id); }
-        }
-    }
-
-    Card {
-        elevated: false;
-        border-radius: 16px;
-        HorizontalLayout {
-            padding-left: 16px;
-            padding-right: 16px;
-            padding-top: 15px;
-            padding-bottom: 15px;
-            spacing: 12px;
-            Text { text: Str.split-title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
-            Text { text: AppState.split-summary; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; }
+        spacing: 0px;
+        GroupHead { caption: AppState.grp-leak; }
+        Card {
+            elevated: false;
+            border-radius: 16px;
             VerticalLayout {
-                alignment: center;
-                Rectangle {
-                    width: 7px;
-                    height: 7px;
-                    Path {
-                        width: 7px;
-                        height: 12px;
-                        viewbox-width: 7;
-                        viewbox-height: 12;
-                        stroke: Theme.t2;
-                        stroke-width: 1.5px;
-                        commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
-                        y: -2px;
-                    }
+                for tg[i] in AppState.sh-leak: ToggleLine {
+                    tg: tg;
+                    top-border: i > 0;
+                    toggled => { AppState.flip-toggle(tg.id); }
                 }
             }
         }
-        TouchArea { clicked => { Screen.go(Page.split); } }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+        GroupHead { caption: AppState.grp-net; }
+        Card {
+            elevated: false;
+            border-radius: 16px;
+            VerticalLayout {
+                for tg[i] in AppState.sh-net: ToggleLine {
+                    tg: tg;
+                    top-border: i > 0;
+                    toggled => { AppState.flip-toggle(tg.id); }
+                }
+                Rectangle {
+                    Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
+                    background: split-t.pressed ? Theme.sf2 : transparent;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        padding-top: 15px;
+                        padding-bottom: 15px;
+                        spacing: 10px;
+                        Text { text: Str.split-title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: AppState.split-summary; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; }
+                        VerticalLayout {
+                            alignment: center;
+                            Path {
+                                width: 7px;
+                                height: 12px;
+                                viewbox-width: 7;
+                                viewbox-height: 12;
+                                stroke: Theme.t2;
+                                stroke-width: 1.5px;
+                                commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
+                            }
+                        }
+                    }
+                    split-t := TouchArea { clicked => { Screen.go(Page.split); } }
+                }
+            }
+        }
     }
 }

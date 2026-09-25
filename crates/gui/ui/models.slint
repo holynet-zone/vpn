@@ -201,6 +201,15 @@ export struct MtuPreset {
     selected: bool,
 }
 
+export struct ShieldIssue {
+    title: string,
+    desc: string,
+    fix-label: string,
+    fix-kind: int,
+    serious: bool,
+    top-border: bool,
+}
+
 export struct LegalDocRow {
     key: int,
     title: string,

@@ -20,7 +20,7 @@ struct Core {
     transport_id: String,
     auto_transport: bool,
     cipher: usize,
-    toggles: [bool; 4],
+    toggles: [bool; 5],
     split: crate::split::SplitState,
     query: String,
     sec: u64,
@@ -74,7 +74,7 @@ impl Core {
             transport_id: "udp".into(),
             auto_transport: true,
             cipher: 0,
-            toggles: [true, true, true, false],
+            toggles: [true, true, true, true, false],
             split: crate::split::SplitState::new(),
             query: String::new(),
             sec: 0,
@@ -231,8 +231,8 @@ fn render_all(app: &AppWindow, c: &Core) {
     st.set_transports(model(transports));
     st.set_ciphers(model(ciphers));
     st.set_chain(model(data::chain(&c.transport_id)));
-    st.set_toggles(model(data::toggle_rows(lang, &c.toggles)));
     st.set_devices(model(data::device_rows(lang)));
+    render_shield(app, c);
     st.set_proto_rows(model(data::proto_rows(lang, &cipher_name, &c.transport_id)));
     st.set_palettes(model(data::palette_rows(lang, dark, c.accent)));
     st.set_lang_rows(model(data::lang_rows(lang)));
@@ -276,6 +276,142 @@ fn render_all(app: &AppWindow, c: &Core) {
     render_spaces(app, c);
     render_globe(app, c);
     render_live(app, c);
+}
+
+fn render_shield(app: &AppWindow, c: &Core) {
+    let st = app.global::<AppState>();
+    let lang = c.lang;
+
+    let rows = data::toggle_rows(lang, &c.toggles);
+    st.set_toggles(model(rows.clone()));
+    st.set_sh_leak(model(rows[0..3].to_vec()));
+    st.set_sh_net(model(rows[3..5].to_vec()));
+    st.set_kill_on(c.toggles[0]);
+    st.set_grp_leak(
+        t4(
+            lang,
+            "Leak protection",
+            "Защита от утечек",
+            "防泄漏",
+            "漏洩対策",
+        )
+        .into(),
+    );
+    st.set_grp_net(t4(lang, "Network", "Сеть", "网络", "ネットワーク").into());
+    st.set_sh_attention(
+        t4(
+            lang,
+            "Needs attention",
+            "Требует внимания",
+            "需要注意",
+            "要確認",
+        )
+        .into(),
+    );
+
+    let relays = c.hops.iter().filter(|h| **h != c.exit_id).count();
+    let mut issues: Vec<crate::ShieldIssue> = Vec::new();
+    let mk = |title: &str, desc: &str, fix: &str, kind: i32, serious: bool| crate::ShieldIssue {
+        title: title.into(),
+        desc: desc.into(),
+        fix_label: fix.into(),
+        fix_kind: kind,
+        serious,
+        top_border: false,
+    };
+    let fix_on = t4(lang, "Turn on", "Включить", "开启", "オンにする");
+    let fix_off = t4(lang, "Turn off", "Выключить", "关闭", "オフにする");
+    let fix_add = t4(lang, "Add hop", "Добавить", "添加", "追加");
+    if !c.toggles[0] {
+        issues.push(mk(
+            t4(
+                lang,
+                "Kill switch is off",
+                "Kill switch выключен",
+                "断网保护已关闭",
+                "キルスイッチ無効",
+            ),
+            t4(
+                lang,
+                "If the channel drops, traffic leaks to the open network.",
+                "При обрыве канала трафик уйдёт в открытую сеть.",
+                "通道断开时流量会泄漏到开放网络。",
+                "切断時に通信が開放ネットワークへ漏れます。",
+            ),
+            fix_on,
+            0,
+            true,
+        ));
+    }
+    if relays == 0 {
+        issues.push(mk(
+            t4(
+                lang,
+                "Single-node route",
+                "В маршруте один узел",
+                "单节点路由",
+                "単一ノード経路",
+            ),
+            t4(
+                lang,
+                "The exit sees both your IP and destination.",
+                "Exit видит и ваш IP, и назначение.",
+                "出口节点同时看到你的 IP 和目标。",
+                "出口ノードが IP と宛先の両方を見ます。",
+            ),
+            fix_add,
+            1,
+            true,
+        ));
+    }
+    if !c.toggles[1] {
+        issues.push(mk(
+            t4(
+                lang,
+                "DNS bypasses the tunnel",
+                "DNS идёт мимо туннеля",
+                "DNS 绕过隧道",
+                "DNS がトンネルを迂回",
+            ),
+            t4(
+                lang,
+                "Your ISP sees which sites you open.",
+                "Провайдер видит, какие сайты вы открываете.",
+                "运营商能看到你打开的网站。",
+                "プロバイダに閲覧サイトが見えます。",
+            ),
+            fix_on,
+            2,
+            true,
+        ));
+    }
+    if c.toggles[4] {
+        issues.push(mk(
+            t4(
+                lang,
+                "Local network bypass",
+                "Локальная сеть в обход",
+                "本地网络绕行",
+                "ローカルネットワーク迂回",
+            ),
+            t4(
+                lang,
+                "Devices on this Wi-Fi can see your phone.",
+                "Устройства в этой Wi-Fi сети видят ваш телефон.",
+                "此 Wi-Fi 上的设备能看到你的手机。",
+                "この Wi-Fi 上の端末から端末が見えます。",
+            ),
+            fix_off,
+            3,
+            false,
+        ));
+    }
+    for (i, is) in issues.iter_mut().enumerate() {
+        is.top_border = i > 0;
+    }
+    st.set_sh_has_issues(!issues.is_empty());
+    st.set_sh_issue_count(issues.len().to_string().into());
+    st.set_sh_issues(model(issues));
 }
 
 fn render_globe(app: &AppWindow, c: &Core) {
@@ -600,6 +736,36 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                 if let Some(idx) = data::toggle_index(&id) {
                     let mut c = cc.borrow_mut();
                     c.toggles[idx] = !c.toggles[idx];
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_shield_fix(move |kind: i32| {
+            if let Some(app) = w.upgrade() {
+                let go_nodes = {
+                    let mut c = cc.borrow_mut();
+                    match kind {
+                        0 => {
+                            c.toggles[0] = true;
+                            false
+                        }
+                        2 => {
+                            c.toggles[1] = true;
+                            false
+                        }
+                        3 => {
+                            c.toggles[4] = false;
+                            false
+                        }
+                        _ => true,
+                    }
+                };
+                if go_nodes {
+                    app.global::<Screen>().invoke_go(crate::Page::Nodes);
                 }
                 render_all(&app, &cc.borrow());
             }

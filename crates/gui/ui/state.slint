@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset, LangRow } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset, LangRow, ShieldIssue } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -49,6 +49,16 @@ export global AppState {
     in property <[Visibility]> visibility;
     in property <[Factor]> factors;
     in property <string> privacy-note;
+
+    // Shield (isShield) — issue-driven
+    in property <[ShieldIssue]> sh-issues;
+    in property <bool> sh-has-issues: false;
+    in property <string> sh-issue-count;
+    in property <string> sh-attention;
+    in property <[ToggleInfo]> sh-leak;
+    in property <[ToggleInfo]> sh-net;
+    in property <string> grp-leak;
+    in property <string> grp-net;
 
     in property <bool> cold: false;
     in property <string> space-name;
@@ -199,6 +209,7 @@ export global AppState {
     callback select-transport(string);
     callback select-cipher(int);
     callback flip-toggle(string);
+    callback shield-fix(int);
     callback set-auto-transport(bool);
     callback query-changed(string);
     callback smart-pick();

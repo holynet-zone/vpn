@@ -161,20 +161,25 @@ const TOGGLES: &[(&str, L4, L4)] = &[
         "kill",
         ("Kill switch", "Kill switch", "断网保护", "キルスイッチ"),
         (
-            "Cut traffic if the channel drops",
-            "Обрубить трафик, если канал упал",
-            "通道断开时切断流量",
-            "チャネル切断時に通信を遮断",
+            "Blocks all traffic until the channel is back",
+            "Блокирует весь трафик, пока канал не восстановится",
+            "在通道恢复前阻断所有流量",
+            "チャネル復旧まで全通信を遮断",
         ),
     ),
     (
-        "auto",
-        ("Auto-connect", "Автоподключение", "自动连接", "自動接続"),
+        "dns",
         (
-            "On unknown Wi-Fi networks",
-            "В незнакомых Wi-Fi сетях",
-            "在陌生 Wi-Fi 网络下",
-            "未知の Wi-Fi ネットワークで",
+            "DNS through tunnel",
+            "DNS через туннель",
+            "DNS 经隧道",
+            "DNS をトンネル経由",
+        ),
+        (
+            "Your ISP can’t see which addresses you look up",
+            "Провайдер не видит, какие адреса вы запрашиваете",
+            "运营商无法看到你查询的地址",
+            "プロバイダは照会先アドレスを見られません",
         ),
     ),
     (
@@ -186,25 +191,35 @@ const TOGGLES: &[(&str, L4, L4)] = &[
             "トラッカーブロック",
         ),
         (
-            "DNS-level filter",
-            "Фильтр на уровне DNS",
-            "DNS 层过滤",
-            "DNS レベルのフィルタ",
+            "Ads and trackers cut at the DNS level",
+            "Реклама и трекеры отсекаются на уровне DNS",
+            "在 DNS 层拦截广告和追踪器",
+            "広告とトラッカーを DNS レベルで遮断",
+        ),
+    ),
+    (
+        "auto",
+        ("Auto-connect", "Автоподключение", "自动连接", "自動接続"),
+        (
+            "On unknown and open Wi-Fi",
+            "В незнакомых и открытых Wi-Fi сетях",
+            "在陌生和开放的 Wi-Fi 下",
+            "未知・オープンな Wi-Fi で",
         ),
     ),
     (
         "lan",
         (
-            "Local network",
-            "Локальная сеть",
-            "本地网络",
-            "ローカルネットワーク",
+            "Local network access",
+            "Доступ к локальной сети",
+            "本地网络访问",
+            "ローカルネットワークへのアクセス",
         ),
         (
-            "Printers and NAS bypass the channel",
-            "Принтеры и NAS в обход канала",
-            "打印机和 NAS 绕过通道",
-            "プリンタや NAS はチャネルを迂回",
+            "Printers, NAS and Chromecast bypass the channel",
+            "Принтеры, NAS и Chromecast — мимо канала",
+            "打印机、NAS 和 Chromecast 绕过通道",
+            "プリンタ・NAS・Chromecast はチャネルを迂回",
         ),
     ),
 ];
@@ -396,7 +411,7 @@ pub fn chain(current: &str) -> Vec<ChainStep> {
         .collect()
 }
 
-pub fn toggle_rows(lang: Lang, on: &[bool; 4]) -> Vec<ToggleInfo> {
+pub fn toggle_rows(lang: Lang, on: &[bool; 5]) -> Vec<ToggleInfo> {
     TOGGLES
         .iter()
         .enumerate()
