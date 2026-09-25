@@ -53,12 +53,6 @@ export component SampleData inherits Rectangle {
             { id: "blocker", name: "Блокировка трекеров", hint: "Фильтр на уровне DNS", on: true },
             { id: "lan", name: "Локальная сеть", hint: "Принтеры и NAS в обход канала", on: false },
         ];
-        AppState.apps = [
-            { name: "Браузер", letter: "Б", tunneled: true },
-            { name: "Мессенджер", letter: "М", tunneled: true },
-            { name: "Банк", letter: "Б", tunneled: false },
-            { name: "Стриминг", letter: "С", tunneled: true },
-        ];
         AppState.devices = [
             { kind: "PHONE", name: "Pixel 8", meta: "Android · Москва", tag: "сейчас", state: 0 },
             { kind: "LAPTOP", name: "MacBook Air", meta: "macOS · Москва", tag: "online", state: 1 },

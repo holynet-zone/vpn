@@ -1,8 +1,10 @@
 import { Theme } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
 import { Card } from "../widgets/card.slint";
-import { ScreenTitle, SectionLabel, ToggleRow } from "../widgets/tiles.slint";
+import { ScreenTitle, ToggleRow } from "../widgets/tiles.slint";
 
 export component ShieldView inherits VerticalLayout {
     spacing: 18px;
@@ -67,57 +69,35 @@ export component ShieldView inherits VerticalLayout {
         }
     }
 
-    HorizontalLayout {
-        SectionLabel { text: Str.split-title; }
-        Rectangle {}
-        Text { text: AppState.split-summary; font-size: 11px; color: Theme.t2; }
-    }
-
-    VerticalLayout {
-        spacing: 8px;
-        for a[i] in AppState.apps: Card {
-            elevated: false;
-            border-radius: 16px;
-            HorizontalLayout {
-                padding-left: 14px;
-                padding-right: 14px;
-                padding-top: 12px;
-                padding-bottom: 12px;
-                spacing: 12px;
+    Card {
+        elevated: false;
+        border-radius: 16px;
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 15px;
+            padding-bottom: 15px;
+            spacing: 12px;
+            Text { text: Str.split-title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: AppState.split-summary; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; }
+            VerticalLayout {
+                alignment: center;
                 Rectangle {
-                    width: 32px;
-                    height: 32px;
-                    border-radius: 10px;
-                    background: Theme.sf2;
-                    Text { text: a.letter; font-size: 13px; font-weight: 700; color: Theme.t2; }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Text { text: a.name; font-size: 13px; font-weight: 600; color: Theme.t; }
-                }
-                Rectangle {}
-                VerticalLayout {
-                    alignment: center;
-                    Rectangle {
-                        border-radius: 999px;
-                        border-width: 1px;
-                        border-color: a.tunneled ? Theme.ok : Theme.ln;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            padding-top: 5px;
-                            padding-bottom: 5px;
-                            Text {
-                                text: a.tunneled ? Str.tunnel-in : Str.tunnel-out;
-                                font-size: 10.5px;
-                                color: a.tunneled ? Theme.ok : Theme.t2;
-                                font-family: "IBM Plex Mono";
-                            }
-                        }
+                    width: 7px;
+                    height: 7px;
+                    Path {
+                        width: 7px;
+                        height: 12px;
+                        viewbox-width: 7;
+                        viewbox-height: 12;
+                        stroke: Theme.t2;
+                        stroke-width: 1.5px;
+                        commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
+                        y: -2px;
                     }
                 }
             }
-            TouchArea { clicked => { AppState.flip-app(i); } }
         }
+        TouchArea { clicked => { Screen.go(Page.split); } }
     }
 }

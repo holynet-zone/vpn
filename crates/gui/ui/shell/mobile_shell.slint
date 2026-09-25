@@ -81,31 +81,25 @@ export component MobileShell inherits Rectangle {
                 padding-right: 12px + Screen.safe-right;
                 padding-bottom: Screen.safe-bottom;
                 BottomNavItem {
-                    kind: 0;
+                    kind: 10;
                     label: Str.nav-home;
                     active: Screen.page == Page.home;
                     clicked => { Screen.go(Page.home); }
                 }
                 BottomNavItem {
-                    kind: 5;
+                    kind: 11;
                     label: Str.nav-route;
-                    active: Screen.page == Page.route;
+                    active: Screen.page == Page.route || Screen.page == Page.nodes;
                     clicked => { Screen.go(Page.route); }
                 }
                 BottomNavItem {
-                    kind: 1;
-                    label: Str.nav-nodes;
-                    active: Screen.page == Page.nodes;
-                    clicked => { Screen.go(Page.nodes); }
-                }
-                BottomNavItem {
-                    kind: 2;
+                    kind: 12;
                     label: Str.nav-shield;
                     active: Screen.page == Page.shield;
                     clicked => { Screen.go(Page.shield); }
                 }
                 BottomNavItem {
-                    kind: 4;
+                    kind: 13;
                     label: Str.nav-settings;
                     active: root.more-active;
                     clicked => { Screen.go(Page.more); }

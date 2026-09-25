@@ -1,7 +1,7 @@
 use slint::{Brush, Color, SharedString};
 
 use crate::{
-    Accent, ChainStep, CipherInfo, DeviceInfo, KeyValue, Lang, PaletteCard, SplitApp, ToggleInfo,
+    Accent, ChainStep, CipherInfo, DeviceInfo, KeyValue, Lang, PaletteCard, ToggleInfo,
     TransportInfo,
 };
 
@@ -180,20 +180,6 @@ const TOGGLES: &[(&str, L4, L4)] = &[
             "打印机和 NAS 绕过通道",
             "プリンタや NAS はチャネルを迂回",
         ),
-    ),
-];
-
-const APPS: &[L4] = &[
-    ("Browser", "Браузер", "浏览器", "ブラウザ"),
-    ("Messenger", "Мессенджер", "即时通讯", "メッセンジャー"),
-    ("Banking", "Банк", "银行", "銀行"),
-    ("Games", "Игры", "游戏", "ゲーム"),
-    ("Streaming", "Стриминг", "流媒体", "ストリーミング"),
-    (
-        "Work VPN client",
-        "Рабочий VPN-клиент",
-        "工作 VPN 客户端",
-        "業務用 VPN クライアント",
     ),
 ];
 
@@ -399,20 +385,6 @@ pub fn toggle_rows(lang: Lang, on: &[bool; 4]) -> Vec<ToggleInfo> {
 
 pub fn toggle_index(id: &str) -> Option<usize> {
     TOGGLES.iter().position(|&(k, ..)| k == id)
-}
-
-pub fn app_rows(lang: Lang, on: &[bool]) -> Vec<SplitApp> {
-    APPS.iter()
-        .enumerate()
-        .map(|(i, &n)| {
-            let name = tr(lang, n.0, n.1, n.2, n.3);
-            SplitApp {
-                name: s(name),
-                letter: s(&name.chars().next().unwrap_or('•').to_string()),
-                tunneled: on.get(i).copied().unwrap_or(false),
-            }
-        })
-        .collect()
 }
 
 pub fn device_rows(lang: Lang) -> Vec<DeviceInfo> {

@@ -1,5 +1,5 @@
 export enum ConnStatus { off, connecting, on }
-export enum Page { home, route, nodes, shield, more, proto, devices, settings }
+export enum Page { home, route, nodes, shield, more, proto, devices, settings, split, about }
 export enum RouteTab { auto, manual, graph }
 export enum AddStep { idle, parsed, error }
 
@@ -146,10 +146,34 @@ export struct ToggleInfo {
     on: bool,
 }
 
-export struct SplitApp {
+export struct SplitAppRow {
+    id: string,
     name: string,
     letter: string,
-    tunneled: bool,
+    color: brush,
+    sub: string,
+    sub-warn: bool,
+    selected: bool,
+    top-border: bool,
+}
+
+export struct SplitModeRow {
+    key: int,
+    name: string,
+    hint: string,
+    selected: bool,
+    top-border: bool,
+}
+
+export struct SplitDomainRow {
+    value: string,
+    kind: string,
+}
+
+export struct SplitChip {
+    name: string,
+    letter: string,
+    color: brush,
 }
 
 export struct DeviceInfo {

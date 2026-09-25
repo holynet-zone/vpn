@@ -4,38 +4,8 @@ import { AppState } from "../state.slint";
 import { Card } from "../widgets/card.slint";
 import { PillToggle } from "../widgets/pill_toggle.slint";
 import { ScreenTitle, SectionLabel } from "../widgets/tiles.slint";
-import { SplitApp } from "../models.slint";
-
-component AppCard inherits Card {
-    in property <SplitApp> app;
-    in property <int> index;
-    elevated: false;
-    border-radius: 14px;
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        padding-top: 11px;
-        padding-bottom: 11px;
-        spacing: 10px;
-        Rectangle {
-            width: 28px;
-            height: 28px;
-            border-radius: 9px;
-            background: Theme.sf2;
-            Text { text: app.letter; font-size: 12px; font-weight: 700; color: Theme.t2; }
-        }
-        VerticalLayout {
-            alignment: center;
-            Text { text: app.name; font-size: 12px; font-weight: 600; color: Theme.t; overflow: elide; }
-        }
-        Rectangle {}
-        VerticalLayout {
-            alignment: center;
-            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: app.tunneled ? Theme.ok : Theme.ln; }
-        }
-    }
-    TouchArea { clicked => { AppState.flip-app(index); } }
-}
+import { Screen } from "../screen.slint";
+import { Page } from "../models.slint";
 
 export component DesktopShieldView inherits VerticalLayout {
     spacing: 15px;
@@ -126,28 +96,31 @@ export component DesktopShieldView inherits VerticalLayout {
         }
     }
 
-    HorizontalLayout {
+    Card {
         vertical-stretch: 0;
-        SectionLabel { text: Str.split-title; }
-        Rectangle {}
-        Text { text: AppState.split-summary; font-size: 11px; color: Theme.t2; }
-    }
-
-    // Трёхколоночная сетка без GridLayout (репитер нельзя класть прямо в
-    // GridLayout), карточки фиксированной высоты позиционируются вручную.
-    grid := Rectangle {
-        vertical-stretch: 0;
-        property <length> gap: 9px;
-        property <length> card-h: 50px;
-        property <length> col-w: (self.width - 2 * self.gap) / 3;
-        height: floor((AppState.apps.length + 2) / 3) * (self.card-h + self.gap) - self.gap;
-        for a[i] in AppState.apps: AppCard {
-            app: a;
-            index: i;
-            width: grid.col-w;
-            height: grid.card-h;
-            x: mod(i, 3) * (grid.col-w + grid.gap);
-            y: floor(i / 3) * (grid.card-h + grid.gap);
+        elevated: false;
+        border-radius: 16px;
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 15px;
+            padding-bottom: 15px;
+            spacing: 12px;
+            Text { text: Str.split-title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: AppState.split-summary; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; }
+            VerticalLayout {
+                alignment: center;
+                Path {
+                    width: 7px;
+                    height: 12px;
+                    viewbox-width: 7;
+                    viewbox-height: 12;
+                    stroke: Theme.t2;
+                    stroke-width: 1.5px;
+                    commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
+                }
+            }
         }
+        TouchArea { clicked => { Screen.go(Page.split); } }
     }
 }

@@ -5,6 +5,7 @@ mod data;
 mod domain;
 mod globe;
 mod land;
+mod split;
 
 #[cfg(target_os = "android")]
 mod android_ext;

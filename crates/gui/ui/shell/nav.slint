@@ -3,8 +3,58 @@ import { Theme } from "../theme.slint";
 export component NavIcon inherits Rectangle {
     in property <int> kind;
     in property <brush> tint;
-    width: 18px;
-    height: 18px;
+    width: root.kind >= 10 ? 24px : 18px;
+    height: root.kind >= 10 ? 24px : 18px;
+
+    // v4 line-icons (SVG paths, viewbox 24). home / route / shield / more.
+    if kind == 10: Path {
+        width: 24px;
+        height: 24px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.tint;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M 12 3.5 L 12 11 M 7 6.6 A 7.5 7.5 0 1 0 17 6.6";
+    }
+    if kind == 11: Path {
+        width: 24px;
+        height: 24px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.tint;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M 8.2 5.5 L 15.5 5.5 A 3.25 3.25 0 0 1 15.5 12 L 8.5 12 A 3.25 3.25 0 0 0 8.5 18.5 L 15.8 18.5 M 3.8 5.5 A 2.2 2.2 0 1 0 8.2 5.5 A 2.2 2.2 0 1 0 3.8 5.5 M 15.8 18.5 A 2.2 2.2 0 1 0 20.2 18.5 A 2.2 2.2 0 1 0 15.8 18.5";
+    }
+    if kind == 12: Path {
+        width: 24px;
+        height: 24px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.tint;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M 12 3 L 19 5.8 L 19 11.2 C 19 15.6 16.1 19.3 12 21 C 7.9 19.3 5 15.6 5 11.2 L 5 5.8 L 12 3 Z M 9 12.2 L 11.1 14.3 L 15.2 10";
+    }
+    if kind == 13: Path {
+        width: 24px;
+        height: 24px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.tint;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M 4 7 L 13 7 M 17 7 L 20 7 M 13 7 A 2 2 0 1 0 17 7 A 2 2 0 1 0 13 7 M 4 17 L 7 17 M 11 17 L 20 17 M 7 17 A 2 2 0 1 0 11 17 A 2 2 0 1 0 7 17";
+    }
 
     // home: ring with center dot
     if kind == 0: Rectangle {

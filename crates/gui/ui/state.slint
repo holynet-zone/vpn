@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitApp, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -98,12 +98,41 @@ export global AppState {
     in property <string> dev-summary;
     in property <string> split-summary;
 
+    // Split tunneling (isSplit)
+    in property <bool> split-on: true;
+    in property <int> split-mode: 0;
+    in property <string> split-lead;
+    in property <string> split-off-note;
+    in property <[SplitModeRow]> split-modes;
+    in property <bool> split-sug-visible: false;
+    in property <string> split-sug-text;
+    in property <string> split-sug-btn;
+    in property <[SplitChip]> split-sug;
+    in property <bool> split-sys-on: false;
+    in property <bool> split-has-sel: false;
+    in property <[SplitAppRow]> split-sel;
+    in property <string> split-sel-n;
+    in property <string> split-sel-cap;
+    in property <[SplitAppRow]> split-rest;
+    in property <string> split-rest-n;
+    in property <string> split-rest-cap;
+    in property <bool> split-no-match: false;
+    in property <string> split-no-match-text;
+    in property <string> split-dom-cap;
+    in property <string> split-dom-n;
+    in property <[SplitDomainRow]> split-doms;
+    in property <string> split-dom-hint;
+    in property <bool> split-dom-hint-warn: false;
+    in property <bool> split-add-enabled: false;
+    in property <bool> split-show-risk: false;
+    in-out property <string> split-query;
+    in-out property <string> split-dom-in;
+
     in property <[ServerInfo]> servers;
     in property <[TransportInfo]> transports;
     in property <[CipherInfo]> ciphers;
     in property <[ChainStep]> chain;
     in property <[ToggleInfo]> toggles;
-    in property <[SplitApp]> apps;
     in property <[DeviceInfo]> devices;
     in property <[KeyValue]> proto-rows;
     in property <[PaletteCard]> palettes;
@@ -115,7 +144,6 @@ export global AppState {
     callback select-transport(string);
     callback select-cipher(int);
     callback flip-toggle(string);
-    callback flip-app(int);
     callback set-auto-transport(bool);
     callback query-changed(string);
     callback smart-pick();
@@ -157,4 +185,15 @@ export global AppState {
     callback qr-parse();
     callback qr-reset();
     callback qr-reveal();
+
+    callback split-toggle();
+    callback split-set-mode(int);
+    callback split-sug-apply();
+    callback split-sug-dismiss();
+    callback split-set-query(string);
+    callback split-sys-toggle();
+    callback split-flip-app(string);
+    callback split-add-domain();
+    callback split-drop-domain(string);
+    callback split-set-dom-in(string);
 }

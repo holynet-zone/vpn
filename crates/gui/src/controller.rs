@@ -21,7 +21,7 @@ struct Core {
     auto_transport: bool,
     cipher: usize,
     toggles: [bool; 4],
-    apps: Vec<bool>,
+    split: crate::split::SplitState,
     query: String,
     sec: u64,
     down: f64,
@@ -70,7 +70,7 @@ impl Core {
             auto_transport: true,
             cipher: 0,
             toggles: [true, true, true, false],
-            apps: vec![true, true, false, false, true, false],
+            split: crate::split::SplitState::new(),
             query: String::new(),
             sec: 0,
             down: 0.0,
@@ -189,7 +189,6 @@ fn render_all(app: &AppWindow, c: &Core) {
     st.set_ciphers(model(ciphers));
     st.set_chain(model(data::chain(&c.transport_id)));
     st.set_toggles(model(data::toggle_rows(lang, &c.toggles)));
-    st.set_apps(model(data::app_rows(lang, &c.apps)));
     st.set_devices(model(data::device_rows(lang)));
     st.set_proto_rows(model(data::proto_rows(lang, &cipher_name, &c.transport_id)));
     st.set_palettes(model(data::palette_rows(lang, dark, c.accent)));
@@ -206,14 +205,7 @@ fn render_all(app: &AppWindow, c: &Core) {
     st.set_proto_summary(format!("{} · {}", tr.name, cipher_short).into());
     st.set_dev_summary(format!("3 {} 6", t4(lang, "of", "из", "/", "/")).into());
 
-    let tunneled = c.apps.iter().filter(|b| **b).count();
-    let split = match lang {
-        Lang::Ru => format!("{} в канале", tunneled),
-        Lang::Zh => format!("{} 经通道", tunneled),
-        Lang::Ja => format!("{} 件トンネル経由", tunneled),
-        _ => format!("{} tunneled", tunneled),
-    };
-    st.set_split_summary(split.into());
+    crate::split::render(&st, lang, &c.split);
 
     st.set_banner_visible(c.banner.is_some());
     if let Some((a, b)) = &c.banner {
@@ -571,15 +563,100 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
     {
         let w = window.as_weak();
         let cc = core.clone();
-        st.on_flip_app(move |i: i32| {
+        st.on_split_toggle(move || {
             if let Some(app) = w.upgrade() {
-                let idx = i.max(0) as usize;
-                {
-                    let mut c = cc.borrow_mut();
-                    if idx < c.apps.len() {
-                        c.apps[idx] = !c.apps[idx];
-                    }
-                }
+                cc.borrow_mut().split.on ^= true;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_set_mode(move |m: i32| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.set_mode(m == 0);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_sug_apply(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.sug_apply();
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_sug_dismiss(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.sug_hide = true;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_set_query(move |q: SharedString| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.query = q.to_string();
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_sys_toggle(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.sys ^= true;
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_flip_app(move |id: SharedString| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.flip_app(&id);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_set_dom_in(move |v: SharedString| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.dom_in = v.to_string();
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_add_domain(move || {
+            if let Some(app) = w.upgrade() {
+                let lang = cc.borrow().lang;
+                cc.borrow_mut().split.add_domain(lang);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_split_drop_domain(move |v: SharedString| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().split.drop_domain(&v);
                 render_all(&app, &cc.borrow());
             }
         });

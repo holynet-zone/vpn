@@ -1,0 +1,413 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Page, SplitAppRow } from "../models.slint";
+import { Card } from "../widgets/card.slint";
+import { ScreenTitle, SectionLabel, BackButton } from "../widgets/tiles.slint";
+
+component GroupHeader inherits HorizontalLayout {
+    in property <string> caption;
+    in property <string> count;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 7px;
+    SectionLabel { text: root.caption; font-size: 11px; horizontal-stretch: 1; }
+    Text { text: root.count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: bottom; }
+}
+
+component AppLine inherits Rectangle {
+    in property <SplitAppRow> item;
+    callback flip();
+    background: touch.pressed ? Theme.sf2 : transparent;
+    if root.item.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 14px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        spacing: 12px;
+        Rectangle {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: root.item.color;
+            Text { text: root.item.letter; font-size: 15px; font-weight: 800; color: #ffffff; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text { text: root.item.name; font-size: 14px; font-weight: 600; color: Theme.t; overflow: elide; }
+            Text { text: root.item.sub; font-size: 11.5px; color: root.item.sub-warn ? Theme.wn : Theme.t2; overflow: elide; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                border-width: 1.5px;
+                border-color: root.item.selected ? Theme.a1 : Theme.ln;
+                background: root.item.selected ? Theme.a1 : transparent;
+                Path {
+                    width: 11px;
+                    height: 9px;
+                    viewbox-width: 11;
+                    viewbox-height: 9;
+                    stroke: Theme.on;
+                    stroke-width: 2px;
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                    commands: "M 1.5 4.5 L 4.5 7.5 L 9.5 1.5";
+                    opacity: root.item.selected ? 1.0 : 0.0;
+                }
+            }
+        }
+    }
+    touch := TouchArea { clicked => { root.flip(); } }
+}
+
+export component SplitView inherits VerticalLayout {
+    spacing: 16px;
+
+    BackButton {
+        text: Str.protection;
+        clicked => { Screen.go(Page.shield); }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+        ScreenTitle { text: Str.split-title; font-size: 25px; }
+        Text { text: AppState.split-lead; font-size: 12.5px; color: Theme.t2; wrap: word-wrap; }
+    }
+
+    // Enable
+    Card {
+        elevated: false;
+        border-radius: 16px;
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 14px;
+            padding-bottom: 14px;
+            spacing: 12px;
+            Text { text: Str.split-enable; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+            Rectangle {
+                width: 46px;
+                height: 28px;
+                border-radius: 14px;
+                background: AppState.split-on ? Theme.ok : Theme.ln;
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 12px;
+                    background: #ffffff;
+                    x: AppState.split-on ? parent.width - self.width - 2px : 2px;
+                    y: 2px;
+                    animate x { duration: 200ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+                }
+            }
+        }
+        TouchArea { clicked => { AppState.split-toggle(); } }
+    }
+
+    if !AppState.split-on: Text {
+        text: AppState.split-off-note;
+        font-size: 12px;
+        color: Theme.t2;
+        wrap: word-wrap;
+    }
+
+    if AppState.split-on: VerticalLayout {
+        spacing: 16px;
+
+        // Mode
+        VerticalLayout {
+            spacing: 0px;
+            GroupHeader { caption: Str.split-mode-cap; }
+            Card {
+                elevated: false;
+                border-radius: 16px;
+                VerticalLayout {
+                    for m in AppState.split-modes: Rectangle {
+                        background: mtouch.pressed ? Theme.sf2 : transparent;
+                        if m.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            padding-top: 13px;
+                            padding-bottom: 13px;
+                            spacing: 13px;
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 22px;
+                                    height: 22px;
+                                    border-radius: 11px;
+                                    border-width: m.selected ? 7px : 1.5px;
+                                    border-color: m.selected ? Theme.a1 : Theme.ln;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 3px;
+                                horizontal-stretch: 1;
+                                Text { text: m.name; font-size: 14px; font-weight: 600; color: Theme.t; wrap: word-wrap; }
+                                Text { text: m.hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                            }
+                        }
+                        mtouch := TouchArea { clicked => { AppState.split-set-mode(m.key); } }
+                    }
+                }
+            }
+        }
+
+        // Suggestion
+        if AppState.split-sug-visible: Rectangle {
+            border-radius: 16px;
+            background: Theme.sf2;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+                        Text { text: Str.split-sug-title; font-size: 13.5px; font-weight: 700; color: Theme.t; wrap: word-wrap; }
+                        Text { text: AppState.split-sug-text; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                    }
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 8px;
+                        Text { text: "✕"; font-size: 12px; color: Theme.t2; }
+                        TouchArea { clicked => { AppState.split-sug-dismiss(); } }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    // chips wrap manually is not available; show inline
+                    for chip in AppState.split-sug: Rectangle {
+                        border-radius: 999px;
+                        background: Theme.sf;
+                        HorizontalLayout {
+                            padding-left: 5px;
+                            padding-right: 10px;
+                            padding-top: 5px;
+                            padding-bottom: 5px;
+                            spacing: 7px;
+                            Rectangle {
+                                width: 20px;
+                                height: 20px;
+                                border-radius: 6px;
+                                background: chip.color;
+                                Text { text: chip.letter; font-size: 10px; font-weight: 800; color: #ffffff; }
+                            }
+                            Text { text: chip.name; font-size: 11.5px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 42px;
+                    border-radius: 12px;
+                    background: Theme.sf;
+                    border-width: 1px;
+                    border-color: Theme.ln;
+                    Text { text: AppState.split-sug-btn; font-size: 12.5px; font-weight: 700; color: Theme.a1; }
+                    TouchArea { clicked => { AppState.split-sug-apply(); } }
+                }
+            }
+        }
+
+        // Search + system toggle
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                border-radius: 12px;
+                background: Theme.sf2;
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    padding-left: 13px;
+                    padding-right: 13px;
+                    spacing: 9px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 12px;
+                            height: 12px;
+                            border-radius: 6px;
+                            border-width: 1.6px;
+                            border-color: Theme.t2;
+                        }
+                    }
+                    search := TextInput {
+                        text: AppState.split-query;
+                        font-size: 13.5px;
+                        color: Theme.t;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        single-line: true;
+                        edited => { AppState.split-set-query(self.text); }
+                    }
+                }
+                if AppState.split-query == "": Text {
+                    x: 34px;
+                    text: Str.split-search;
+                    font-size: 13.5px;
+                    color: Theme.t2;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: AppState.split-sys-on ? Theme.a1 : Theme.ln;
+                horizontal-stretch: 0;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    Text { text: Str.split-sys; font-size: 11.5px; font-weight: 600; color: AppState.split-sys-on ? Theme.a1 : Theme.t2; vertical-alignment: center; }
+                }
+                TouchArea { clicked => { AppState.split-sys-toggle(); } }
+            }
+        }
+
+        // Selected apps
+        if AppState.split-has-sel: VerticalLayout {
+            spacing: 0px;
+            GroupHeader { caption: AppState.split-sel-cap; count: AppState.split-sel-n; }
+            Card {
+                elevated: false;
+                border-radius: 16px;
+                VerticalLayout {
+                    for r in AppState.split-sel: AppLine {
+                        item: r;
+                        flip => { AppState.split-flip-app(r.id); }
+                    }
+                }
+            }
+        }
+
+        // Rest apps
+        VerticalLayout {
+            spacing: 0px;
+            GroupHeader { caption: AppState.split-rest-cap; count: AppState.split-rest-n; }
+            Card {
+                elevated: false;
+                border-radius: 16px;
+                VerticalLayout {
+                    for r in AppState.split-rest: AppLine {
+                        item: r;
+                        flip => { AppState.split-flip-app(r.id); }
+                    }
+                    if AppState.split-no-match: Text {
+                        text: AppState.split-no-match-text;
+                        font-size: 12.5px;
+                        color: Theme.t2;
+                        horizontal-alignment: center;
+                        height: 66px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Domains
+        VerticalLayout {
+            spacing: 0px;
+            GroupHeader { caption: AppState.split-dom-cap; count: AppState.split-dom-n; }
+            Card {
+                elevated: false;
+                border-radius: 16px;
+                VerticalLayout {
+                    for dm in AppState.split-doms: Rectangle {
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.ln; }
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 6px;
+                            padding-top: 9px;
+                            padding-bottom: 9px;
+                            spacing: 12px;
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 3px;
+                                horizontal-stretch: 1;
+                                Text { text: dm.value; font-size: 13px; font-family: "IBM Plex Mono"; color: Theme.t; overflow: elide; }
+                                Text { text: dm.kind; font-size: 11px; color: Theme.t2; }
+                            }
+                            Rectangle {
+                                width: 44px;
+                                Text { text: "✕"; font-size: 13px; color: Theme.t2; }
+                                TouchArea { clicked => { AppState.split-drop-domain(dm.value); } }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 6px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        spacing: 8px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            dom := TextInput {
+                                text: AppState.split-dom-in;
+                                font-size: 13px;
+                                font-family: "IBM Plex Mono";
+                                color: Theme.t;
+                                vertical-alignment: center;
+                                single-line: true;
+                                edited => { AppState.split-set-dom-in(self.text); }
+                                accepted => { AppState.split-add-domain(); }
+                            }
+                            if AppState.split-dom-in == "": Text {
+                                text: "example.com, *.bank.ru, 10.0.0.0/8";
+                                font-size: 13px;
+                                font-family: "IBM Plex Mono";
+                                color: Theme.t2;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Rectangle {
+                            border-radius: 10px;
+                            background: AppState.split-add-enabled ? Theme.a1 : Theme.sf2;
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                padding-top: 10px;
+                                padding-bottom: 10px;
+                                Text { text: Str.split-add; font-size: 12px; font-weight: 700; color: AppState.split-add-enabled ? Theme.on : Theme.t2; }
+                            }
+                            TouchArea { clicked => { AppState.split-add-domain(); } }
+                        }
+                    }
+                }
+            }
+            Text {
+                text: AppState.split-dom-hint;
+                font-size: 11px;
+                color: AppState.split-dom-hint-warn ? Theme.wn : Theme.t2;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+        }
+
+        // Risk
+        if AppState.split-show-risk: HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 10px;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.wn;
+                y: 6px;
+            }
+            Text { text: Str.split-risk; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; horizontal-stretch: 1; }
+        }
+    }
+}
