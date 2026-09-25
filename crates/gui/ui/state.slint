@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset, LangRow, ShieldIssue } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset, LangRow, ShieldIssue, HomeSeg, HomeHop } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -27,6 +27,12 @@ export global AppState {
     in property <string> path-warn;
     in property <string> hops-count;
     in property <string> route-mode-label;
+    in property <string> hr-total;
+    in property <string> hr-unit;
+    in property <string> hr-meta;
+    in property <string> hr-via;
+    in property <[HomeSeg]> hr-segs;
+    in property <[HomeHop]> hr-hops;
     in property <[string]> chain-log;
     in property <bool> no-relays: false;
     in property <bool> has-relays: false;

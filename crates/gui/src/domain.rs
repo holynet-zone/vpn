@@ -1,5 +1,8 @@
 use crate::Lang;
-use crate::{AddHopChip, EdgeRow, Factor, GlobeNode, NodeRow, RouteHop, SpaceRow, Visibility};
+use crate::{
+    AddHopChip, EdgeRow, Factor, GlobeNode, HomeHop, HomeSeg, NodeRow, RouteHop, SpaceRow,
+    Visibility,
+};
 use slint::{ModelRc, SharedString, VecModel};
 
 type L4 = (&'static str, &'static str, &'static str, &'static str);
@@ -398,6 +401,153 @@ pub fn path_cost(space_id: &str, path: &[&str]) -> i32 {
         }
     }
     c
+}
+
+#[allow(clippy::type_complexity)]
+pub fn home_route(
+    space_id: &str,
+    lang: Lang,
+    path: &[&str],
+    transport_code: &str,
+    on: bool,
+) -> (
+    String,
+    String,
+    String,
+    String,
+    ModelRc<HomeSeg>,
+    ModelRc<HomeHop>,
+) {
+    let ru = matches!(lang, Lang::Ru);
+    let unit = if ru { "мс" } else { "ms" };
+    let cost = path_cost(space_id, path);
+    let miss = path_missing(space_id, path);
+    let total = format!("{}{}", if miss > 0 { "≥" } else { "" }, cost);
+    let n = path.len();
+    let relays = n.saturating_sub(1);
+    let node_word = |k: usize| -> &'static str {
+        if ru {
+            let m = k % 100;
+            let d = k % 10;
+            if (11..=14).contains(&m) {
+                "узлов"
+            } else if d == 1 {
+                "узел"
+            } else if (2..=4).contains(&d) {
+                "узла"
+            } else {
+                "узлов"
+            }
+        } else if k == 1 {
+            "node"
+        } else {
+            "nodes"
+        }
+    };
+    let layer_word = |k: usize| -> &'static str {
+        if ru {
+            let m = k % 100;
+            let d = k % 10;
+            if (11..=14).contains(&m) {
+                "слоёв"
+            } else if d == 1 {
+                "слой"
+            } else if (2..=4).contains(&d) {
+                "слоя"
+            } else {
+                "слоёв"
+            }
+        } else if k == 1 {
+            "layer"
+        } else {
+            "layers"
+        }
+    };
+    let meta = if ru {
+        format!(
+            "{} {}\n{} {} onion",
+            n,
+            node_word(n),
+            relays,
+            layer_word(relays)
+        )
+    } else {
+        format!(
+            "{} {}\n{} onion {}",
+            n,
+            node_word(n),
+            relays,
+            layer_word(relays)
+        )
+    };
+    let via = if ru {
+        format!("через {}", transport_code)
+    } else {
+        format!("via {}", transport_code)
+    };
+    let no_edge = if ru { "нет ребра" } else { "no edge" };
+
+    let seg_val = |i: usize| -> Option<i32> {
+        if i == 0 {
+            let r = node(path[0]).rtt;
+            if r < 0 { None } else { Some(r) }
+        } else {
+            let e = edge_rtt(space_id, path[i - 1], path[i]);
+            if e < 0 { None } else { Some(e) }
+        }
+    };
+    let last = n.saturating_sub(1);
+    let mut segs: Vec<HomeSeg> = Vec::new();
+    let mut hops: Vec<HomeHop> = Vec::new();
+    for (i, &id) in path.iter().enumerate() {
+        let v = seg_val(i);
+        let kind = if v.is_none() {
+            0
+        } else if i == last {
+            3
+        } else if i == 0 {
+            1
+        } else {
+            2
+        };
+        segs.push(HomeSeg {
+            w: v.unwrap_or(20).max(1),
+            kind,
+        });
+        let nd = node(id);
+        let ex = i == last;
+        let seg_str = match v {
+            Some(x) => format!("+{}{}", x, unit),
+            None => no_edge.to_string(),
+        };
+        hops.push(HomeHop {
+            label: s(tr(lang, nd.label)),
+            code: s(nd.code),
+            tag: s(if ex { "EXIT" } else { "" }),
+            seg: s(&seg_str),
+            seg_warn: v.is_none(),
+            is_exit: ex,
+            line_kind: if on {
+                if ex {
+                    3
+                } else if i == 0 {
+                    1
+                } else {
+                    2
+                }
+            } else {
+                0
+            },
+        });
+    }
+    (
+        total,
+        unit.to_string(),
+        meta,
+        via,
+        ModelRc::new(VecModel::from(segs)),
+        ModelRc::new(VecModel::from(hops)),
+    )
 }
 
 pub fn path_missing(space_id: &str, path: &[&str]) -> usize {

@@ -39,28 +39,6 @@ export component MobileShell inherits Rectangle {
                 padding-bottom: 28px;
                 spacing: 20px;
 
-                Rectangle {
-                    height: 34px;
-                    horizontal-stretch: 0;
-                    border-radius: 999px;
-                    background: Theme.sf;
-                    border-width: 1px;
-                    border-color: Theme.ln;
-                    HorizontalLayout {
-                        padding-left: 11px;
-                        padding-right: 11px;
-                        spacing: 7px;
-                        Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.a1; }
-                        Text { text: AppState.space-name; font-size: 11px; font-weight: 600; color: Theme.t; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                        Rectangle {
-                            width: 6px;
-                            height: 6px;
-                            Path { width: 6px; height: 4px; viewbox-width: 6; viewbox-height: 4; stroke: Theme.t2; stroke-width: 1.5px; commands: "M 0.5 0.5 L 3 3 L 5.5 0.5"; }
-                        }
-                    }
-                    TouchArea { clicked => { AppState.open-spaces(); } }
-                }
-
                 PageHost {}
             }
         }

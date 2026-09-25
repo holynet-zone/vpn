@@ -31,6 +31,21 @@ export struct RouteHop {
     can-swap: bool,
 }
 
+export struct HomeSeg {
+    w: int,
+    kind: int,
+}
+
+export struct HomeHop {
+    label: string,
+    code: string,
+    tag: string,
+    seg: string,
+    seg-warn: bool,
+    is-exit: bool,
+    line-kind: int,
+}
+
 export struct EdgeRow {
     pair: string,
     val: string,

@@ -500,6 +500,20 @@ fn render_route(app: &AppWindow, c: &Core) {
     st.set_hops_count(domain::hops_count(lang, path.len()).into());
     st.set_route_mode_label(domain::mode_label(lang, c.manual_mode).into());
 
+    let (hr_total, hr_unit, hr_meta, hr_via, hr_segs, hr_hops) = domain::home_route(
+        space,
+        lang,
+        &path,
+        &c.transport_id.to_uppercase(),
+        c.status == ConnStatus::On,
+    );
+    st.set_hr_total(hr_total.into());
+    st.set_hr_unit(hr_unit.into());
+    st.set_hr_meta(hr_meta.into());
+    st.set_hr_via(hr_via.into());
+    st.set_hr_segs(hr_segs);
+    st.set_hr_hops(hr_hops);
+
     let first_code = domain::exit_view(lang, path[0]).code;
     if c.status == ConnStatus::On {
         st.set_chain_log(domain::chain_log(lang, &first_code, &ev.code));
