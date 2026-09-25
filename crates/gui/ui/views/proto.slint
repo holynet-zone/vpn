@@ -2,169 +2,376 @@ import { Theme } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
-import { Page } from "../models.slint";
+import { Page, ProtoRow, ProtoOpt } from "../models.slint";
 import { Card } from "../widgets/card.slint";
 import { ScreenTitle, SectionLabel, BackButton } from "../widgets/tiles.slint";
 
-component RadioDot inherits Rectangle {
-    in property <bool> on;
-    width: 18px;
-    height: 18px;
-    border-radius: 9px;
-    border-width: 1.5px;
-    border-color: on ? Theme.a1 : Theme.ln;
+component Spinner inherits Rectangle {
+    width: 14px;
+    height: 14px;
+    property <float> ms: animation-tick() / 1ms;
     Rectangle {
-        width: 9px;
-        height: 9px;
-        border-radius: 4.5px;
-        background: on ? Theme.a1 : transparent;
+        width: 100%;
+        height: 100%;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Theme.ln;
+    }
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        transform-rotation: root.ms * 0.6deg;
+        Rectangle {
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.a1;
+            x: parent.width / 2 - self.width / 2;
+            y: -1px;
+        }
+    }
+}
+
+component PRow inherits Rectangle {
+    in property <ProtoRow> item;
+    callback go();
+    background: t.pressed ? Theme.sf2 : transparent;
+    opacity: item.disabled ? 0.5 : 1.0;
+    if item.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 15px;
+        padding-bottom: 15px;
+        spacing: 8px;
+        Text { text: item.name; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
+        if item.modified: Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.a1; y: parent.height / 2 - 3px; }
+        Rectangle { horizontal-stretch: 1; }
+        Text { text: item.val; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; overflow: elide; }
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 7px;
+                height: 12px;
+                viewbox-width: 7;
+                viewbox-height: 12;
+                stroke: Theme.t2;
+                stroke-width: 1.5px;
+                commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
+            }
+        }
+    }
+    t := TouchArea { clicked => { if (!root.item.disabled) { root.go(); } } }
+}
+
+component GroupCard inherits VerticalLayout {
+    in property <string> caption;
+    in property <[ProtoRow]> rows;
+    spacing: 7px;
+    SectionLabel { text: root.caption; font-size: 11px; }
+    Card {
+        elevated: false;
+        border-radius: 16px;
+        VerticalLayout {
+            for r in root.rows: PRow {
+                item: r;
+                go => { AppState.proto-open(r.key); }
+            }
+        }
     }
 }
 
 export component ProtoView inherits VerticalLayout {
-    spacing: 18px;
+    spacing: 20px;
 
-    if !Screen.wide: BackButton {
-        text: Str.back;
-        clicked => { Screen.go(Page.more); }
+    BackButton {
+        text: AppState.proto-back-label;
+        clicked => { AppState.proto-back(); }
     }
 
-    ScreenTitle { text: Str.proto-settings; font-size: 25px; }
+    if AppState.proto-list: VerticalLayout {
+        spacing: 20px;
 
-    Card {
-        border-radius: 20px;
+        ScreenTitle { text: Str.proto-settings; font-size: 25px; }
+
+        Rectangle {
+            border-radius: 16px;
+            background: Theme.sf2;
+            VerticalLayout {
+                padding: 17px;
+                spacing: 7px;
+                Text { text: AppState.proto-detail-summary; font-size: 12.5px; font-weight: 600; font-family: "IBM Plex Mono"; color: Theme.t; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 7px;
+                    Rectangle { width: 6px; height: 6px; border-radius: 3px; background: AppState.proto-state-modified ? Theme.a1 : Theme.ok; y: 3px; }
+                    Text { text: AppState.proto-state-text; font-size: 11.5px; color: Theme.t2; vertical-alignment: center; }
+                }
+            }
+        }
+
+        GroupCard { caption: AppState.proto-cap-transport; rows: AppState.proto-grp-transport; }
+        Text { text: Str.failover-hint; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+        GroupCard { caption: AppState.proto-cap-crypto; rows: AppState.proto-grp-crypto; }
+        GroupCard { caption: AppState.proto-cap-conn; rows: AppState.proto-grp-conn; }
+
+        if AppState.proto-changed: Card {
+            elevated: false;
+            border-radius: 16px;
+            Rectangle {
+                height: 50px;
+                background: reset-t.pressed ? Theme.sf2 : transparent;
+                Text { text: AppState.proto-reset-label; font-size: 14px; font-weight: 600; color: Theme.a1; }
+                reset-t := TouchArea { clicked => { AppState.proto-reset(); } }
+            }
+        }
+
         VerticalLayout {
-            padding: 17px;
-            spacing: 14px;
-            SectionLabel { text: Str.failover-chain; }
-            HorizontalLayout {
-                spacing: 6px;
-                for c in AppState.chain: HorizontalLayout {
-                    spacing: 6px;
-                    horizontal-stretch: 1;
-                    Rectangle {
-                        border-radius: 13px;
-                        background: c.active ? Theme.sf2 : transparent;
-                        border-width: 1px;
-                        border-color: c.active ? Theme.a1 : Theme.ln;
-                        horizontal-stretch: 1;
+            spacing: 7px;
+            SectionLabel { text: AppState.proto-cap-diag; font-size: 11px; }
+            Card {
+                elevated: false;
+                border-radius: 16px;
+                Rectangle {
+                    height: 52px;
+                    background: sim-t.pressed ? Theme.sf2 : transparent;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        Text { text: Str.simulate; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
                         VerticalLayout {
-                            padding-top: 10px;
-                            padding-bottom: 10px;
-                            Text {
-                                text: c.code;
-                                horizontal-alignment: center;
-                                font-size: 11px;
-                                font-weight: 700;
-                                color: c.active ? Theme.t : Theme.t2;
-                                font-family: "IBM Plex Mono";
+                            alignment: center;
+                            Path {
+                                width: 7px;
+                                height: 12px;
+                                viewbox-width: 7;
+                                viewbox-height: 12;
+                                stroke: Theme.t2;
+                                stroke-width: 1.5px;
+                                commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
                             }
                         }
                     }
-                    if !c.last: Rectangle {
-                        width: 14px;
-                        height: 2px;
-                        border-radius: 1px;
-                        background: Theme.ln;
-                    }
+                    sim-t := TouchArea { clicked => { AppState.simulate(); Screen.go(Page.home); } }
                 }
             }
-            Text { text: Str.failover-hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+            Text { text: AppState.proto-sim-hint; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
         }
     }
 
-    VerticalLayout {
-        spacing: 9px;
-        SectionLabel { text: Str.transport; }
-        for tr in AppState.transports: Card {
-            elevated: false;
-            border-radius: 18px;
-            stroke: tr.selected ? Theme.a1 : Theme.ln;
-            HorizontalLayout {
-                padding: 14px;
-                spacing: 13px;
-                Rectangle {
-                    width: 44px;
-                    height: 32px;
-                    border-radius: 9px;
-                    background: Theme.sf2;
-                    Text {
-                        text: tr.name;
-                        font-size: 10.5px;
-                        font-weight: 600;
-                        color: tr.selected ? Theme.a1 : Theme.t2;
-                        font-family: "IBM Plex Mono";
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 3px;
-                    Text { text: tr.title; font-size: 13px; font-weight: 600; color: Theme.t; }
-                    Text { text: tr.desc; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
-                }
-                Rectangle {}
-                VerticalLayout { alignment: center; RadioDot { on: tr.selected; } }
-            }
-            TouchArea { clicked => { AppState.select-transport(tr.id); } }
-        }
-    }
+    if AppState.proto-detail: VerticalLayout {
+        spacing: 20px;
 
-    VerticalLayout {
-        spacing: 9px;
-        SectionLabel { text: Str.cipher; }
-        HorizontalLayout {
+        VerticalLayout {
             spacing: 8px;
-            for c[i] in AppState.ciphers: Card {
+            ScreenTitle { text: AppState.proto-detail-title; font-size: 25px; }
+            Text { text: AppState.proto-detail-lead; font-size: 12.5px; color: Theme.t2; wrap: word-wrap; }
+        }
+
+        if AppState.proto-is-opts: Card {
+            elevated: false;
+            border-radius: 16px;
+            VerticalLayout {
+                for o[i] in AppState.proto-opts: Rectangle {
+                    background: opt-t.pressed ? Theme.sf2 : transparent;
+                    if o.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                Text {
+                                    text: o.name;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: Theme.t;
+                                    font-family: o.mono ? "IBM Plex Mono" : "Manrope";
+                                    vertical-alignment: center;
+                                }
+                                if o.has-badge: Rectangle {
+                                    border-radius: 999px;
+                                    background: Theme.sf2;
+                                    HorizontalLayout {
+                                        padding-left: 7px;
+                                        padding-right: 7px;
+                                        padding-top: 4px;
+                                        padding-bottom: 4px;
+                                        Text { text: o.badge; font-size: 9.5px; font-weight: 600; color: Theme.a1; }
+                                    }
+                                }
+                            }
+                            Text { text: o.hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Path {
+                                width: 12px;
+                                height: 12px;
+                                viewbox-width: 12;
+                                viewbox-height: 12;
+                                stroke: Theme.a1;
+                                stroke-width: 2.2px;
+                                stroke-line-cap: round;
+                                stroke-line-join: round;
+                                commands: "M 2 6.5 L 5 9.5 L 10.5 2.5";
+                                opacity: o.checked ? 1.0 : 0.0;
+                            }
+                        }
+                    }
+                    opt-t := TouchArea { clicked => { AppState.proto-pick(i); } }
+                }
+            }
+        }
+
+        if AppState.proto-is-mtu: VerticalLayout {
+            spacing: 8px;
+
+            Card {
                 elevated: false;
                 border-radius: 16px;
-                stroke: c.selected ? Theme.a1 : Theme.ln;
-                background: c.selected ? Theme.sf2 : Theme.sf;
-                horizontal-stretch: 1;
-                VerticalLayout {
-                    padding: 13px;
-                    spacing: 5px;
-                    Text {
-                        text: c.name;
-                        font-size: 11.5px;
-                        font-weight: 600;
-                        color: c.selected ? Theme.t : Theme.t2;
-                        font-family: "IBM Plex Mono";
+                Rectangle {
+                    background: mauto-t.pressed ? Theme.sf2 : transparent;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            Text { text: AppState.mtu-auto-label; font-size: 14px; font-weight: 600; color: Theme.t; }
+                            Text { text: AppState.mtu-auto-hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 46px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: AppState.mtu-auto ? Theme.ok : Theme.ln;
+                                Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: #ffffff;
+                                    x: AppState.mtu-auto ? parent.width - self.width - 2px : 2px;
+                                    y: 2px;
+                                    animate x { duration: 200ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+                                }
+                            }
+                        }
                     }
-                    Text { text: c.hint; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
+                    mauto-t := TouchArea { clicked => { AppState.proto-mtu-auto-flip(); } }
                 }
-                TouchArea { clicked => { AppState.select-cipher(i); } }
             }
-        }
-    }
 
-    Card {
-        border-radius: 20px;
-        VerticalLayout {
-            padding: 16px;
-            spacing: 11px;
-            for p in AppState.proto-rows: HorizontalLayout {
-                spacing: 12px;
-                Text { text: p.key; font-size: 12.5px; color: Theme.t2; }
-                Rectangle {}
-                Text { text: p.value; font-size: 12px; color: Theme.t; font-family: "IBM Plex Mono"; }
+            if !AppState.mtu-auto: Card {
+                elevated: false;
+                border-radius: 16px;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 16px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Rectangle {
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 14px;
+                            background: Theme.sf2;
+                            opacity: AppState.mtu-dec-op;
+                            Text { text: "−"; font-size: 22px; color: Theme.t; }
+                            TouchArea { clicked => { AppState.proto-mtu-dec(); } }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 6px;
+                            Text { text: AppState.mtu-val; font-size: 34px; font-family: "IBM Plex Mono"; color: Theme.t; horizontal-alignment: center; }
+                            Text { text: AppState.mtu-bytes; font-size: 10.5px; color: Theme.t2; horizontal-alignment: center; }
+                        }
+                        Rectangle {
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 14px;
+                            background: Theme.sf2;
+                            opacity: AppState.mtu-inc-op;
+                            Text { text: "+"; font-size: 22px; color: Theme.t; }
+                            TouchArea { clicked => { AppState.proto-mtu-inc(); } }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for p[i] in AppState.mtu-presets: Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 11px;
+                            border-width: 1px;
+                            border-color: p.selected ? Theme.a1 : Theme.ln;
+                            background: p.selected ? Theme.sf2 : transparent;
+                            VerticalLayout {
+                                padding-top: 9px;
+                                padding-bottom: 9px;
+                                spacing: 4px;
+                                Text { text: p.val; font-size: 12px; font-family: "IBM Plex Mono"; color: Theme.t; horizontal-alignment: center; }
+                                Text { text: p.hint; font-size: 9.5px; color: Theme.t2; horizontal-alignment: center; }
+                            }
+                            TouchArea { clicked => { AppState.proto-mtu-preset(i); } }
+                        }
+                    }
+                }
             }
-        }
-    }
 
-    Rectangle {
-        border-radius: 16px;
-        border-width: 1px;
-        border-color: Theme.wn;
-        VerticalLayout {
-            padding: 14px;
-            Text {
-                text: Str.simulate;
-                horizontal-alignment: center;
-                font-size: 12.5px;
-                font-weight: 600;
-                color: Theme.wn;
+            Rectangle {
+                height: 48px;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: Theme.ln;
+                background: Theme.sf;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 9px;
+                    if AppState.mtu-probing: VerticalLayout { alignment: center; Spinner {} }
+                    Text { text: AppState.mtu-probe-label; font-size: 13px; font-weight: 600; color: Theme.a1; vertical-alignment: center; }
+                }
+                TouchArea { clicked => { AppState.proto-mtu-probe(); } }
+            }
+            if AppState.mtu-has-result: Rectangle {
+                border-radius: 14px;
+                background: Theme.sf2;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 10px;
+                    Text { text: AppState.mtu-result; font-size: 12px; color: Theme.t; wrap: word-wrap; horizontal-stretch: 1; vertical-alignment: center; }
+                    if AppState.mtu-can-apply: Rectangle {
+                        border-radius: 10px;
+                        background: Theme.a1;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 9px;
+                            padding-bottom: 9px;
+                            Text { text: AppState.mtu-use; font-size: 11.5px; font-weight: 700; color: Theme.on; }
+                        }
+                        TouchArea { clicked => { AppState.proto-mtu-apply(); } }
+                    }
+                }
             }
         }
-        TouchArea { clicked => { AppState.simulate(); Screen.go(Page.home); } }
+
+        if AppState.proto-detail-has-foot: Text {
+            text: AppState.proto-detail-foot;
+            font-size: 11.5px;
+            color: Theme.t2;
+            wrap: word-wrap;
+        }
     }
 }

@@ -176,6 +176,31 @@ export struct SplitChip {
     color: brush,
 }
 
+export struct ProtoRow {
+    key: int,
+    name: string,
+    val: string,
+    modified: bool,
+    disabled: bool,
+    top-border: bool,
+}
+
+export struct ProtoOpt {
+    name: string,
+    hint: string,
+    badge: string,
+    has-badge: bool,
+    mono: bool,
+    checked: bool,
+    top-border: bool,
+}
+
+export struct MtuPreset {
+    val: string,
+    hint: string,
+    selected: bool,
+}
+
 export struct LegalDocRow {
     key: int,
     title: string,

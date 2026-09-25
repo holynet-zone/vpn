@@ -6,6 +6,7 @@ mod data;
 mod domain;
 mod globe;
 mod land;
+mod proto;
 mod split;
 
 #[cfg(target_os = "android")]

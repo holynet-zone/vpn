@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -143,6 +143,45 @@ export global AppState {
     in property <string> doc-url;
     in property <[DocSection]> doc-sections;
 
+    // Proto settings (isProto)
+    in property <bool> proto-list: true;
+    in property <bool> proto-detail: false;
+    in property <bool> proto-is-opts: false;
+    in property <bool> proto-is-mtu: false;
+    in property <string> proto-back-label;
+    in property <string> proto-detail-summary;
+    in property <string> proto-state-text;
+    in property <bool> proto-state-modified: false;
+    in property <[ProtoRow]> proto-grp-transport;
+    in property <[ProtoRow]> proto-grp-crypto;
+    in property <[ProtoRow]> proto-grp-conn;
+    in property <bool> proto-changed: false;
+    in property <string> proto-detail-title;
+    in property <string> proto-detail-lead;
+    in property <string> proto-detail-foot;
+    in property <bool> proto-detail-has-foot: false;
+    in property <[ProtoOpt]> proto-opts;
+    in property <string> proto-cap-transport;
+    in property <string> proto-cap-crypto;
+    in property <string> proto-cap-conn;
+    in property <string> proto-cap-diag;
+    in property <string> proto-reset-label;
+    in property <string> proto-sim-hint;
+    in property <bool> mtu-auto: true;
+    in property <string> mtu-val;
+    in property <float> mtu-dec-op: 1.0;
+    in property <float> mtu-inc-op: 1.0;
+    in property <string> mtu-auto-hint;
+    in property <string> mtu-auto-label;
+    in property <[MtuPreset]> mtu-presets;
+    in property <bool> mtu-probing: false;
+    in property <bool> mtu-has-result: false;
+    in property <string> mtu-probe-label;
+    in property <string> mtu-result;
+    in property <bool> mtu-can-apply: false;
+    in property <string> mtu-bytes;
+    in property <string> mtu-use;
+
     in property <[ServerInfo]> servers;
     in property <[TransportInfo]> transports;
     in property <[CipherInfo]> ciphers;
@@ -217,4 +256,15 @@ export global AppState {
     callback about-open-doc(int);
     callback about-back();
     callback open-url(string);
+
+    callback proto-open(int);
+    callback proto-back();
+    callback proto-pick(int);
+    callback proto-reset();
+    callback proto-mtu-auto-flip();
+    callback proto-mtu-dec();
+    callback proto-mtu-inc();
+    callback proto-mtu-preset(int);
+    callback proto-mtu-probe();
+    callback proto-mtu-apply();
 }

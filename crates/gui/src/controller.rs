@@ -50,6 +50,8 @@ struct Core {
     about_doc: Option<usize>,
     about_upd: i32,
     _upd_timer: Timer,
+    proto: crate::proto::ProtoState,
+    _mtu_timer: Timer,
 }
 
 fn detect_lang() -> Lang {
@@ -102,6 +104,8 @@ impl Core {
             about_doc: None,
             about_upd: 0,
             _upd_timer: Timer::default(),
+            proto: crate::proto::ProtoState::new(),
+            _mtu_timer: Timer::default(),
         }
     }
 }
@@ -211,6 +215,18 @@ fn render_all(app: &AppWindow, c: &Core) {
 
     let (transports, tr) = data::transport_rows(lang, &c.transport_id);
     let (ciphers, cipher_name) = data::cipher_rows(lang, c.cipher);
+
+    crate::proto::render(
+        &st,
+        lang,
+        &c.proto,
+        &transports,
+        &c.transport_id,
+        c.auto_transport,
+        &ciphers,
+        c.cipher,
+        cfg!(target_os = "android"),
+    );
 
     st.set_transports(model(transports));
     st.set_ciphers(model(ciphers));
@@ -766,6 +782,174 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
     st.on_open_url(|url: SharedString| {
         open_url(&url);
     });
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_open(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().proto.open(i);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_back(move || {
+            if let Some(app) = w.upgrade() {
+                let go_more = !cc.borrow_mut().proto.back();
+                if go_more {
+                    app.global::<Screen>().invoke_go(crate::Page::More);
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_pick(move |index: i32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let pp = c.proto.pp;
+                    let ids: Vec<String> = data::transport_rows(c.lang, &c.transport_id)
+                        .0
+                        .iter()
+                        .map(|t| t.id.to_string())
+                        .collect();
+                    let mut auto_t = c.auto_transport;
+                    let mut tid = c.transport_id.clone();
+                    let mut cipher = c.cipher;
+                    crate::proto::apply_pick(
+                        &mut c.proto,
+                        pp,
+                        index.max(0) as usize,
+                        &mut auto_t,
+                        &mut tid,
+                        &mut cipher,
+                        &ids,
+                    );
+                    c.auto_transport = auto_t;
+                    c.transport_id = tid;
+                    c.cipher = cipher;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_reset(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().proto.reset();
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_mtu_auto_flip(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let auto_mtu = if c.transport_id == "udp" { 1380 } else { 1280 };
+                    let was = c.proto.mtu_auto;
+                    c.proto.mtu_auto = !was;
+                    if was {
+                        c.proto.mtu = auto_mtu;
+                    }
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_mtu_dec(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let v = c.proto.mtu - 10;
+                    c.proto.set_mtu(v);
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_mtu_inc(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let v = c.proto.mtu + 10;
+                    c.proto.set_mtu(v);
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_mtu_preset(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                let vals = [1280, 1380, 1420, 1500];
+                if let Some(v) = vals.get(i.max(0) as usize) {
+                    cc.borrow_mut().proto.set_mtu(*v);
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_mtu_probe(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    if c.proto.mtu_probe == 1 {
+                        return;
+                    }
+                    c.proto.mtu_probe = 1;
+                }
+                render_all(&app, &cc.borrow());
+                let w2 = w.clone();
+                let cc2 = cc.clone();
+                cc.borrow()._mtu_timer.start(
+                    TimerMode::SingleShot,
+                    Duration::from_millis(1500),
+                    move || {
+                        if let Some(app) = w2.upgrade() {
+                            cc2.borrow_mut().proto.mtu_probe = 2;
+                            render_all(&app, &cc2.borrow());
+                        }
+                    },
+                );
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_proto_mtu_apply(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let found = if c.transport_id == "udp" { 1392 } else { 1280 };
+                    c.proto.mtu_auto = false;
+                    c.proto.mtu = found;
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
     {
         let w = window.as_weak();
         let cc = core.clone();
