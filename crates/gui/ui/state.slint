@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset, LangRow } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -190,6 +190,7 @@ export global AppState {
     in property <[DeviceInfo]> devices;
     in property <[KeyValue]> proto-rows;
     in property <[PaletteCard]> palettes;
+    in property <[LangRow]> lang-rows;
 
     in-out property <string> query;
 
@@ -206,6 +207,7 @@ export global AppState {
     callback select-palette(int);
     callback set-mode(ThemeMode);
     callback set-lang(Lang);
+    callback select-lang-idx(int);
 
     callback select-route-tab(RouteTab);
     callback set-prio(int);

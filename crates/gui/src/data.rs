@@ -1,9 +1,35 @@
 use slint::{Brush, Color, SharedString};
 
 use crate::{
-    Accent, ChainStep, CipherInfo, DeviceInfo, KeyValue, Lang, PaletteCard, ToggleInfo,
+    Accent, ChainStep, CipherInfo, DeviceInfo, KeyValue, Lang, LangRow, PaletteCard, ToggleInfo,
     TransportInfo,
 };
+
+pub fn lang_rows(lang: Lang) -> Vec<LangRow> {
+    let ru = matches!(lang, Lang::Ru);
+    // (id, native name, sub-when-ru, sub-when-other)
+    let langs: [(i32, &str, &str, &str); 4] = [
+        (1, "Русский", "", "Russian"),
+        (0, "English", "английский", ""),
+        (2, "简体中文", "китайский", "Chinese"),
+        (3, "日本語", "японский", "Japanese"),
+    ];
+    let cur = match lang {
+        Lang::Ru => 1,
+        Lang::Zh => 2,
+        Lang::Ja => 3,
+        _ => 0,
+    };
+    langs
+        .iter()
+        .map(|&(id, name, sub_ru, sub_other)| LangRow {
+            id,
+            name: s(name),
+            sub: s(if ru { sub_ru } else { sub_other }),
+            checked: id == cur,
+        })
+        .collect()
+}
 
 fn s(v: &str) -> SharedString {
     v.into()

@@ -235,6 +235,7 @@ fn render_all(app: &AppWindow, c: &Core) {
     st.set_devices(model(data::device_rows(lang)));
     st.set_proto_rows(model(data::proto_rows(lang, &cipher_name, &c.transport_id)));
     st.set_palettes(model(data::palette_rows(lang, dark, c.accent)));
+    st.set_lang_rows(model(data::lang_rows(lang)));
 
     st.set_transport_code(tr.name.clone().into());
     st.set_transport_title(tr.title.into());
@@ -998,6 +999,23 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
         let cc = core.clone();
         st.on_set_lang(move |l: Lang| {
             if let Some(app) = w.upgrade() {
+                cc.borrow_mut().lang = l;
+                app.global::<Str>().set_lang(l);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_select_lang_idx(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                let l = match i {
+                    1 => Lang::Ru,
+                    2 => Lang::Zh,
+                    3 => Lang::Ja,
+                    _ => Lang::En,
+                };
                 cc.borrow_mut().lang = l;
                 app.global::<Str>().set_lang(l);
                 render_all(&app, &cc.borrow());

@@ -1,63 +1,223 @@
-import { Theme } from "../theme.slint";
+import { Theme, ThemeMode } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
 import { Page } from "../models.slint";
 import { Card } from "../widgets/card.slint";
-import { ScreenTitle, LinkRow } from "../widgets/tiles.slint";
+import { ScreenTitle, SectionLabel } from "../widgets/tiles.slint";
+
+component NavRow inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+    in property <bool> top-border;
+    callback go();
+    background: t.pressed ? Theme.sf2 : transparent;
+    if root.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 15px;
+        padding-bottom: 15px;
+        spacing: 10px;
+        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: root.value; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; overflow: elide; }
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 7px;
+                height: 12px;
+                viewbox-width: 7;
+                viewbox-height: 12;
+                stroke: Theme.t2;
+                stroke-width: 1.5px;
+                commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
+            }
+        }
+    }
+    t := TouchArea { clicked => { root.go(); } }
+}
+
+component GroupLabel inherits SectionLabel {
+    font-size: 11px;
+}
 
 export component MoreView inherits VerticalLayout {
+    property <bool> lang-open: false;
     spacing: 18px;
 
     ScreenTitle { text: Str.settings; }
 
-    Card {
-        border-radius: 22px;
-        HorizontalLayout {
-            padding: 17px;
-            spacing: 14px;
-            Rectangle {
-                width: 48px;
-                height: 48px;
-                border-radius: 24px;
-                background: @conic-gradient(Theme.a1 0deg, Theme.a2 180deg, Theme.a1 360deg);
-            }
+    // Connection
+    VerticalLayout {
+        spacing: 7px;
+        GroupLabel { text: Str.grp-conn; }
+        Card {
+            elevated: false;
+            border-radius: 16px;
             VerticalLayout {
-                alignment: center;
-                spacing: 4px;
-                Text { text: Str.account; font-size: 15px; font-weight: 700; color: Theme.t; }
-                Text { text: Str.plan; font-size: 12px; color: Theme.t2; }
+                NavRow {
+                    title: Str.proto-settings;
+                    value: AppState.proto-summary;
+                    go => { Screen.go(Page.proto); }
+                }
+                NavRow {
+                    title: Str.devices;
+                    value: AppState.dev-summary;
+                    top-border: true;
+                    go => { Screen.go(Page.devices); }
+                }
             }
         }
     }
 
-    LinkRow {
-        title: Str.proto-settings;
-        subtitle: AppState.proto-summary;
-        clicked => { Screen.go(Page.proto); }
+    // Appearance
+    VerticalLayout {
+        spacing: 7px;
+        GroupLabel { text: Str.grp-look; }
+        Card {
+            elevated: false;
+            border-radius: 16px;
+            VerticalLayout {
+                // Theme
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 10px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 10px;
+                    Text { text: Str.theme-lbl; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+                    Rectangle {
+                        border-radius: 10px;
+                        background: Theme.sf2;
+                        HorizontalLayout {
+                            padding: 2px;
+                            spacing: 2px;
+                            for seg in [
+                                { k: 1, name: Str.mode-light, dark: false },
+                                { k: 2, name: Str.mode-dark, dark: true },
+                            ]: Rectangle {
+                                property <bool> sel: seg.dark == Theme.dark;
+                                border-radius: 8px;
+                                background: sel ? Theme.sf : transparent;
+                                drop-shadow-blur: sel ? 3px : 0;
+                                drop-shadow-color: #00000022;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    padding-top: 8px;
+                                    padding-bottom: 8px;
+                                    Text { text: seg.name; font-size: 12px; font-weight: 600; color: sel ? Theme.t : Theme.t2; }
+                                }
+                                TouchArea { clicked => { AppState.set-mode(seg.dark ? ThemeMode.dark : ThemeMode.light); } }
+                            }
+                        }
+                    }
+                }
+                Rectangle { x: 16px; width: parent.width - 16px; height: 1px; background: Theme.ln; }
+                // Color
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 14px;
+                    padding-top: 10px;
+                    padding-bottom: 10px;
+                    spacing: 10px;
+                    Text { text: Str.color-lbl; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for p in AppState.palettes: Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            border-width: 2px;
+                            border-color: p.selected ? Theme.t : transparent;
+                            Rectangle {
+                                width: 20px;
+                                height: 20px;
+                                border-radius: 10px;
+                                clip: true;
+                                HorizontalLayout {
+                                    Rectangle { background: p.sw1; horizontal-stretch: 1; }
+                                    Rectangle { background: p.sw2; horizontal-stretch: 1; }
+                                }
+                            }
+                            TouchArea { clicked => { AppState.select-palette(p.id); } }
+                        }
+                    }
+                }
+                Rectangle { x: 16px; width: parent.width - 16px; height: 1px; background: Theme.ln; }
+                // Language
+                Rectangle {
+                    background: lang-t.pressed ? Theme.sf2 : transparent;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        padding-top: 15px;
+                        padding-bottom: 15px;
+                        spacing: 10px;
+                        Text { text: Str.language; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: Str.lang-name-self; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 10px;
+                                height: 8px;
+                                Path {
+                                    width: 10px;
+                                    height: 7px;
+                                    viewbox-width: 10;
+                                    viewbox-height: 7;
+                                    stroke: Theme.t2;
+                                    stroke-width: 1.5px;
+                                    commands: root.lang-open ? "M 1 6 L 5 2 L 9 6" : "M 1 1.5 L 5 5.5 L 9 1.5";
+                                }
+                            }
+                        }
+                    }
+                    lang-t := TouchArea { clicked => { root.lang-open = !root.lang-open; } }
+                }
+                if root.lang-open: VerticalLayout {
+                    for r in AppState.lang-rows: Rectangle {
+                        background: lt.pressed ? Theme.sf2 : transparent;
+                        Rectangle { x: 32px; y: 0; width: parent.width - 32px; height: 1px; background: Theme.ln; }
+                        HorizontalLayout {
+                            padding-left: 32px;
+                            padding-right: 16px;
+                            padding-top: 12px;
+                            padding-bottom: 12px;
+                            spacing: 10px;
+                            Text { text: r.name; font-size: 13.5px; font-weight: 500; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: r.sub; font-size: 11.5px; color: Theme.t2; vertical-alignment: center; }
+                            VerticalLayout {
+                                alignment: center;
+                                Path {
+                                    width: 12px;
+                                    height: 10px;
+                                    viewbox-width: 12;
+                                    viewbox-height: 10;
+                                    stroke: Theme.a1;
+                                    stroke-width: 2px;
+                                    stroke-line-cap: round;
+                                    stroke-line-join: round;
+                                    commands: "M 1.5 5 L 4.5 8 L 10.5 1.5";
+                                    opacity: r.checked ? 1.0 : 0.0;
+                                }
+                            }
+                        }
+                        lt := TouchArea { clicked => { AppState.select-lang-idx(r.id); root.lang-open = false; } }
+                    }
+                }
+            }
+        }
     }
 
-    LinkRow {
-        title: Str.devices;
-        subtitle: AppState.dev-summary;
-        clicked => { Screen.go(Page.devices); }
-    }
-
-    LinkRow {
-        title: Str.appearance;
-        subtitle: Str.palette-hint;
-        clicked => { Screen.go(Page.settings); }
-    }
-
-    LinkRow {
-        title: Str.diagnostics;
-        subtitle: Str.soon;
-        enabled: false;
-    }
-
-    LinkRow {
-        title: Str.about-app;
-        subtitle: "4.0.0";
-        clicked => { AppState.about-open(); }
+    // About
+    Card {
+        elevated: false;
+        border-radius: 16px;
+        NavRow {
+            title: Str.about-app;
+            value: "4.0.0";
+            go => { AppState.about-open(); }
+        }
     }
 }
