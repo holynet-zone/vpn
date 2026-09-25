@@ -9,6 +9,7 @@ import { ProtoView } from "../views/proto.slint";
 import { DevicesView } from "../views/devices.slint";
 import { SettingsView } from "../views/settings.slint";
 import { SplitView } from "../views/split.slint";
+import { AboutView } from "../views/about.slint";
 
 export component PageHost inherits VerticalLayout {
     if Screen.page == Page.home: HomeView {}
@@ -20,4 +21,5 @@ export component PageHost inherits VerticalLayout {
     if Screen.page == Page.devices: DevicesView {}
     if Screen.page == Page.settings: SettingsView {}
     if Screen.page == Page.split: SplitView {}
+    if Screen.page == Page.about: AboutView {}
 }

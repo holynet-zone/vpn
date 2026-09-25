@@ -1,5 +1,6 @@
 slint::include_modules!();
 
+mod about;
 mod controller;
 mod data;
 mod domain;

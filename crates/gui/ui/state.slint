@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -128,6 +128,21 @@ export global AppState {
     in-out property <string> split-query;
     in-out property <string> split-dom-in;
 
+    // About (isAbout)
+    in property <bool> about-doc-open: false;
+    in property <string> about-back-label;
+    in property <string> about-version-line;
+    in property <string> about-pitch;
+    in property <string> about-update-label;
+    in property <int> about-update-state: 0;
+    in property <string> gh-short;
+    in property <[LegalDocRow]> about-legal;
+    in property <string> doc-title;
+    in property <string> doc-updated;
+    in property <string> doc-tldr;
+    in property <string> doc-url;
+    in property <[DocSection]> doc-sections;
+
     in property <[ServerInfo]> servers;
     in property <[TransportInfo]> transports;
     in property <[CipherInfo]> ciphers;
@@ -196,4 +211,10 @@ export global AppState {
     callback split-add-domain();
     callback split-drop-domain(string);
     callback split-set-dom-in(string);
+
+    callback about-open();
+    callback about-check-update();
+    callback about-open-doc(int);
+    callback about-back();
+    callback open-url(string);
 }

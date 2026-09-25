@@ -56,8 +56,8 @@ export component MoreView inherits VerticalLayout {
     }
 
     LinkRow {
-        title: Str.about;
-        subtitle: Str.soon;
-        enabled: false;
+        title: Str.about-app;
+        subtitle: "4.0.0";
+        clicked => { AppState.about-open(); }
     }
 }

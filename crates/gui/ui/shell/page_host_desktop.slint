@@ -6,6 +6,7 @@ import { DesktopNodesView } from "../views/desktop_nodes.slint";
 import { DesktopShieldView } from "../views/desktop_shield.slint";
 import { DesktopMoreView } from "../views/desktop_more.slint";
 import { SplitView } from "../views/split.slint";
+import { AboutView } from "../views/about.slint";
 
 export component DesktopPageHost inherits VerticalLayout {
     property <bool> more-group: Screen.page == Page.more || Screen.page == Page.proto
@@ -16,5 +17,6 @@ export component DesktopPageHost inherits VerticalLayout {
     if Screen.page == Page.nodes: DesktopNodesView {}
     if Screen.page == Page.shield: DesktopShieldView {}
     if Screen.page == Page.split: SplitView {}
+    if Screen.page == Page.about: AboutView {}
     if root.more-group: DesktopMoreView {}
 }

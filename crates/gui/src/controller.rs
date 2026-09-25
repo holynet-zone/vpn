@@ -47,6 +47,9 @@ struct Core {
     globe_rot_x: f32,
     globe_rot_y: f32,
     globe_zoom: f32,
+    about_doc: Option<usize>,
+    about_upd: i32,
+    _upd_timer: Timer,
 }
 
 fn detect_lang() -> Lang {
@@ -96,6 +99,9 @@ impl Core {
             globe_rot_x: -15.0,
             globe_rot_y: -18.0,
             globe_zoom: 1.0,
+            about_doc: None,
+            about_upd: 0,
+            _upd_timer: Timer::default(),
         }
     }
 }
@@ -174,6 +180,27 @@ fn fmt_bytes(v: f64, lang: Lang) -> String {
     format!("{}{}", num, unit)
 }
 
+fn open_url(url: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        let _ = url;
+    }
+}
+
 fn render_all(app: &AppWindow, c: &Core) {
     let st = app.global::<AppState>();
     let lang = c.lang;
@@ -206,6 +233,7 @@ fn render_all(app: &AppWindow, c: &Core) {
     st.set_dev_summary(format!("3 {} 6", t4(lang, "of", "из", "/", "/")).into());
 
     crate::split::render(&st, lang, &c.split);
+    crate::about::render(&st, lang, c.about_doc, c.about_upd);
 
     st.set_banner_visible(c.banner.is_some());
     if let Some((a, b)) = &c.banner {
@@ -661,6 +689,83 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             }
         });
     }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_about_open(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.about_doc = None;
+                    c.about_upd = 0;
+                }
+                app.global::<Screen>().invoke_go(crate::Page::About);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_about_open_doc(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().about_doc = Some(i.max(0) as usize);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_about_back(move || {
+            if let Some(app) = w.upgrade() {
+                let go_more = {
+                    let mut c = cc.borrow_mut();
+                    if c.about_doc.is_some() {
+                        c.about_doc = None;
+                        false
+                    } else {
+                        true
+                    }
+                };
+                if go_more {
+                    app.global::<Screen>().invoke_go(crate::Page::More);
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_about_check_update(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    if c.about_upd == 1 {
+                        return;
+                    }
+                    c.about_upd = 1;
+                }
+                render_all(&app, &cc.borrow());
+                let w2 = w.clone();
+                let cc2 = cc.clone();
+                cc.borrow()._upd_timer.start(
+                    TimerMode::SingleShot,
+                    Duration::from_millis(1300),
+                    move || {
+                        if let Some(app) = w2.upgrade() {
+                            cc2.borrow_mut().about_upd = 2;
+                            render_all(&app, &cc2.borrow());
+                        }
+                    },
+                );
+            }
+        });
+    }
+    st.on_open_url(|url: SharedString| {
+        open_url(&url);
+    });
     {
         let w = window.as_weak();
         let cc = core.clone();

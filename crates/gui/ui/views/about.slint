@@ -1,0 +1,279 @@
+import { Theme } from "../theme.slint";
+import { Str } from "../strings.slint";
+import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
+import { Card } from "../widgets/card.slint";
+import { ScreenTitle, SectionLabel, BackButton } from "../widgets/tiles.slint";
+
+component Spinner inherits Rectangle {
+    width: 13px;
+    height: 13px;
+    property <float> ms: animation-tick() / 1ms;
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Theme.ln;
+    }
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        transform-rotation: root.ms * 0.6deg;
+        Rectangle {
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.a1;
+            x: parent.width / 2 - self.width / 2;
+            y: -1px;
+        }
+    }
+}
+
+component ExtRow inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+    in property <bool> top-border;
+    callback go();
+    background: t.pressed ? Theme.sf2 : transparent;
+    if root.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 15px;
+        padding-bottom: 15px;
+        spacing: 10px;
+        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: root.value; font-size: 11.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+        Text { text: "↗"; font-size: 13px; color: Theme.t2; vertical-alignment: center; }
+    }
+    t := TouchArea { clicked => { root.go(); } }
+}
+
+component NavRow inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+    in property <bool> top-border;
+    callback go();
+    background: t.pressed ? Theme.sf2 : transparent;
+    if root.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 15px;
+        padding-bottom: 15px;
+        spacing: 10px;
+        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: root.value; font-size: 11.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 7px;
+                height: 12px;
+                viewbox-width: 7;
+                viewbox-height: 12;
+                stroke: Theme.t2;
+                stroke-width: 1.5px;
+                commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
+            }
+        }
+    }
+    t := TouchArea { clicked => { root.go(); } }
+}
+
+export component AboutView inherits VerticalLayout {
+    spacing: 22px;
+
+    BackButton {
+        text: AppState.about-back-label;
+        clicked => { AppState.about-back(); }
+    }
+
+    if !AppState.about-doc-open: VerticalLayout {
+        spacing: 22px;
+
+        VerticalLayout {
+            spacing: 14px;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 84px;
+                    height: 84px;
+                    border-radius: 24px;
+                    background: @linear-gradient(145deg, Theme.a1, Theme.a2);
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 20px;
+                        border-width: 3.5px;
+                        border-color: Theme.on;
+                        y: parent.height / 2 - self.height / 2 - 3px;
+                    }
+                    Rectangle {
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: Theme.on;
+                        y: parent.height / 2 - self.height / 2 - 13px;
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout { alignment: center; Text { text: "HolyNet"; font-size: 26px; font-weight: 800; color: Theme.t; } }
+                HorizontalLayout { alignment: center; Text { text: AppState.about-version-line; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; } }
+            }
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 40px;
+                    border-radius: 999px;
+                    background: Theme.sf;
+                    border-width: 1px;
+                    border-color: AppState.about-update-state == 2 ? Theme.ok : Theme.ln;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        alignment: center;
+                        if AppState.about-update-state == 1: VerticalLayout { alignment: center; Spinner {} }
+                        if AppState.about-update-state == 2: VerticalLayout {
+                            alignment: center;
+                            Path {
+                                width: 11px;
+                                height: 9px;
+                                viewbox-width: 11;
+                                viewbox-height: 9;
+                                stroke: Theme.ok;
+                                stroke-width: 2px;
+                                stroke-line-cap: round;
+                                stroke-line-join: round;
+                                commands: "M 1.5 4.5 L 4.5 7.5 L 9.5 1.5";
+                            }
+                        }
+                        Text {
+                            text: AppState.about-update-label;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: AppState.about-update-state == 2 ? Theme.ok : Theme.t;
+                            vertical-alignment: center;
+                        }
+                    }
+                    TouchArea { clicked => { AppState.about-check-update(); } }
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                Text {
+                    text: AppState.about-pitch;
+                    font-size: 12.5px;
+                    color: Theme.t2;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    max-width: 300px;
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 7px;
+            SectionLabel { text: Str.about-grp-open; font-size: 11px; }
+            Card {
+                elevated: false;
+                border-radius: 16px;
+                VerticalLayout {
+                    ExtRow { title: Str.about-src; value: AppState.gh-short; go => { AppState.open-url("https://github.com/holynet/holynet"); } }
+                    ExtRow { title: Str.about-report; top-border: true; go => { AppState.open-url("https://github.com/holynet/holynet/issues/new/choose"); } }
+                    ExtRow { title: Str.about-changelog; top-border: true; go => { AppState.open-url("https://github.com/holynet/holynet/releases"); } }
+                    NavRow { title: Str.about-license; value: "GPL-3.0"; top-border: true; go => { AppState.about-open-doc(3); } }
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 7px;
+            SectionLabel { text: Str.about-grp-legal; font-size: 11px; }
+            Card {
+                elevated: false;
+                border-radius: 16px;
+                VerticalLayout {
+                    for d in AppState.about-legal: NavRow {
+                        title: d.title;
+                        top-border: d.top-border;
+                        go => { AppState.about-open-doc(d.key); }
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 6px;
+            HorizontalLayout { alignment: center; Text { text: Str.about-copyright; font-size: 11px; color: Theme.t2; horizontal-alignment: center; wrap: word-wrap; } }
+            HorizontalLayout {
+                alignment: center;
+                Text { text: "holynet.app"; font-size: 11px; font-weight: 600; font-family: "IBM Plex Mono"; color: Theme.a1; }
+                TouchArea { width: 90px; clicked => { AppState.open-url("https://holynet.app"); } }
+            }
+        }
+    }
+
+    if AppState.about-doc-open: VerticalLayout {
+        spacing: 22px;
+
+        VerticalLayout {
+            spacing: 8px;
+            ScreenTitle { text: AppState.doc-title; font-size: 26px; }
+            Text { text: AppState.doc-updated; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+        }
+
+        Rectangle {
+            border-radius: 16px;
+            background: Theme.sf2;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 8px;
+                Text { text: Str.about-tldr; font-size: 10px; font-weight: 700; font-family: "IBM Plex Mono"; color: Theme.a1; }
+                Text { text: AppState.doc-tldr; font-size: 14.5px; font-weight: 600; color: Theme.t; wrap: word-wrap; }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 22px;
+            for sec in AppState.doc-sections: HorizontalLayout {
+                spacing: 14px;
+                Text { text: sec.n; width: 20px; font-size: 11px; font-weight: 600; font-family: "IBM Plex Mono"; color: Theme.t2; }
+                VerticalLayout {
+                    spacing: 6px;
+                    horizontal-stretch: 1;
+                    Text { text: sec.h; font-size: 14.5px; font-weight: 700; color: Theme.t; wrap: word-wrap; }
+                    Text { text: sec.p; font-size: 13px; color: Theme.t2; wrap: word-wrap; }
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 8px;
+            Rectangle {
+                height: 48px;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: Theme.ln;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    Text { text: Str.about-full-github; font-size: 12.5px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
+                    Text { text: "↗"; font-size: 12px; color: Theme.t2; vertical-alignment: center; }
+                }
+                TouchArea { clicked => { AppState.open-url(AppState.doc-url); } }
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 5px;
+                Text { text: Str.about-questions; font-size: 11px; color: Theme.t2; }
+                Text { text: "legal@holynet.app"; font-size: 11px; color: Theme.a1; }
+                TouchArea { width: 140px; clicked => { AppState.open-url("mailto:legal@holynet.app"); } }
+            }
+        }
+    }
+}
