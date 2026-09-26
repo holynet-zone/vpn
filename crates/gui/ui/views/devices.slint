@@ -18,28 +18,6 @@ export component DevicesView inherits VerticalLayout {
 
     Card {
         border-radius: 20px;
-        HorizontalLayout {
-            padding: 16px;
-            spacing: 14px;
-            VerticalLayout {
-                alignment: center;
-                spacing: 4px;
-                Text { text: AppState.dev-summary; font-size: 13.5px; font-weight: 700; color: Theme.t; }
-                Text { text: Str.devices-hint; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
-            }
-            Rectangle {
-                width: 52px;
-                height: 52px;
-                border-radius: 12px;
-                background: @linear-gradient(45deg, Theme.sf2 0%, Theme.sf 50%, Theme.sf2 100%);
-                border-width: 1px;
-                border-color: Theme.ln;
-            }
-        }
-    }
-
-    Card {
-        border-radius: 20px;
         VerticalLayout {
             padding: 16px;
             spacing: 13px;
@@ -106,7 +84,7 @@ export component DevicesView inherits VerticalLayout {
                         spacing: 6px;
                         Text { text: "✓ " + Str.qr-parsed-title; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.ok; }
                         Text { text: AppState.qr-exit-line; font-size: 12.5px; font-weight: 700; color: Theme.t; }
-                        Text { text: AppState.qr-endpoint + " · noise-xk"; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+                        Text { text: AppState.qr-endpoint + " · noise-xk · …c8"; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
                         HorizontalLayout {
                             spacing: 7px;
                             Rectangle {

@@ -211,9 +211,6 @@ fn open_url(url: &str) {
     }
 }
 
-// In the unified route the hop chain is always editable. If the user starts
-// editing while an auto plan is shown, seed the manual hops from that plan so
-// index-based edits line up with what is on screen.
 fn seed_manual(c: &mut Core) {
     if !c.manual_mode {
         let exit = domain::resolve_exit(&c.space_id, &c.exit_id);
