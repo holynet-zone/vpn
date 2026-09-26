@@ -2,25 +2,25 @@ import { Theme } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
-import { ConnStatus, Page } from "../models.slint";
-import { Card, Chip } from "../widgets/card.slint";
+import { ConnStatus, Page, HomeHop } from "../models.slint";
+import { Card } from "../widgets/card.slint";
 import { Sparkline } from "../widgets/sparkline.slint";
-import { StatBox, IconTag } from "../widgets/tiles.slint";
-import { PillToggle } from "../widgets/pill_toggle.slint";
 
 component ConnectButton inherits Rectangle {
     in property <brush> status-color;
     property <bool> on: AppState.status == ConnStatus.on;
-    border-radius: 14px;
+    horizontal-stretch: 0;
+    height: 54px;
+    min-width: 190px;
+    border-radius: 16px;
     background: on ? Theme.sf : @linear-gradient(135deg, Theme.a1, Theme.a2);
     border-width: 1px;
     border-color: on ? Theme.ln : transparent;
     HorizontalLayout {
-        padding-left: 22px;
-        padding-right: 22px;
-        padding-top: 13px;
-        padding-bottom: 13px;
-        spacing: 11px;
+        padding-left: 26px;
+        padding-right: 26px;
+        spacing: 10px;
+        alignment: center;
         VerticalLayout {
             alignment: center;
             Rectangle { width: 9px; height: 9px; border-radius: 4.5px; background: root.status-color; }
@@ -28,7 +28,7 @@ component ConnectButton inherits Rectangle {
         Text {
             text: AppState.status == ConnStatus.on ? Str.btn-on
                 : AppState.status == ConnStatus.connecting ? "…" : Str.btn-off;
-            font-size: 13px;
+            font-size: 14.5px;
             font-weight: 700;
             color: on ? Theme.t : Theme.on;
             vertical-alignment: center;
@@ -37,252 +37,294 @@ component ConnectButton inherits Rectangle {
     TouchArea { clicked => { AppState.toggle-connect(); } }
 }
 
-component CompactToggle inherits Rectangle {
-    in property <string> name;
-    in property <bool> on;
-    callback toggled();
-    height: 26px;
+component DStat inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <length> value-size: 22px;
+    spacing: 8px;
+    Text { text: root.label; font-size: 12px; font-weight: 600; color: Theme.t2; }
+    Text { text: root.value; font-size: root.value-size; font-weight: 600; font-family: "IBM Plex Mono"; color: Theme.t; overflow: elide; }
+}
+
+component HopLine inherits VerticalLayout {
+    in property <HomeHop> hop;
+    property <brush> line-c: hop.line-kind == 0 ? Theme.ln : hop.line-kind == 1 ? Theme.a2 : Theme.a1;
+    spacing: 0px;
     HorizontalLayout {
-        spacing: 10px;
-        VerticalLayout {
-            alignment: center;
-            Text { text: root.name; font-size: 12px; font-weight: 500; color: Theme.t; }
-        }
-        Rectangle {}
-        VerticalLayout {
-            alignment: center;
-            PillToggle {
-                on: root.on;
-                track-width: 34px;
-                track-height: 20px;
-                toggled => { root.toggled(); }
+        spacing: 12px;
+        Rectangle {
+            width: 16px;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle { width: 2px; height: 22px; border-radius: 1px; background: root.line-c; }
             }
         }
+        Text { text: hop.seg; font-size: 10px; font-family: "IBM Plex Mono"; color: hop.seg-warn ? Theme.wn : Theme.t2; vertical-alignment: center; }
     }
-    TouchArea { clicked => { root.toggled(); } }
+    HorizontalLayout {
+        spacing: 12px;
+        Rectangle {
+            width: 16px;
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    if hop.is-exit: Rectangle {
+                        width: 14px;
+                        height: 14px;
+                        border-radius: 7px;
+                        background: Theme.a1;
+                        drop-shadow-blur: AppState.status == ConnStatus.on ? 6px : 0;
+                        drop-shadow-color: Theme.a1;
+                    }
+                    if !hop.is-exit: Rectangle {
+                        width: 10px;
+                        height: 10px;
+                        background: Theme.sf;
+                        border-width: 2px;
+                        border-color: Theme.a1;
+                        transform-rotation: 45deg;
+                    }
+                }
+            }
+        }
+        Text {
+            text: hop.label;
+            font-size: hop.is-exit ? 14px : 13px;
+            font-weight: hop.is-exit ? 700 : 500;
+            color: Theme.t;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        if hop.tag != "": Text { text: hop.tag; font-size: 8.5px; letter-spacing: 1px; font-family: "IBM Plex Mono"; color: Theme.a1; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        Text { text: hop.code; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+    }
 }
 
 export component DesktopHomeView inherits VerticalLayout {
     property <brush> status-color: AppState.status == ConnStatus.on ? Theme.ok
         : AppState.status == ConnStatus.connecting ? Theme.a1 : Theme.t2;
-    spacing: 18px;
+    property <brush> sh-color: AppState.sh-home-state == 2 ? Theme.ok
+        : AppState.sh-home-state == 1 ? Theme.wn : Theme.t2;
+    spacing: 16px;
 
-    HorizontalLayout {
+    Card {
         vertical-stretch: 0;
-        spacing: 20px;
+        border-radius: 24px;
         VerticalLayout {
-            horizontal-stretch: 1;
-            spacing: 6px;
-            Text {
-                text: AppState.status == ConnStatus.on ? Str.status-on
-                    : AppState.status == ConnStatus.connecting ? Str.status-connecting : Str.status-off;
-                font-size: 10.5px;
-                font-weight: 500;
-                letter-spacing: 1.4px;
-                color: root.status-color;
-                font-family: "IBM Plex Mono";
+            padding: 28px;
+            spacing: 22px;
+            HorizontalLayout {
+                spacing: 24px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 10px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.status-color; }
+                        }
+                        Text {
+                            text: AppState.status == ConnStatus.on ? Str.status-on
+                                : AppState.status == ConnStatus.connecting ? Str.status-connecting : Str.status-off;
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            color: Theme.t2;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    Text {
+                        text: AppState.status == ConnStatus.on ? Str.title-on
+                            : AppState.status == ConnStatus.connecting ? Str.title-connecting : Str.title-off;
+                        font-size: 34px;
+                        font-weight: 800;
+                        letter-spacing: -1.1px;
+                        color: Theme.t;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: AppState.status == ConnStatus.on ? AppState.status-sub
+                            : AppState.status == ConnStatus.connecting ? Str.sub-connecting : Str.sub-off;
+                        font-size: 14px;
+                        color: Theme.t2;
+                        wrap: word-wrap;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    ConnectButton { status-color: root.status-color; }
+                }
             }
-            Text {
-                text: AppState.status == ConnStatus.on ? Str.title-on
-                    : AppState.status == ConnStatus.connecting ? Str.title-connecting : Str.title-off;
-                font-size: 27px;
-                font-weight: 800;
-                letter-spacing: -0.8px;
-                color: Theme.t;
+            if AppState.status == ConnStatus.on: Rectangle {
+                height: 1px;
+                background: Theme.ln;
             }
-            Text {
-                text: AppState.status == ConnStatus.on ? AppState.status-sub
-                    : AppState.status == ConnStatus.connecting ? Str.sub-connecting : Str.sub-off;
-                font-size: 13px;
-                color: Theme.t2;
-                wrap: word-wrap;
+            if AppState.status == ConnStatus.on: HorizontalLayout {
+                spacing: 20px;
+                DStat { label: Str.down; value: AppState.down-text; }
+                Rectangle { width: 1px; background: Theme.ln; }
+                DStat { label: Str.up; value: AppState.up-text; }
+                Rectangle { width: 1px; background: Theme.ln; }
+                DStat { label: Str.cipher-short; value: AppState.cipher-name; value-size: 14px; }
             }
-        }
-        VerticalLayout {
-            alignment: start;
-            ConnectButton { status-color: root.status-color; }
         }
     }
 
     HorizontalLayout {
         vertical-stretch: 1;
-        min-height: 430px;
         spacing: 16px;
 
         Card {
-            horizontal-stretch: 135;
+            horizontal-stretch: 1;
+            border-radius: 24px;
             VerticalLayout {
-                padding: 20px;
-                spacing: 14px;
+                padding: 22px;
+                spacing: 0px;
                 HorizontalLayout {
-                    vertical-stretch: 0;
-                    Text { text: Str.live-traffic; font-size: 12px; font-weight: 600; color: Theme.t2; }
-                    Rectangle {}
-                    Text { text: AppState.speed-now; font-size: 11px; color: Theme.t2; font-family: "IBM Plex Mono"; }
+                    spacing: 8px;
+                    Text { text: Str.route; font-size: 12px; font-weight: 600; color: Theme.t2; horizontal-stretch: 1; vertical-alignment: center; }
+                    Rectangle {
+                        border-radius: 999px;
+                        background: Theme.sf2;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            padding-top: 5px;
+                            padding-bottom: 5px;
+                            Text { text: AppState.route-mode-label; font-size: 9px; letter-spacing: 1px; font-family: "IBM Plex Mono"; color: AppState.route-manual ? Theme.a1 : Theme.ok; }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    padding-top: 14px;
+                    HorizontalLayout {
+                        spacing: 5px;
+                        alignment: start;
+                        Text { text: AppState.hr-total; font-size: 40px; font-weight: 600; letter-spacing: -1.6px; font-family: "IBM Plex Mono"; color: Theme.t; }
+                        Text { text: AppState.hr-unit; font-size: 13px; color: Theme.t2; vertical-alignment: bottom; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: AppState.hr-meta; font-size: 11px; color: Theme.t2; horizontal-alignment: right; vertical-alignment: center; }
+                }
+                HorizontalLayout {
+                    padding-top: 16px;
+                    spacing: 3px;
+                    height: 6px;
+                    for sg in AppState.hr-segs: Rectangle {
+                        horizontal-stretch: sg.w;
+                        min-width: 10px;
+                        border-radius: 3px;
+                        background: sg.kind == 0 ? Theme.ln : sg.kind == 1 ? Theme.a2 : Theme.a1;
+                    }
                 }
                 Rectangle {
-                    vertical-stretch: 1;
-                    min-height: 96px;
-                    Sparkline {
-                        width: 100%;
-                        height: 100%;
-                        values: AppState.spark;
-                        active: AppState.status == ConnStatus.on;
-                    }
-                    if AppState.status == ConnStatus.off: Text {
-                        text: Str.no-data;
-                        color: Theme.t2;
-                        font-size: 10.5px;
-                        letter-spacing: 1.4px;
-                        font-family: "IBM Plex Mono";
-                    }
+                    height: 18px;
+                    Rectangle { height: 1px; background: Theme.ln; y: 9px; }
                 }
-                HorizontalLayout {
-                    vertical-stretch: 0;
-                    spacing: 10px;
-                    StatBox { label: Str.down; value: AppState.down-text; value-size: 16px; }
-                    StatBox { label: Str.up; value: AppState.up-text; value-size: 16px; }
-                    StatBox { label: Str.cipher-short; value: AppState.cipher-name; value-size: 12px; }
+                VerticalLayout {
+                    spacing: 0px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Rectangle {
+                            width: 16px;
+                            HorizontalLayout {
+                                alignment: center;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle { width: 10px; height: 10px; border-radius: 5px; border-width: 2px; border-color: Theme.t2; }
+                                }
+                            }
+                        }
+                        Text { text: Str.you-label; font-size: 13px; font-weight: 600; color: Theme.t2; horizontal-stretch: 1; vertical-alignment: center; }
+                        Text { text: AppState.hr-via; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
+                    }
+                    for hop in AppState.hr-hops: HopLine { hop: hop; }
                 }
+                Rectangle { vertical-stretch: 1; }
             }
+            TouchArea { clicked => { Screen.go(Page.route); } }
         }
 
         VerticalLayout {
-            horizontal-stretch: 100;
-            spacing: 12px;
-
-            Card {
-                vertical-stretch: 0;
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 10px;
-                    HorizontalLayout {
-                        spacing: 12px;
-                        IconTag { text: AppState.exit-code; width: 38px; height: 38px; }
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 3px;
-                            Text { text: Str.exit-node; font-size: 9.5px; letter-spacing: 1px; color: Theme.t2; font-family: "IBM Plex Mono"; }
-                            Text { text: AppState.exit-city; font-size: 13.5px; font-weight: 700; color: Theme.t; }
-                            Text { text: AppState.exit-meta; font-size: 11px; color: Theme.t2; font-family: "IBM Plex Mono"; }
-                        }
-                        Rectangle {}
-                        VerticalLayout {
-                            alignment: center;
-                            Text { text: AppState.exit-ping; font-size: 11px; color: Theme.ok; font-family: "IBM Plex Mono"; }
-                        }
-                    }
-                    Rectangle { height: 1px; background: Theme.ln; }
-                    HorizontalLayout {
-                        spacing: 9px;
-                        Text { text: AppState.route-mode-label; font-size: 10px; font-weight: 600; color: AppState.route-manual ? Theme.a1 : Theme.ok; font-family: "IBM Plex Mono"; vertical-alignment: center; }
-                        Text { text: AppState.hops-count; font-size: 11px; color: Theme.t2; vertical-alignment: center; horizontal-stretch: 1; }
-                        Text { text: AppState.path-sum; font-size: 11px; color: Theme.ok; font-family: "IBM Plex Mono"; vertical-alignment: center; }
-                    }
-                }
-                TouchArea { clicked => { Screen.go(Page.route); } }
-            }
-
-            Card {
-                vertical-stretch: 0;
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 10px;
-                    HorizontalLayout {
-                        Text { text: Str.transport; font-size: 12px; font-weight: 600; color: Theme.t2; }
-                        Rectangle {}
-                        TouchArea {
-                            clicked => { AppState.set-auto-transport(!AppState.auto-transport); }
-                            Chip {
-                                text: AppState.auto-transport ? Str.auto-pick : Str.manual-pick;
-                                text-color: AppState.auto-transport ? Theme.a1 : Theme.t2;
-                                stroke: AppState.auto-transport ? Theme.a1 : Theme.ln;
-                            }
-                        }
-                    }
-                    Rectangle {
-                        height: 42px;
-                        border-radius: 13px;
-                        background: Theme.sf2;
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            spacing: 11px;
-                            VerticalLayout {
-                                alignment: center;
-                                Text { text: AppState.transport-code; font-size: 11px; font-weight: 700; color: root.status-color; font-family: "IBM Plex Mono"; }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                Text { text: AppState.transport-title; font-size: 11.5px; font-weight: 500; color: Theme.t; overflow: elide; }
-                            }
-                            Rectangle {}
-                            VerticalLayout {
-                                alignment: center;
-                                Path {
-                                    width: 10px;
-                                    height: 6px;
-                                    viewbox-width: 10;
-                                    viewbox-height: 6;
-                                    stroke: Theme.t2;
-                                    stroke-width: 1.5px;
-                                    commands: "M 1 1 L 5 5 L 9 1";
-                                }
-                            }
-                        }
-                        TouchArea { clicked => { Screen.desk-transport-open = !Screen.desk-transport-open; } }
-                    }
-                    if Screen.desk-transport-open: VerticalLayout {
-                        spacing: 6px;
-                        for tr in AppState.transports: Rectangle {
-                            height: 38px;
-                            border-radius: 11px;
-                            background: tr.selected ? Theme.sf2 : transparent;
-                            border-width: 1px;
-                            border-color: tr.selected ? Theme.a1 : Theme.ln;
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 10px;
-                                spacing: 9px;
-                                VerticalLayout {
-                                    alignment: center;
-                                    Text { text: tr.name; width: 34px; font-size: 10px; font-weight: 600; color: tr.selected ? Theme.a1 : Theme.t2; font-family: "IBM Plex Mono"; }
-                                }
-                                VerticalLayout {
-                                    alignment: center;
-                                    Text { text: tr.title; font-size: 11px; font-weight: 500; color: Theme.t; overflow: elide; }
-                                }
-                                Rectangle {}
-                                VerticalLayout {
-                                    alignment: center;
-                                    Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: tr.selected ? Theme.a1 : transparent; }
-                                }
-                            }
-                            TouchArea {
-                                clicked => {
-                                    AppState.select-transport(tr.id);
-                                    Screen.desk-transport-open = false;
-                                }
-                            }
-                        }
-                    }
-                    Text { text: AppState.transport-desc; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
-                }
-            }
+            horizontal-stretch: 1;
+            spacing: 16px;
 
             Card {
                 vertical-stretch: 1;
+                border-radius: 24px;
                 VerticalLayout {
-                    padding: 16px;
+                    padding: 22px;
                     spacing: 14px;
-                    alignment: start;
-                    Text { text: Str.protection; font-size: 12px; font-weight: 600; color: Theme.t2; }
-                    for tg in AppState.toggles: CompactToggle {
-                        name: tg.name;
-                        on: tg.on;
-                        toggled => { AppState.flip-toggle(tg.id); }
+                    HorizontalLayout {
+                        Text { text: Str.live-traffic; font-size: 12px; font-weight: 600; color: Theme.t2; horizontal-stretch: 1; }
+                        Text { text: AppState.speed-now; font-size: 13px; color: Theme.t; font-family: "IBM Plex Mono"; }
+                    }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        min-height: 110px;
+                        Sparkline {
+                            width: 100%;
+                            height: 100%;
+                            values: AppState.spark;
+                            active: AppState.status == ConnStatus.on;
+                        }
+                        if AppState.status == ConnStatus.off: Text {
+                            text: Str.no-data;
+                            color: Theme.t2;
+                            font-size: 12px;
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle { width: 6px; height: 6px; border-radius: 3px; background: root.status-color; }
+                        }
+                        Text { text: AppState.cipher-name; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
                     }
                 }
+            }
+
+            Card {
+                vertical-stretch: 0;
+                border-radius: 24px;
+                HorizontalLayout {
+                    padding: 20px;
+                    padding-left: 22px;
+                    padding-right: 22px;
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            border-radius: 20px;
+                            border-width: 2px;
+                            border-color: root.sh-color;
+                            if AppState.sh-home-state == 2: Path {
+                                width: 16px;
+                                height: 16px;
+                                stroke: Theme.ok;
+                                stroke-width: 2.2px;
+                                stroke-line-cap: round;
+                                commands: "M 3 8.5 L 6.5 12 L 13 4.5";
+                            }
+                            if AppState.sh-home-state == 1: Text { text: "!"; font-size: 17px; font-weight: 800; color: Theme.wn; }
+                            if AppState.sh-home-state == 0: Rectangle { width: 10px; height: 10px; border-radius: 5px; background: Theme.t2; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        horizontal-stretch: 1;
+                        Text { text: AppState.sh-home-title; font-size: 15px; font-weight: 700; color: Theme.t; }
+                        Text { text: AppState.sh-home-sub; font-size: 12px; color: Theme.t2; }
+                    }
+                }
+                TouchArea { clicked => { Screen.go(Page.shield); } }
             }
         }
     }

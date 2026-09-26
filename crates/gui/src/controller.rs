@@ -427,7 +427,63 @@ fn render_shield(app: &AppWindow, c: &Core) {
     }
     st.set_sh_has_issues(!issues.is_empty());
     st.set_sh_issue_count(issues.len().to_string().into());
+    let n_issues = issues.len();
     st.set_sh_issues(model(issues));
+
+    let home_state = if c.status == ConnStatus::Off {
+        0
+    } else if n_issues > 0 {
+        1
+    } else {
+        2
+    };
+    st.set_sh_home_state(home_state);
+    st.set_sh_home_title(
+        match home_state {
+            0 => t4(
+                lang,
+                "Protection off",
+                "Защита выключена",
+                "防护已关闭",
+                "保護オフ",
+            ),
+            1 => t4(
+                lang,
+                "Needs attention",
+                "Требует внимания",
+                "需要注意",
+                "要確認",
+            ),
+            _ => t4(
+                lang,
+                "You are protected",
+                "Вы защищены",
+                "已受保护",
+                "保護されています",
+            ),
+        }
+        .into(),
+    );
+    let sub = if n_issues > 0 {
+        match lang {
+            Lang::Ru => format!("{} к исправлению", n_issues),
+            Lang::Zh => format!("{} 项待处理", n_issues),
+            Lang::Ja => format!("{} 件の対応", n_issues),
+            _ => format!("{} to fix", n_issues),
+        }
+    } else if home_state == 0 {
+        t4(
+            lang,
+            "Connect to protect traffic",
+            "Подключитесь для защиты",
+            "连接以保护流量",
+            "接続して保護",
+        )
+        .to_string()
+    } else {
+        t4(lang, "No issues", "Проблем нет", "无问题", "問題なし").to_string()
+    };
+    st.set_sh_home_sub(sub.into());
 }
 
 fn render_globe(app: &AppWindow, c: &Core) {
