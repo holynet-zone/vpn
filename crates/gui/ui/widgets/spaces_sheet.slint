@@ -1,6 +1,7 @@
 import { Theme } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
 import { AddStep } from "../models.slint";
 import { Card } from "card.slint";
 import { GradBtn, GhostBtn } from "../views/route.slint";
@@ -24,8 +25,8 @@ export component SpacesSheet inherits Rectangle {
 
     Rectangle {
         x: (parent.width - self.width) / 2;
-        y: parent.height - self.height;
-        width: min(parent.width, 460px);
+        y: Screen.wide ? (parent.height - self.height) / 2 : parent.height - self.height;
+        width: min(parent.width, Screen.wide ? 420px : 460px);
         height: min(parent.height * 0.82, content.preferred-height + 36px);
         background: Theme.bg;
         border-radius: 26px;

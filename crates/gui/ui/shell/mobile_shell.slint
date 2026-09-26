@@ -13,7 +13,7 @@ import { BouncyScroll } from "../widgets/bouncy_scroll.slint";
 export component MobileShell inherits Rectangle {
     background: @linear-gradient(180deg, Theme.bg 0%, Theme.page 100%);
     property <bool> more-active: Screen.page == Page.more || Screen.page == Page.proto
-        || Screen.page == Page.devices || Screen.page == Page.settings;
+        || Screen.page == Page.devices || Screen.page == Page.about;
 
     if AppState.cold: BouncyScroll {
         show-scrollbar: !Screen.mobile-target;

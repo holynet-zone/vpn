@@ -12,7 +12,7 @@ import { ColdView } from "../views/cold.slint";
 export component DesktopShell inherits Rectangle {
     background: @linear-gradient(180deg, Theme.bg 0%, Theme.page 100%);
     property <bool> settings-active: Screen.page == Page.more || Screen.page == Page.proto
-        || Screen.page == Page.devices || Screen.page == Page.settings || Screen.page == Page.about;
+        || Screen.page == Page.devices || Screen.page == Page.about;
 
     if AppState.cold: HorizontalLayout {
         alignment: center;
