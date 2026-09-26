@@ -1,7 +1,7 @@
 use crate::Lang;
 use crate::{
-    AddHopChip, EdgeRow, Factor, GlobeNode, HomeHop, HomeSeg, NodeRow, RouteHop, SpaceRow,
-    Visibility,
+    AddHopChip, EdgeRow, ExtraExit, Factor, GlobeNode, HomeHop, HomeSeg, NodeRow, PickMode,
+    RouteHop, SpaceRow, Visibility,
 };
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -1144,11 +1144,122 @@ pub fn topo_counts(lang: Lang, space_id: &str, age: u32) -> String {
     }
 }
 
-pub fn mode_label(lang: Lang, manual: bool) -> String {
-    if manual {
-        t4(lang, "MANUAL", "ВРУЧНУЮ", "手动", "手動").to_string()
+pub fn mode_label(lang: Lang, optimal: bool) -> String {
+    if optimal {
+        t4(lang, "OPTIMAL", "ОПТИМАЛЬНЫЙ", "最优", "最適").to_string()
     } else {
-        t4(lang, "AUTO", "АВТО", "自动", "自動").to_string()
+        t4(lang, "MANUAL", "РУЧНОЙ", "手动", "手動").to_string()
+    }
+}
+
+pub fn extra_exits(
+    space_id: &str,
+    lang: Lang,
+    relays: &[&str],
+    exits: &[String],
+) -> ModelRc<ExtraExit> {
+    let rows = exits
+        .iter()
+        .filter(|id| in_space(space_id, id) && !relays.iter().any(|r| r == &id.as_str()))
+        .map(|id| {
+            let n = node(id);
+            let mut chain: Vec<&str> = relays.to_vec();
+            chain.push(n.id);
+            let cost = path_cost(space_id, &chain);
+            ExtraExit {
+                id: s(n.id),
+                code: s(n.code),
+                label: s(tr(lang, n.label)),
+                lat: s(&format!("{}{}", cost, ms(lang))),
+            }
+        })
+        .collect();
+    model(rows)
+}
+
+pub fn exits_count(lang: Lang, n: usize) -> String {
+    match lang {
+        Lang::Ru => {
+            let word = if n == 1 {
+                "выход"
+            } else if n < 5 {
+                "выхода"
+            } else {
+                "выходов"
+            };
+            format!("{} {}", n, word)
+        }
+        Lang::Zh => format!("{} 出口", n),
+        Lang::Ja => format!("{} 出口", n),
+        _ => format!("{} exit{}", n, if n == 1 { "" } else { "s" }),
+    }
+}
+
+pub fn add_free_count(space_id: &str, lang: Lang, exit: &str, path: &[&str]) -> String {
+    let n = space(space_id)
+        .nodes
+        .iter()
+        .map(|id| node(id))
+        .filter(|nd| nd.rtt >= 0 && nd.id != exit && !path.contains(&nd.id))
+        .count();
+    match lang {
+        Lang::Ru => format!("свободно {}", n),
+        Lang::Zh => format!("可用 {}", n),
+        Lang::Ja => format!("空き {}", n),
+        _ => format!("{} free", n),
+    }
+}
+
+pub fn nodes_title(lang: Lang, pick: PickMode) -> String {
+    match pick {
+        PickMode::Exit2 => t4(lang, "Add exit", "Добавить выход", "添加出口", "出口を追加"),
+        PickMode::Hop => t4(lang, "Add hop", "Добавить хоп", "添加跳点", "ホップを追加"),
+        PickMode::Rep => t4(
+            lang,
+            "Replace hop",
+            "Заменить хоп",
+            "替换跳点",
+            "ホップを置換",
+        ),
+        _ => t4(lang, "Nodes", "Узлы", "节点", "ノード"),
+    }
+    .to_string()
+}
+
+pub fn pick_hint(lang: Lang, pick: PickMode, pick_idx: usize, exit_code: &str) -> String {
+    match pick {
+        PickMode::Exit2 => t4(
+            lang,
+            "Pick another exit node — it will run alongside the current one.",
+            "Выберите ещё один exit-узел — он будет работать одновременно с текущим.",
+            "选择另一个出口节点 — 它将与当前节点同时运行。",
+            "もう一つ出口ノードを選択 — 現在のものと同時に動作します。",
+        )
+        .to_string(),
+        PickMode::Rep => {
+            let n = pick_idx + 1;
+            match lang {
+                Lang::Ru => format!("Выберите узел вместо хопа {}.", n),
+                Lang::Zh => format!("选择节点替换第 {} 跳。", n),
+                Lang::Ja => format!("ホップ {} と置き換えるノードを選択。", n),
+                _ => format!("Pick a node to replace hop {}.", n),
+            }
+        }
+        _ => match lang {
+            Lang::Ru => format!(
+                "Выберите узел — он встанет в цепочку перед exit {}.",
+                exit_code
+            ),
+            Lang::Zh => format!("选择一个节点，它将插入出口 {} 之前。", exit_code),
+            Lang::Ja => format!(
+                "ノードを選択すると、出口 {} の前に挿入されます。",
+                exit_code
+            ),
+            _ => format!(
+                "Pick a node — it goes into the chain before exit {}.",
+                exit_code
+            ),
+        },
     }
 }
 

@@ -1,4 +1,4 @@
-import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, GlobeNode, GlobeArc, GlobeDot, RouteTab, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset, LangRow, ShieldIssue, HomeSeg, HomeHop } from "models.slint";
+import { ConnStatus, ServerInfo, TransportInfo, CipherInfo, ChainStep, ToggleInfo, SplitAppRow, SplitModeRow, SplitDomainRow, SplitChip, DeviceInfo, KeyValue, PaletteCard, NodeRow, RouteHop, EdgeRow, PrioTab, RouteSeg, SpaceRow, Visibility, Factor, AddHopChip, ExtraExit, GlobeNode, GlobeArc, GlobeDot, RouteTab, PickMode, AddStep, LegalDocRow, DocSection, ProtoRow, ProtoOpt, MtuPreset, LangRow, ShieldIssue, HomeSeg, HomeHop } from "models.slint";
 import { ThemeMode, Lang } from "theme.slint";
 
 export global AppState {
@@ -39,6 +39,19 @@ export global AppState {
     in property <bool> can-add-hop: true;
     in property <string> empty-title;
     in property <string> empty-body;
+    in property <string> mode-color-tag;
+    in property <bool> mode-optimal: true;
+    in property <bool> has-extra-exits: false;
+    in property <[ExtraExit]> extra-exits;
+    in property <string> exits-count;
+    in property <string> add-free-count;
+
+    // Node picker (isServers pickFor)
+    in property <PickMode> pick-mode: PickMode.none;
+    in property <bool> pick-active: false;
+    in property <bool> pick-rep: false;
+    in property <string> nodes-title;
+    in property <string> pick-hint;
 
     in property <[NodeRow]> node-list;
     in property <[EdgeRow]> edge-list;
@@ -240,6 +253,12 @@ export global AppState {
     callback reprobe();
     callback pick-node(string);
     callback select-exit(string);
+    callback open-add-hop();
+    callback open-add-exit();
+    callback cancel-pick();
+    callback remove-picked();
+    callback hop-replace(int);
+    callback drop-exit(string);
     callback globe-drag(float, float);
     callback globe-zoom(float);
     callback globe-tap(float, float);

@@ -9,8 +9,8 @@ use crate::data;
 use crate::domain;
 use crate::globe;
 use crate::{
-    Accent, AddStep, AppState, AppWindow, ConnStatus, Lang, PrioTab, RouteTab, Screen, Str, Theme,
-    ThemeMode,
+    Accent, AddStep, AppState, AppWindow, ConnStatus, Lang, PickMode, PrioTab, RouteTab, Screen,
+    Str, Theme, ThemeMode,
 };
 
 const SPARK_LEN: usize = 34;
@@ -35,6 +35,9 @@ struct Core {
     joined: Vec<String>,
     exit_id: String,
     hops: Vec<String>,
+    exits: Vec<String>,
+    pick_for: PickMode,
+    pick_idx: usize,
     prio: i32,
     route_tab: RouteTab,
     manual_mode: bool,
@@ -89,6 +92,9 @@ impl Core {
             joined: vec!["core".into()],
             exit_id: "us".into(),
             hops: vec!["nl".into(), "de".into()],
+            exits: vec![],
+            pick_for: PickMode::None,
+            pick_idx: 0,
             prio: 1,
             route_tab: RouteTab::Auto,
             manual_mode: false,
@@ -202,6 +208,19 @@ fn open_url(url: &str) {
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         let _ = url;
+    }
+}
+
+// In the unified route the hop chain is always editable. If the user starts
+// editing while an auto plan is shown, seed the manual hops from that plan so
+// index-based edits line up with what is on screen.
+fn seed_manual(c: &mut Core) {
+    if !c.manual_mode {
+        let exit = domain::resolve_exit(&c.space_id, &c.exit_id);
+        let mut plan = domain::plan(&c.space_id, exit, c.prio);
+        plan.pop();
+        c.hops = plan.iter().map(|s| s.to_string()).collect();
+        c.manual_mode = true;
     }
 }
 
@@ -498,7 +517,9 @@ fn render_route(app: &AppWindow, c: &Core) {
     st.set_path_estimated(miss > 0);
     st.set_path_warn(domain::path_warn(lang).into());
     st.set_hops_count(domain::hops_count(lang, path.len()).into());
-    st.set_route_mode_label(domain::mode_label(lang, c.manual_mode).into());
+    let optimal = !c.manual_mode || auto_path == manual_path;
+    st.set_mode_optimal(optimal);
+    st.set_route_mode_label(domain::mode_label(lang, optimal).into());
 
     let (hr_total, hr_unit, hr_meta, hr_via, hr_segs, hr_hops) = domain::home_route(
         space,
@@ -560,15 +581,41 @@ fn render_route(app: &AppWindow, c: &Core) {
         domain::plan_reason(lang, c.prio, auto_path.len(), domain::node_count(space)).into(),
     );
 
-    let manual_view: Vec<&str> = manual_path.to_vec();
-    st.set_draft_hops(domain::draft_hops(space, lang, &manual_view));
-    st.set_add_hop_list(domain::add_hop_list(space, lang, exit, &c.hops));
-    let relays = manual_path.len().saturating_sub(1);
+    let eff: Vec<&str> = if c.manual_mode {
+        manual_path.to_vec()
+    } else {
+        auto_path.to_vec()
+    };
+    let eff_relays: Vec<String> = eff[..eff.len().saturating_sub(1)]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    st.set_draft_hops(domain::draft_hops(space, lang, &eff));
+    st.set_add_hop_list(domain::add_hop_list(space, lang, exit, &eff_relays));
+    let relays = eff.len().saturating_sub(1);
     st.set_no_relays(relays == 0);
     st.set_has_relays(relays > 0);
-    st.set_can_add_hop(manual_path.len() < domain::MAX_HOPS);
+    st.set_can_add_hop(eff.len() < domain::MAX_HOPS);
     st.set_empty_title(domain::empty_title(lang).into());
     st.set_empty_body(domain::empty_body(lang).into());
+
+    let eff_relay_slice: Vec<&str> = eff[..eff.len().saturating_sub(1)].to_vec();
+    let extra: Vec<String> = c
+        .exits
+        .iter()
+        .filter(|id| !eff.iter().any(|p| p == &id.as_str()))
+        .cloned()
+        .collect();
+    st.set_extra_exits(domain::extra_exits(space, lang, &eff_relay_slice, &extra));
+    st.set_has_extra_exits(!extra.is_empty());
+    st.set_exits_count(domain::exits_count(lang, extra.len() + 1).into());
+    st.set_add_free_count(domain::add_free_count(space, lang, exit, &eff).into());
+
+    st.set_pick_mode(c.pick_for);
+    st.set_pick_active(c.pick_for != PickMode::None);
+    st.set_pick_rep(c.pick_for == PickMode::Rep);
+    st.set_nodes_title(domain::nodes_title(lang, c.pick_for).into());
+    st.set_pick_hint(domain::pick_hint(lang, c.pick_for, c.pick_idx, &ev.code).into());
 
     st.set_node_list(domain::node_rows(
         space, lang, &c.query, exit, &c.hops, c.probing,
@@ -1243,10 +1290,10 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 {
                     let mut c = cc.borrow_mut();
+                    seed_manual(&mut c);
                     let i = i as usize;
                     if i > 0 && i < c.hops.len() {
                         c.hops.swap(i - 1, i);
-                        c.manual_mode = true;
                     }
                 }
                 render_all(&app, &cc.borrow());
@@ -1260,10 +1307,10 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 {
                     let mut c = cc.borrow_mut();
+                    seed_manual(&mut c);
                     let i = i as usize;
                     if i + 1 < c.hops.len() {
                         c.hops.swap(i, i + 1);
-                        c.manual_mode = true;
                     }
                 }
                 render_all(&app, &cc.borrow());
@@ -1277,10 +1324,10 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 {
                     let mut c = cc.borrow_mut();
+                    seed_manual(&mut c);
                     let i = i as usize;
                     if i < c.hops.len() {
                         c.hops.remove(i);
-                        c.manual_mode = true;
                     }
                 }
                 render_all(&app, &cc.borrow());
@@ -1289,9 +1336,103 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
     }
     {
         let w = window.as_weak();
+        let cc = core.clone();
         st.on_hop_swap(move || {
             if let Some(app) = w.upgrade() {
+                cc.borrow_mut().pick_for = PickMode::None;
                 app.global::<Screen>().invoke_go(crate::Page::Nodes);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_open_add_hop(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.pick_for = PickMode::Hop;
+                    c.query.clear();
+                }
+                app.global::<Screen>().invoke_go(crate::Page::Nodes);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_open_add_exit(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.pick_for = PickMode::Exit2;
+                    c.query.clear();
+                }
+                app.global::<Screen>().invoke_go(crate::Page::Nodes);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_hop_replace(move |i: i32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    seed_manual(&mut c);
+                    c.pick_for = PickMode::Rep;
+                    c.pick_idx = i as usize;
+                    c.query.clear();
+                }
+                app.global::<Screen>().invoke_go(crate::Page::Nodes);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_cancel_pick(move || {
+            if let Some(app) = w.upgrade() {
+                cc.borrow_mut().pick_for = PickMode::None;
+                app.global::<Screen>().invoke_go(crate::Page::Route);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_remove_picked(move || {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    seed_manual(&mut c);
+                    let idx = c.pick_idx;
+                    if idx < c.hops.len() {
+                        c.hops.remove(idx);
+                    }
+                    c.manual_mode = true;
+                    c.pick_for = PickMode::None;
+                }
+                app.global::<Screen>().invoke_go(crate::Page::Route);
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        st.on_drop_exit(move |id: SharedString| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    c.exits.retain(|e| e != id.as_str());
+                }
+                render_all(&app, &cc.borrow());
             }
         });
     }
@@ -1302,6 +1443,7 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 {
                     let mut c = cc.borrow_mut();
+                    seed_manual(&mut c);
                     c.hops.push(id.to_string());
                     let cap = domain::MAX_HOPS - 1;
                     if c.hops.len() > cap {
@@ -1368,7 +1510,49 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
         let cc = core.clone();
         st.on_select_exit(move |id: SharedString| {
             if let Some(app) = w.upgrade() {
-                cc.borrow_mut().exit_id = id.to_string();
+                {
+                    let id = id.to_string();
+                    let mut c = cc.borrow_mut();
+                    match c.pick_for {
+                        PickMode::Hop => {
+                            seed_manual(&mut c);
+                            let exit = domain::resolve_exit(&c.space_id, &c.exit_id).to_string();
+                            if id != exit && !c.hops.iter().any(|h| h == &id) {
+                                c.hops.push(id);
+                                let cap = domain::MAX_HOPS - 1;
+                                if c.hops.len() > cap {
+                                    c.hops.truncate(cap);
+                                }
+                                c.manual_mode = true;
+                            }
+                            c.pick_for = PickMode::None;
+                        }
+                        PickMode::Exit2 => {
+                            let exit = domain::resolve_exit(&c.space_id, &c.exit_id).to_string();
+                            if id != exit
+                                && !c.hops.iter().any(|h| h == &id)
+                                && !c.exits.iter().any(|e| e == &id)
+                            {
+                                c.exits.push(id);
+                            }
+                            c.pick_for = PickMode::None;
+                        }
+                        PickMode::Rep => {
+                            seed_manual(&mut c);
+                            let exit = domain::resolve_exit(&c.space_id, &c.exit_id).to_string();
+                            let idx = c.pick_idx;
+                            if id != exit && !c.hops.iter().any(|h| h == &id) && idx < c.hops.len()
+                            {
+                                c.hops[idx] = id;
+                                c.manual_mode = true;
+                            }
+                            c.pick_for = PickMode::None;
+                        }
+                        _ => {
+                            c.exit_id = id;
+                        }
+                    }
+                }
                 app.global::<Screen>().invoke_go(crate::Page::Route);
                 render_all(&app, &cc.borrow());
             }
