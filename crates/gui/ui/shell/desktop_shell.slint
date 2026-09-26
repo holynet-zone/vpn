@@ -12,7 +12,7 @@ import { ColdView } from "../views/cold.slint";
 export component DesktopShell inherits Rectangle {
     background: @linear-gradient(180deg, Theme.bg 0%, Theme.page 100%);
     property <bool> settings-active: Screen.page == Page.more || Screen.page == Page.proto
-        || Screen.page == Page.devices || Screen.page == Page.settings;
+        || Screen.page == Page.devices || Screen.page == Page.settings || Screen.page == Page.about;
 
     if AppState.cold: HorizontalLayout {
         alignment: center;
@@ -90,19 +90,13 @@ export component DesktopShell inherits Rectangle {
                 SideNavItem {
                     kind: 5;
                     label: Str.nav-route;
-                    active: Screen.page == Page.route;
+                    active: Screen.page == Page.route || Screen.page == Page.nodes;
                     clicked => { Screen.go(Page.route); }
-                }
-                SideNavItem {
-                    kind: 1;
-                    label: Str.nav-nodes;
-                    active: Screen.page == Page.nodes;
-                    clicked => { Screen.go(Page.nodes); }
                 }
                 SideNavItem {
                     kind: 2;
                     label: Str.nav-shield;
-                    active: Screen.page == Page.shield;
+                    active: Screen.page == Page.shield || Screen.page == Page.split;
                     clicked => { Screen.go(Page.shield); }
                 }
                 SideNavItem {

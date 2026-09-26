@@ -145,8 +145,17 @@ export component SideNavItem inherits Rectangle {
     HorizontalLayout {
         padding-left: 11px;
         padding-right: 11px;
-        spacing: 11px;
-        VerticalLayout { alignment: center; NavIcon { kind: root.kind; tint: root.tint; } }
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: root.tint;
+                opacity: active ? 1.0 : 0.3;
+            }
+        }
         VerticalLayout {
             alignment: center;
             Text { text: root.label; font-size: 13px; font-weight: 600; color: root.tint; }
