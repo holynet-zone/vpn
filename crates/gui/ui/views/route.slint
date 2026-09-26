@@ -1,11 +1,13 @@
 import { Theme } from "../theme.slint";
 import { Str } from "../strings.slint";
 import { AppState } from "../state.slint";
+import { Screen } from "../screen.slint";
 import { RouteHop, ExtraExit } from "../models.slint";
 import { Card } from "../widgets/card.slint";
 import { ScreenTitle } from "../widgets/tiles.slint";
 import { Ic } from "../widgets/icons.slint";
 import { GlobeView } from "../widgets/globe.slint";
+import { BouncyScroll } from "../widgets/bouncy_scroll.slint";
 
 export component GradBtn inherits Rectangle {
     in property <string> label;
@@ -42,18 +44,6 @@ export component GhostBtn inherits Rectangle {
         color: root.tint;
     }
     TouchArea { clicked => { root.clicked(); } }
-}
-
-component ReorderBtn inherits Rectangle {
-    in property <string> kind;
-    in property <bool> enabled: true;
-    callback clicked();
-    width: 22px;
-    height: 22px;
-    border-radius: 7px;
-    background: t.pressed && enabled ? Theme.sf : transparent;
-    Ic { kind: root.kind; size: 13px; tint: Theme.t2; opacity: root.enabled ? 0.9 : 0.25; }
-    t := TouchArea { clicked => { if (root.enabled) { root.clicked(); } } }
 }
 
 component HopBody inherits HorizontalLayout {
@@ -96,53 +86,161 @@ component HopBody inherits HorizontalLayout {
     }
 }
 
+// Строка черновика маршрута. Жесты повторяют дизайн v4: тап — заменить узел,
+// зажатие (320мс) и протяжка вверх/вниз — reorder, свайп влево — удалить. Reorder
+// хранит родитель (drag-idx/drag-dy), свайп — локально (swipe-dx). TouchArea
+// статична (не двигается вместе с карточкой), поэтому координаты жеста стабильны.
 component DraftHopCard inherits Rectangle {
     in property <RouteHop> hop;
     in property <int> idx;
-    border-radius: 14px;
-    background: Theme.sf2;
-    min-height: 56px;
+    in property <int> drag-idx: -1;
+    in property <length> drag-dy: 0px;
+    in property <int> n-relays;
+    callback start-drag(int);
+    callback move-drag(length);
+    callback end-drag();
+
+    property <length> row-h: 62px;
+    property <bool> dragging: root.drag-idx == root.idx && !root.hop.is-exit;
+    property <float> target-i: max(0, min(root.n-relays - 1, root.drag-idx + round(root.drag-dy / root.row-h)));
+    property <length> pressed-x: 0px;
+    property <length> pressed-y: 0px;
+    property <bool> pressing: false;
+    // 0 — ось не выбрана, 1 — горизонталь (свайп), 2 — вертикаль (скролл)
+    property <int> axis: 0;
+    property <length> swipe-dx: 0px;
+    property <bool> swipe-anim: false;
+    property <length> swipe-threshold: min(110px, root.width * 0.33);
+
+    width: 100%;
+    height: 56px;
     clip: true;
-    HorizontalLayout {
-        padding-right: 8px;
-        spacing: 4px;
-        Rectangle {
-            horizontal-stretch: 1;
-            HopBody {
-                label: hop.label;
-                code: hop.code;
-                rtt: hop.rtt;
-                rtt-warn: hop.rtt-warn;
-                is-exit: hop.is-exit;
-                mark: hop.num;
+    border-radius: 14px;
+    y: root.drag-idx == -1 ? root.idx * root.row-h
+        : root.dragging ? root.idx * root.row-h + root.drag-dy
+        : (root.idx > root.drag-idx && root.idx <= root.target-i) ? (root.idx - 1) * root.row-h
+        : (root.idx < root.drag-idx && root.idx >= root.target-i) ? (root.idx + 1) * root.row-h
+        : root.idx * root.row-h;
+    animate y { duration: root.dragging ? 0ms : 170ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+    press-timer := Timer {
+        interval: 320ms;
+        running: root.pressing && root.axis == 0 && root.drag-idx == -1 && !root.hop.is-exit;
+        triggered => {
+            if (root.pressing && root.axis == 0 && !root.hop.is-exit) {
+                root.start-drag(root.idx);
             }
-            TouchArea {
-                clicked => {
-                    if (hop.is-exit) {
+        }
+    }
+
+    // Красный фон удаления, проявляется по мере свайпа.
+    Rectangle {
+        background: Theme.dg;
+        border-radius: 14px;
+        opacity: root.swipe-dx != 0px ? 1.0 : 0.0;
+        HorizontalLayout {
+            padding-left: 22px;
+            padding-right: 22px;
+            alignment: root.swipe-dx > 0px ? start : end;
+            Text {
+                text: Str.hop-remove;
+                font-size: 12.5px;
+                font-weight: 600;
+                color: #ffffff;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // Видимая карточка: смещается по x при свайпе, приподнимается при drag.
+    fg := Rectangle {
+        x: root.swipe-dx;
+        border-radius: 14px;
+        background: root.dragging ? Theme.sf : Theme.sf2;
+        border-width: root.dragging ? 1px : 0px;
+        border-color: Theme.a1;
+        drop-shadow-blur: root.dragging ? 20px : 0;
+        drop-shadow-color: #0000004d;
+        animate x { duration: root.swipe-anim ? 200ms : 0ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+        HorizontalLayout {
+            padding-right: 14px;
+            Rectangle {
+                horizontal-stretch: 1;
+                HopBody {
+                    label: hop.label;
+                    code: hop.code;
+                    rtt: hop.rtt;
+                    rtt-warn: hop.rtt-warn;
+                    is-exit: hop.is-exit;
+                    mark: hop.num;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Ic { kind: hop.is-exit ? "chev-right" : "reorder"; size: hop.is-exit ? 12px : 15px; tint: Theme.t2; opacity: 0.6; }
+            }
+        }
+    }
+
+    body := TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.pressed-x = self.mouse-x;
+                root.pressed-y = self.mouse-y;
+                root.pressing = true;
+                root.axis = 0;
+                root.swipe-anim = false;
+            }
+            if (e.kind == PointerEventKind.up) {
+                if (root.dragging) {
+                    root.end-drag();
+                } else if (root.axis == 1) {
+                    root.swipe-anim = true;
+                    if (abs(root.swipe-dx) > root.swipe-threshold) {
+                        AppState.hop-drop(root.idx);
+                    } else {
+                        root.swipe-dx = 0px;
+                    }
+                    Screen.lock-scroll = false;
+                } else if (root.pressing && root.axis == 0) {
+                    if (root.hop.is-exit) {
                         AppState.hop-swap();
                     } else {
-                        AppState.hop-replace(idx);
+                        AppState.hop-replace(root.idx);
                     }
+                }
+                root.pressing = false;
+            }
+            if (e.kind == PointerEventKind.cancel) {
+                if (root.dragging) {
+                    root.end-drag();
+                }
+                if (root.axis == 1) {
+                    root.swipe-anim = true;
+                    root.swipe-dx = 0px;
+                    Screen.lock-scroll = false;
+                }
+                root.pressing = false;
+            }
+        }
+        moved => {
+            if (root.dragging) {
+                // Ограничиваем протяжку пределами списка релеев, чтобы карточку
+                // нельзя было вытянуть выше первого или ниже последнего хопа.
+                root.move-drag(max(-root.idx * root.row-h, min((root.n-relays - 1 - root.idx) * root.row-h, self.mouse-y - root.pressed-y)));
+            } else {
+                if (root.axis == 0 && (abs(self.mouse-x - root.pressed-x) > 8px || abs(self.mouse-y - root.pressed-y) > 8px)) {
+                    root.axis = abs(self.mouse-x - root.pressed-x) > abs(self.mouse-y - root.pressed-y) ? 1 : 2;
+                    if (root.axis == 1) {
+                        Screen.lock-scroll = true;
+                    }
+                }
+                if (root.axis == 1 && !root.hop.is-exit) {
+                    root.swipe-dx = self.mouse-x - root.pressed-x;
                 }
             }
         }
-        if !hop.is-exit: VerticalLayout {
-            alignment: center;
-            spacing: 1px;
-            ReorderBtn { kind: "chev-up"; enabled: hop.can-up; clicked => { AppState.hop-up(idx); } }
-            ReorderBtn { kind: "chev-down"; enabled: hop.can-down; clicked => { AppState.hop-down(idx); } }
-        }
-        if !hop.is-exit: VerticalLayout {
-            alignment: center;
-            Rectangle {
-                width: 30px;
-                height: 30px;
-                border-radius: 8px;
-                Ic { kind: "close"; size: 13px; tint: Theme.dg; }
-                TouchArea { clicked => { AppState.hop-drop(idx); } }
-            }
-        }
-        if hop.is-exit: VerticalLayout { alignment: center; Ic { kind: "chev-right"; size: 12px; tint: Theme.t2; } }
     }
 }
 
@@ -203,10 +301,21 @@ component Divider inherits Rectangle {
 
 export component RouteView inherits VerticalLayout {
     spacing: 16px;
+    property <int> drag-idx: -1;
+    property <length> drag-dy: 0px;
+    // На мобильном граф выносится в интерактивный оверлей ВНЕ скролла (см.
+    // mobile_shell), поэтому здесь рисуем только заглушку-место. На desktop мышь
+    // работает в скролле, там граф инлайн.
+    in property <bool> overlay-globe: false;
+    // Позиция и ширина места графа внутри контента (для позиционирования оверлея).
+    out property <length> globe-x: card.x + gph.x;
+    out property <length> globe-y: card.y + gph.y;
+    out property <length> globe-w: gph.width;
+    out property <length> globe-h: gph.height;
 
     ScreenTitle { text: Str.route; }
 
-    Card {
+    card := Card {
         VerticalLayout {
             padding: 16px;
             spacing: 12px;
@@ -275,6 +384,7 @@ export component RouteView inherits VerticalLayout {
             }
 
             if AppState.no-relays: Rectangle {
+                horizontal-stretch: 1;
                 border-radius: 14px;
                 border-width: 1px;
                 border-color: Theme.wn;
@@ -283,14 +393,47 @@ export component RouteView inherits VerticalLayout {
                     padding-left: 14px;
                     padding-right: 14px;
                     spacing: 6px;
-                    Text { text: AppState.empty-title; font-size: 12px; font-weight: 700; color: Theme.wn; }
-                    Text { text: AppState.empty-body; font-size: 11px; color: Theme.t2; wrap: word-wrap; }
+                    Text {
+                        text: AppState.empty-title;
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: Theme.wn;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: AppState.empty-body;
+                        font-size: 11px;
+                        color: Theme.t2;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
                 }
             }
 
-            VerticalLayout {
-                spacing: 6px;
-                for hop[i] in AppState.draft-hops: DraftHopCard { hop: hop; idx: i; }
+            Rectangle {
+                height: AppState.draft-hops.length * 62px - 6px;
+                for hop[i] in AppState.draft-hops: DraftHopCard {
+                    hop: hop;
+                    idx: i;
+                    drag-idx: root.drag-idx;
+                    drag-dy: root.drag-dy;
+                    n-relays: AppState.draft-hops.length - 1;
+                    start-drag(x) => {
+                        root.drag-idx = x;
+                        root.drag-dy = 0px;
+                        Screen.lock-scroll = true;
+                    }
+                    move-drag(dy) => {
+                        root.drag-dy = dy;
+                    }
+                    end-drag() => {
+                        AppState.hop-reorder(root.drag-idx, max(0, min(AppState.draft-hops.length - 2, root.drag-idx + round(root.drag-dy / 62px))));
+                        root.drag-idx = -1;
+                        root.drag-dy = 0px;
+                        Screen.lock-scroll = false;
+                    }
+                }
             }
 
             if AppState.has-extra-exits: VerticalLayout {
@@ -322,11 +465,46 @@ export component RouteView inherits VerticalLayout {
             Divider {}
 
             Text { text: Str.route-graph-title; font-size: 12.5px; font-weight: 700; color: Theme.t; }
-            Rectangle {
-                height: globe.height;
-                globe := GlobeView { width: min(parent.width, 560px); x: (parent.width - self.width) / 2; }
+            gph := Rectangle {
+                height: min(self.width, 560px) * 280 / 300;
+                // Desktop: инлайн-граф прямо тут (мышь в скролле работает).
+                // Mobile: пусто — граф рисует оверлей поверх этого места.
+                if !root.overlay-globe: GlobeView {
+                    width: min(parent.width, 560px);
+                    x: (parent.width - self.width) / 2;
+                }
             }
             Text { text: Str.map-legend; font-size: 10px; color: Theme.t2; wrap: word-wrap; }
         }
+    }
+}
+
+// Страница маршрута для мобильного: скролл с карточками + ИНТЕРАКТИВНЫЙ граф
+// оверлеем ПОВЕРХ скролла (вне Flickable), позиция которого привязана к месту-
+// заглушке в потоке. Так граф скроллится вместе с контентом, не является sticky,
+// и его TouchArea вне арбитража Flickable — забирает ВСЕ касания (в т.ч. один
+// палец) без «зажатия». Мимо графа касания проходят к скроллу.
+export component RoutePage inherits Rectangle {
+    clip: true;
+    scr := BouncyScroll {
+        width: 100%;
+        height: 100%;
+        show-scrollbar: !Screen.mobile-target;
+        VerticalLayout {
+            width: parent.width;
+            padding-left: 20px + Screen.safe-left;
+            padding-right: 20px + Screen.safe-right;
+            padding-top: 22px + Screen.safe-top;
+            padding-bottom: 28px;
+            rv := RouteView {
+                overlay-globe: true;
+            }
+        }
+    }
+
+    GlobeView {
+        width: min(rv.globe-w, 560px);
+        x: (20px + Screen.safe-left) + rv.globe-x + (rv.globe-w - self.width) / 2;
+        y: (22px + Screen.safe-top) + rv.globe-y + scr.offset-y;
     }
 }

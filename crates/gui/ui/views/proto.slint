@@ -38,12 +38,11 @@ component PRow inherits Rectangle {
     callback go();
     background: t.pressed ? Theme.sf2 : transparent;
     opacity: item.disabled ? 0.5 : 1.0;
+    min-height: 52px;
     if item.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
-        padding-top: 15px;
-        padding-bottom: 15px;
         spacing: 8px;
         Text { text: item.name; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
         if item.modified: Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.a1; y: parent.height / 2 - 3px; }

@@ -8,6 +8,7 @@ import { BottomNavItem } from "nav.slint";
 import { TransportSheet } from "../widgets/transport_sheet.slint";
 import { SpacesSheet } from "../widgets/spaces_sheet.slint";
 import { ColdView } from "../views/cold.slint";
+import { RoutePage } from "../views/route.slint";
 import { BouncyScroll } from "../widgets/bouncy_scroll.slint";
 
 export component MobileShell inherits Rectangle {
@@ -28,7 +29,12 @@ export component MobileShell inherits Rectangle {
     }
 
     if !AppState.cold: VerticalLayout {
-        BouncyScroll {
+        // Маршрут — отдельная страница: интерактивный граф оверлеем вне скролла.
+        if Screen.page == Page.route: RoutePage {
+            vertical-stretch: 1;
+        }
+
+        if Screen.page != Page.route: BouncyScroll {
             vertical-stretch: 1;
             show-scrollbar: !Screen.mobile-target;
             VerticalLayout {

@@ -247,6 +247,7 @@ export global AppState {
     callback apply-route();
     callback hop-up(int);
     callback hop-down(int);
+    callback hop-reorder(int, int);
     callback hop-drop(int);
     callback hop-swap();
     callback add-hop(string);
@@ -264,6 +265,8 @@ export global AppState {
     callback drop-exit(string);
     callback globe-drag(float, float);
     callback globe-zoom(float);
+    callback globe-pinch-start();
+    callback globe-transform(float, float);
     callback globe-tap(float, float);
 
     callback open-spaces();

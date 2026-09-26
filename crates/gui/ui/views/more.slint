@@ -81,35 +81,37 @@ export component MoreView inherits VerticalLayout {
             VerticalLayout {
                 // Theme
                 HorizontalLayout {
+                    min-height: 52px;
                     padding-left: 16px;
                     padding-right: 10px;
-                    padding-top: 8px;
-                    padding-bottom: 8px;
                     spacing: 10px;
                     Text { text: Str.theme-lbl; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
-                    Rectangle {
-                        border-radius: 10px;
-                        background: Theme.sf2;
-                        HorizontalLayout {
-                            padding: 2px;
-                            spacing: 2px;
-                            for seg in [
-                                { k: 1, name: Str.mode-light, dark: false },
-                                { k: 2, name: Str.mode-dark, dark: true },
-                            ]: Rectangle {
-                                property <bool> sel: seg.dark == Theme.dark;
-                                border-radius: 8px;
-                                background: sel ? Theme.sf : transparent;
-                                drop-shadow-blur: sel ? 3px : 0;
-                                drop-shadow-color: #00000022;
-                                HorizontalLayout {
-                                    padding-left: 12px;
-                                    padding-right: 12px;
-                                    padding-top: 8px;
-                                    padding-bottom: 8px;
-                                    Text { text: seg.name; font-size: 12px; font-weight: 600; color: sel ? Theme.t : Theme.t2; }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            border-radius: 10px;
+                            background: Theme.sf2;
+                            HorizontalLayout {
+                                padding: 2px;
+                                spacing: 2px;
+                                for seg in [
+                                    { k: 1, name: Str.mode-light, dark: false },
+                                    { k: 2, name: Str.mode-dark, dark: true },
+                                ]: Rectangle {
+                                    property <bool> sel: seg.dark == Theme.dark;
+                                    border-radius: 8px;
+                                    background: sel ? Theme.sf : transparent;
+                                    drop-shadow-blur: sel ? 3px : 0;
+                                    drop-shadow-color: #00000022;
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        padding-top: 8px;
+                                        padding-bottom: 8px;
+                                        Text { text: seg.name; font-size: 12px; font-weight: 600; color: sel ? Theme.t : Theme.t2; }
+                                    }
+                                    TouchArea { clicked => { AppState.set-mode(seg.dark ? ThemeMode.dark : ThemeMode.light); } }
                                 }
-                                TouchArea { clicked => { AppState.set-mode(seg.dark ? ThemeMode.dark : ThemeMode.light); } }
                             }
                         }
                     }
@@ -117,31 +119,33 @@ export component MoreView inherits VerticalLayout {
                 Rectangle { x: 16px; width: parent.width - 16px; height: 1px; background: Theme.ln; }
                 // Color
                 HorizontalLayout {
+                    min-height: 52px;
                     padding-left: 16px;
                     padding-right: 14px;
-                    padding-top: 10px;
-                    padding-bottom: 10px;
                     spacing: 10px;
                     Text { text: Str.color-lbl; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        for p in AppState.palettes: Rectangle {
-                            width: 30px;
-                            height: 30px;
-                            border-radius: 15px;
-                            border-width: 2px;
-                            border-color: p.selected ? Theme.t : transparent;
-                            Rectangle {
-                                width: 20px;
-                                height: 20px;
-                                border-radius: 10px;
-                                clip: true;
-                                HorizontalLayout {
-                                    Rectangle { background: p.sw1; horizontal-stretch: 1; }
-                                    Rectangle { background: p.sw2; horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            for p in AppState.palettes: Rectangle {
+                                width: 30px;
+                                height: 30px;
+                                border-radius: 15px;
+                                border-width: 2px;
+                                border-color: p.selected ? Theme.t : transparent;
+                                Rectangle {
+                                    width: 20px;
+                                    height: 20px;
+                                    border-radius: 10px;
+                                    clip: true;
+                                    HorizontalLayout {
+                                        Rectangle { background: p.sw1; horizontal-stretch: 1; }
+                                        Rectangle { background: p.sw2; horizontal-stretch: 1; }
+                                    }
                                 }
+                                TouchArea { clicked => { AppState.select-palette(p.id); } }
                             }
-                            TouchArea { clicked => { AppState.select-palette(p.id); } }
                         }
                     }
                 }
@@ -149,11 +153,10 @@ export component MoreView inherits VerticalLayout {
                 // Language
                 Rectangle {
                     background: lang-t.pressed ? Theme.sf2 : transparent;
+                    min-height: 52px;
                     HorizontalLayout {
                         padding-left: 16px;
                         padding-right: 16px;
-                        padding-top: 15px;
-                        padding-bottom: 15px;
                         spacing: 10px;
                         Text { text: Str.language; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
                         Text { text: Str.lang-name-self; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; }
@@ -179,12 +182,11 @@ export component MoreView inherits VerticalLayout {
                 if root.lang-open: VerticalLayout {
                     for r in AppState.lang-rows: Rectangle {
                         background: lt.pressed ? Theme.sf2 : transparent;
+                        min-height: 46px;
                         Rectangle { x: 32px; y: 0; width: parent.width - 32px; height: 1px; background: Theme.ln; }
                         HorizontalLayout {
                             padding-left: 32px;
                             padding-right: 16px;
-                            padding-top: 12px;
-                            padding-bottom: 12px;
                             spacing: 10px;
                             Text { text: r.name; font-size: 13.5px; font-weight: 500; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
                             Text { text: r.sub; font-size: 11.5px; color: Theme.t2; vertical-alignment: center; }

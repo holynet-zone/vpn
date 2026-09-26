@@ -17,13 +17,16 @@ export global Screen {
     in-out property <Page> page: Page.home;
     in-out property <bool> transport-sheet: false;
     in-out property <bool> desk-transport-open: false;
-    // Пока пользователь крутит глобус, гасим внешний скролл, чтобы жест не
-    // перехватывался Flickable/ScrollView.
+    // Пока пользователь крутит глобус или тянет хоп, гасим внешний скролл, чтобы
+    // жест не перехватывался Flickable/ScrollView.
     in-out property <bool> lock-scroll: false;
 
     public function go(p: Page) {
         self.page = p;
         self.transport-sheet = false;
+        // Страховка: жест глобуса/хопа мог оставить lock-scroll=true — при смене
+        // страницы всегда возвращаем скролл и его rubber-band.
+        self.lock-scroll = false;
     }
     // Обработка системной кнопки/жеста «назад» (Android форвардит её как Key.Back).
     // Возвращает true, если навигация обработана внутри приложения; false — если

@@ -50,6 +50,8 @@ struct Core {
     globe_rot_x: f32,
     globe_rot_y: f32,
     globe_zoom: f32,
+    globe_zoom_start: f32,
+    globe_rot_start_x: f32,
     about_doc: Option<usize>,
     about_upd: i32,
     _upd_timer: Timer,
@@ -107,6 +109,8 @@ impl Core {
             globe_rot_x: -15.0,
             globe_rot_y: -18.0,
             globe_zoom: 1.0,
+            globe_zoom_start: 1.0,
+            globe_rot_start_x: 0.0,
             about_doc: None,
             about_upd: 0,
             _upd_timer: Timer::default(),
@@ -1373,6 +1377,28 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
     {
         let w = window.as_weak();
         let cc = core.clone();
+        st.on_hop_reorder(move |from: i32, to: i32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    seed_manual(&mut c);
+                    let n = c.hops.len();
+                    if n > 0 {
+                        let from = (from.max(0) as usize).min(n - 1);
+                        let to = (to.max(0) as usize).min(n - 1);
+                        if from != to {
+                            let item = c.hops.remove(from);
+                            c.hops.insert(to, item);
+                        }
+                    }
+                }
+                render_all(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
         st.on_hop_drop(move |i: i32| {
             if let Some(app) = w.upgrade() {
                 {
@@ -1708,6 +1734,37 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                     let mut c = cc.borrow_mut();
                     let factor = if delta > 0.0 { 0.94 } else { 1.06 };
                     c.globe_zoom = (c.globe_zoom * factor).clamp(0.82, 1.9);
+                }
+                render_globe(&app, &cc.borrow());
+            }
+        });
+    }
+    {
+        let cc = core.clone();
+        st.on_globe_pinch_start(move || {
+            let mut c = cc.borrow_mut();
+            c.globe_zoom_start = c.globe_zoom;
+            c.globe_rot_start_x = c.globe_rot_x;
+        });
+    }
+    {
+        let w = window.as_weak();
+        let cc = core.clone();
+        // Двупальцевый жест: масштаб → зум, угол поворота → долгота. Настоящий
+        // ре-рендер проекции на каждый кадр (без scale-костыля).
+        st.on_globe_transform(move |scale: f32, rot_deg: f32| {
+            if let Some(app) = w.upgrade() {
+                {
+                    let mut c = cc.borrow_mut();
+                    let s = if scale.is_finite() && scale > 0.0 {
+                        scale
+                    } else {
+                        1.0
+                    };
+                    c.globe_zoom = (c.globe_zoom_start * s).clamp(0.82, 1.9);
+                    if rot_deg.is_finite() {
+                        c.globe_rot_x = c.globe_rot_start_x + rot_deg;
+                    }
                 }
                 render_globe(&app, &cc.borrow());
             }

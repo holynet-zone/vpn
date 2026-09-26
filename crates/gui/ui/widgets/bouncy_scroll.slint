@@ -13,21 +13,35 @@ export component BouncyScroll inherits Rectangle {
     // Показывать пассивный индикатор скролла (desktop). На мобильном — false.
     in property <bool> show-scrollbar: false;
 
+    // Текущее смещение прокрутки (<=0, и >0 при overscroll). Нужно, чтобы внешний
+    // интерактивный оверлей (граф вне Flickable) следовал за контентом.
+    out property <length> offset-y: fl.content-y;
+
     property <length> vh: self.height;
     property <length> content-h: inner.preferred-height;
     property <bool> scrollable: root.content-h > root.vh;
     property <length> max-scroll: max(0px, root.content-h - root.vh);
     // Позиция для индикатора (без учёта натяжения за край).
     property <length> scroll: max(0px, min(root.max-scroll, -fl.content-y));
+    // Движок тянет rubber-band только когда контент ВЫШЕ вьюпорта (flickable.rs:
+    // ch > h). Чтобы эффект был на всех страницах — в т.ч. коротких — держим
+    // контент минимум на 1px выше вьюпорта. Лишний 1px незаметен, скроллбар для
+    // коротких страниц не показываем (см. scrollable выше — по реальной высоте).
+    property <length> eff-content-h: max(root.content-h, root.vh + 1px);
 
     fl := Flickable {
         overshoot-enabled: true;
         interactive: !Screen.lock-scroll;
-        // content-height задаём явно: при наполнении через `for` авто-расчёт не работает.
-        content-height: root.content-h;
+        // Scrollable-высота на 1px выше вьюпорта → движок включает rubber-band даже
+        // на коротких страницах. САМ контент при этом остаётся натуральной высоты
+        // (content-h), иначе VerticalLayout растянулся бы и разъехались отступы.
+        content-height: root.eff-content-h;
         inner := VerticalLayout {
             width: fl.width;
-            height: root.content-h;
+            height: root.eff-content-h;
+            // Прижимаем контент к верху: слой на 1px выше контента (для rubber-band),
+            // без alignment движок распределял/центрировал бы детей и отступы плыли.
+            alignment: start;
             @children
         }
     }

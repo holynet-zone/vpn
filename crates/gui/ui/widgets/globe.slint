@@ -9,7 +9,8 @@ export component GlobeView inherits Rectangle {
     // заполняет доступную область, а не сидит в фиксированной рамке.
     property <float> sc: self.width / 300px;
     height: self.width * 280 / 300;
-    clip: true;
+    // Намеренно НЕ clip: при зуме шар выходит за рамки компонентов (обрезается лишь
+    // на краю экрана внешним скроллом) — это фишка визуала.
 
     function arc-color(kind: int) -> brush {
         kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.ln : Theme.t2
@@ -90,37 +91,67 @@ export component GlobeView inherits Rectangle {
         color: Theme.t;
     }
 
-    ta := TouchArea {
-        property <length> lx;
-        property <length> ly;
-        property <bool> dragging;
-        pointer-event(e) => {
-            if (e.kind == PointerEventKind.down) {
-                ta.lx = ta.mouse-x;
-                ta.ly = ta.mouse-y;
-                ta.dragging = true;
-                Screen.lock-scroll = true;
-            }
-            if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
-                ta.dragging = false;
-                Screen.lock-scroll = false;
-            }
+    // Двупальцевый жест: масштаб + поворот. Движок отдаёт PinchGesture/RotationGesture
+    // жест-хендлеру мимо арбитража внешнего скролла, поэтому зум и вращение двумя
+    // пальцами всегда потребляются здесь. Одиночный палец идёт к вложенной TouchArea
+    // (вращение перетаскиванием / тап-выбор узла).
+    ScaleRotateGestureHandler {
+        started => {
+            Screen.lock-scroll = true;
+            AppState.globe-pinch-start();
         }
-        moved => {
-            if (ta.dragging && root.sc > 0) {
-                AppState.globe-drag((ta.mouse-x - ta.lx) / root.sc / 1px, (ta.mouse-y - ta.ly) / root.sc / 1px);
-                ta.lx = ta.mouse-x;
-                ta.ly = ta.mouse-y;
-            }
+        updated => {
+            AppState.globe-transform(self.scale, self.rotation / 1deg);
         }
-        clicked => {
-            if (root.sc > 0) {
-                AppState.globe-tap(ta.mouse-x / root.sc / 1px, ta.mouse-y / root.sc / 1px);
-            }
+        ended => {
+            Screen.lock-scroll = false;
         }
-        scroll-event(e) => {
-            AppState.globe-zoom(e.delta-y / 1px);
-            accept
+        cancelled => {
+            Screen.lock-scroll = false;
+        }
+
+        ta := TouchArea {
+            property <length> lx;
+            property <length> ly;
+            property <length> down-x;
+            property <length> down-y;
+            property <bool> dragging;
+            property <bool> moved-far;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    ta.lx = ta.mouse-x;
+                    ta.ly = ta.mouse-y;
+                    ta.down-x = ta.mouse-x;
+                    ta.down-y = ta.mouse-y;
+                    ta.dragging = true;
+                    ta.moved-far = false;
+                    // Намеренно НЕ трогаем lock-scroll: одиночный палец не воюет со
+                    // скроллом. Горизонтальный сдвиг движок отдаёт нам (скролл
+                    // вертикальный) → вращаем; вертикальный → страница скроллится.
+                }
+                if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                    ta.dragging = false;
+                }
+            }
+            moved => {
+                if (ta.dragging && root.sc > 0) {
+                    if (abs(ta.mouse-x - ta.down-x) > 6px || abs(ta.mouse-y - ta.down-y) > 6px) {
+                        ta.moved-far = true;
+                    }
+                    AppState.globe-drag((ta.mouse-x - ta.lx) / root.sc / 1px, (ta.mouse-y - ta.ly) / root.sc / 1px);
+                    ta.lx = ta.mouse-x;
+                    ta.ly = ta.mouse-y;
+                }
+            }
+            clicked => {
+                if (root.sc > 0 && !ta.moved-far) {
+                    AppState.globe-tap(ta.mouse-x / root.sc / 1px, ta.mouse-y / root.sc / 1px);
+                }
+            }
+            scroll-event(e) => {
+                AppState.globe-zoom(e.delta-y / 1px);
+                return accept;
+            }
         }
     }
 }

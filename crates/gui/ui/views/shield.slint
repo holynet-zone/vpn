@@ -38,6 +38,7 @@ component ToggleLine inherits Rectangle {
     in property <bool> top-border;
     callback toggled();
     background: t.pressed ? Theme.sf2 : transparent;
+    min-height: 62px;
     if root.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
     HorizontalLayout {
         padding-left: 16px;
