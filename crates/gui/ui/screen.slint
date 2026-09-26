@@ -1,4 +1,5 @@
 import { Page } from "models.slint";
+import { AppState } from "state.slint";
 
 export global Screen {
     in property <bool> wide: false;
@@ -34,6 +35,27 @@ export global Screen {
         }
         if self.desk-transport-open {
             self.desk-transport-open = false;
+            return true;
+        }
+        if AppState.space-sheet-open {
+            AppState.close-spaces();
+            return true;
+        }
+        if self.page == Page.about && AppState.about-doc-open {
+            AppState.about-back();
+            return true;
+        }
+        if self.page == Page.proto && AppState.proto-detail {
+            AppState.proto-back();
+            return true;
+        }
+        if self.page == Page.nodes {
+            AppState.cancel-pick();
+            self.page = Page.route;
+            return true;
+        }
+        if self.page == Page.split {
+            self.page = Page.shield;
             return true;
         }
         if self.page == Page.proto || self.page == Page.devices || self.page == Page.about {

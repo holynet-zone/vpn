@@ -5,6 +5,7 @@ import { Screen } from "../screen.slint";
 import { Page, ProtoRow, ProtoOpt } from "../models.slint";
 import { Card } from "../widgets/card.slint";
 import { ScreenTitle, SectionLabel, BackButton } from "../widgets/tiles.slint";
+import { Ic } from "../widgets/icons.slint";
 
 component Spinner inherits Rectangle {
     width: 14px;
@@ -84,7 +85,7 @@ component GroupCard inherits VerticalLayout {
 export component ProtoView inherits VerticalLayout {
     spacing: 20px;
 
-    BackButton {
+    if !Screen.mobile-target: BackButton {
         text: AppState.proto-back-label;
         clicked => { AppState.proto-back(); }
     }
@@ -286,7 +287,7 @@ export component ProtoView inherits VerticalLayout {
                             border-radius: 14px;
                             background: Theme.sf2;
                             opacity: AppState.mtu-dec-op;
-                            Text { text: "−"; font-size: 22px; color: Theme.t; }
+                            Ic { kind: "minus"; size: 20px; tint: Theme.t; sw: 2px; }
                             TouchArea { clicked => { AppState.proto-mtu-dec(); } }
                         }
                         VerticalLayout {
@@ -302,7 +303,7 @@ export component ProtoView inherits VerticalLayout {
                             border-radius: 14px;
                             background: Theme.sf2;
                             opacity: AppState.mtu-inc-op;
-                            Text { text: "+"; font-size: 22px; color: Theme.t; }
+                            Ic { kind: "plus"; size: 20px; tint: Theme.t; sw: 2px; }
                             TouchArea { clicked => { AppState.proto-mtu-inc(); } }
                         }
                     }

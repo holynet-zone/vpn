@@ -5,11 +5,12 @@ import { Screen } from "../screen.slint";
 import { Page } from "../models.slint";
 import { Card } from "../widgets/card.slint";
 import { ScreenTitle, BackButton } from "../widgets/tiles.slint";
+import { Ic } from "../widgets/icons.slint";
 
 export component DevicesView inherits VerticalLayout {
     spacing: 18px;
 
-    if !Screen.wide: BackButton {
+    if !Screen.mobile-target: BackButton {
         text: Str.back;
         clicked => { Screen.go(Page.more); }
     }
@@ -82,7 +83,11 @@ export component DevicesView inherits VerticalLayout {
                     VerticalLayout {
                         padding: 13px;
                         spacing: 6px;
-                        Text { text: "✓ " + Str.qr-parsed-title; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.ok; }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            VerticalLayout { alignment: center; Ic { kind: "check"; size: 11px; tint: Theme.ok; sw: 2px; } }
+                            Text { text: Str.qr-parsed-title; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.ok; vertical-alignment: center; }
+                        }
                         Text { text: AppState.qr-exit-line; font-size: 12.5px; font-weight: 700; color: Theme.t; }
                         Text { text: AppState.qr-endpoint + " · noise-xk · …c8"; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
                         HorizontalLayout {

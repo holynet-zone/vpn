@@ -4,6 +4,7 @@ import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
 import { AddStep } from "../models.slint";
 import { Card } from "card.slint";
+import { Ic } from "icons.slint";
 import { GradBtn, GhostBtn } from "../views/route.slint";
 
 component KvRow inherits HorizontalLayout {
@@ -124,7 +125,11 @@ export component SpacesSheet inherits Rectangle {
                         VerticalLayout {
                             padding: 15px;
                             spacing: 8px;
-                            Text { text: "✓ " + Str.cfg-recognized; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.ok; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                VerticalLayout { alignment: center; Ic { kind: "check"; size: 10px; tint: Theme.ok; sw: 2px; } }
+                                Text { text: Str.cfg-recognized; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.ok; vertical-alignment: center; }
+                            }
                             Text { text: AppState.parsed-name; font-size: 14px; font-weight: 700; color: Theme.t; }
                             Text { text: AppState.parsed-note; font-size: 11px; color: Theme.t2; }
                             Rectangle { height: 1px; background: Theme.ln; }

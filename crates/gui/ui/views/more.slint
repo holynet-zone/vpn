@@ -12,12 +12,11 @@ component NavRow inherits Rectangle {
     in property <bool> top-border;
     callback go();
     background: t.pressed ? Theme.sf2 : transparent;
+    min-height: 52px;
     if root.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
-        padding-top: 15px;
-        padding-bottom: 15px;
         spacing: 10px;
         Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
         Text { text: root.value; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; overflow: elide; }
@@ -37,8 +36,10 @@ component NavRow inherits Rectangle {
     t := TouchArea { clicked => { root.go(); } }
 }
 
-component GroupLabel inherits SectionLabel {
-    font-size: 11px;
+component GroupLabel inherits HorizontalLayout {
+    in property <string> text;
+    padding-left: 16px;
+    Text { text: root.text; font-size: 11px; font-weight: 500; letter-spacing: 0.2px; color: Theme.t2; }
 }
 
 export component MoreView inherits VerticalLayout {

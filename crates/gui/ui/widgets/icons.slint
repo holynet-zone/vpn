@@ -1,0 +1,28 @@
+import { Theme } from "../theme.slint";
+
+// Векторные иконки вместо unicode-глифов: на разных Android глифы вроде ↗ ✕ ✓
+// подхватываются emoji-шрифтом и выглядят по-разному. Все — stroke, viewbox 16.
+export component Ic inherits Path {
+    in property <string> kind;
+    in property <length> size: 14px;
+    in property <brush> tint: Theme.t2;
+    in property <length> sw: 1.6px;
+    width: root.size;
+    height: root.size;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    stroke: root.tint;
+    stroke-width: root.sw;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+    fill: transparent;
+    commands: root.kind == "ext" ? "M 4 12 L 12 4 M 6 4 L 12 4 L 12 10"
+        : root.kind == "check" ? "M 3 8.5 L 6.5 12 L 13 4"
+        : root.kind == "close" ? "M 4.5 4.5 L 11.5 11.5 M 11.5 4.5 L 4.5 11.5"
+        : root.kind == "plus" ? "M 8 3.5 L 8 12.5 M 3.5 8 L 12.5 8"
+        : root.kind == "minus" ? "M 3.5 8 L 12.5 8"
+        : root.kind == "chev-up" ? "M 3.5 10 L 8 5.5 L 12.5 10"
+        : root.kind == "chev-down" ? "M 3.5 6 L 8 10.5 L 12.5 6"
+        : root.kind == "chev-right" ? "M 6 3.5 L 10.5 8 L 6 12.5"
+        : "";
+}

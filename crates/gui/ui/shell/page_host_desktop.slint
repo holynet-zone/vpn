@@ -14,13 +14,7 @@ export component DesktopPageHost inherits VerticalLayout {
     property <bool> more-group: Screen.page == Page.more;
 
     if Screen.page == Page.home: DesktopHomeView {}
-    if Screen.page == Page.route: HorizontalLayout {
-        alignment: start;
-        VerticalLayout {
-            width: min(720px, parent.width);
-            RouteView {}
-        }
-    }
+    if Screen.page == Page.route: RouteView {}
     if Screen.page == Page.nodes: DesktopNodesView {}
     if Screen.page == Page.shield: ShieldView {}
     if Screen.page == Page.split: SplitView {}

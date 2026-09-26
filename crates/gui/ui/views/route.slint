@@ -4,6 +4,7 @@ import { AppState } from "../state.slint";
 import { RouteHop, ExtraExit } from "../models.slint";
 import { Card } from "../widgets/card.slint";
 import { ScreenTitle } from "../widgets/tiles.slint";
+import { Ic } from "../widgets/icons.slint";
 import { GlobeView } from "../widgets/globe.slint";
 
 export component GradBtn inherits Rectangle {
@@ -43,30 +44,55 @@ export component GhostBtn inherits Rectangle {
     TouchArea { clicked => { root.clicked(); } }
 }
 
-component StepBtn inherits Rectangle {
-    in property <string> glyph;
-    in property <float> op: 1.0;
+component ReorderBtn inherits Rectangle {
+    in property <string> kind;
+    in property <bool> enabled: true;
     callback clicked();
-    width: 24px;
-    height: 18px;
-    border-radius: 6px;
-    background: Theme.sf;
-    opacity: op;
-    Text { text: glyph; font-size: 11px; color: Theme.t2; }
-    TouchArea { clicked => { root.clicked(); } }
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    background: t.pressed && enabled ? Theme.sf : transparent;
+    Ic { kind: root.kind; size: 13px; tint: Theme.t2; opacity: root.enabled ? 0.9 : 0.25; }
+    t := TouchArea { clicked => { if (root.enabled) { root.clicked(); } } }
 }
 
-component Chev inherits Rectangle {
-    width: 7px;
-    height: 7px;
-    opacity: 0.6;
-    Path {
-        width: 7px;
-        height: 7px;
-        stroke: Theme.t2;
-        stroke-width: 1.5px;
-        stroke-line-cap: round;
-        commands: "M 1 0.5 L 6 3.5 L 1 6.5";
+component HopBody inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> code;
+    in property <string> rtt;
+    in property <bool> rtt-warn;
+    in property <bool> is-exit;
+    in property <string> mark;
+    padding-left: 14px;
+    spacing: 12px;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
+            background: root.is-exit ? Theme.a1 : Theme.sf;
+            if !root.is-exit: Text { text: root.mark; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+        }
+    }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 4px;
+        alignment: center;
+        HorizontalLayout {
+            spacing: 7px;
+            Text { text: root.label; font-size: 14px; font-weight: 600; color: Theme.t; overflow: elide; }
+            if root.is-exit: Text { text: "EXIT"; font-size: 9px; font-weight: 600; letter-spacing: 0.8px; font-family: "IBM Plex Mono"; color: Theme.a1; vertical-alignment: center; }
+            Rectangle {}
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text { text: root.code; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+            Text { text: root.rtt; font-size: 10.5px; font-family: "IBM Plex Mono"; color: root.rtt-warn ? Theme.wn : Theme.t2; }
+        }
     }
 }
 
@@ -75,65 +101,20 @@ component DraftHopCard inherits Rectangle {
     in property <int> idx;
     border-radius: 14px;
     background: Theme.sf2;
+    min-height: 56px;
+    clip: true;
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        spacing: 12px;
-        alignment: stretch;
-        VerticalLayout {
-            alignment: center;
-            Rectangle {
-                width: 22px;
-                height: 22px;
-                border-radius: 11px;
-                background: hop.is-exit ? Theme.a1 : Theme.sf;
-                if !hop.is-exit: Text {
-                    text: hop.num;
-                    font-size: 10.5px;
-                    font-family: "IBM Plex Mono";
-                    color: Theme.t2;
-                }
-            }
-        }
+        padding-right: 8px;
+        spacing: 4px;
         Rectangle {
             horizontal-stretch: 1;
-            clip: true;
-            VerticalLayout {
-                padding-top: 10px;
-                padding-bottom: 10px;
-                spacing: 4px;
-                alignment: center;
-                HorizontalLayout {
-                    spacing: 7px;
-                    Text {
-                        text: hop.label;
-                        font-size: 14px;
-                        font-weight: 600;
-                        color: Theme.t;
-                        overflow: elide;
-                    }
-                    if hop.is-exit: Text {
-                        text: "EXIT";
-                        font-size: 9px;
-                        font-weight: 600;
-                        letter-spacing: 0.8px;
-                        font-family: "IBM Plex Mono";
-                        color: Theme.a1;
-                        vertical-alignment: center;
-                    }
-                    Rectangle {}
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    Text { text: hop.code; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; }
-                    Text {
-                        text: hop.rtt;
-                        font-size: 10.5px;
-                        font-family: "IBM Plex Mono";
-                        color: hop.rtt-warn ? Theme.wn : Theme.t2;
-                    }
-                }
+            HopBody {
+                label: hop.label;
+                code: hop.code;
+                rtt: hop.rtt;
+                rtt-warn: hop.rtt-warn;
+                is-exit: hop.is-exit;
+                mark: hop.num;
             }
             TouchArea {
                 clicked => {
@@ -145,28 +126,23 @@ component DraftHopCard inherits Rectangle {
                 }
             }
         }
-        if !hop.is-exit: HorizontalLayout {
-            spacing: 6px;
-            VerticalLayout {
-                alignment: center;
-                spacing: 3px;
-                StepBtn { glyph: "▲"; op: hop.can-up ? 1.0 : 0.25; clicked => { AppState.hop-up(idx); } }
-                StepBtn { glyph: "▼"; op: hop.can-down ? 1.0 : 0.25; clicked => { AppState.hop-down(idx); } }
-            }
-            VerticalLayout {
-                alignment: center;
-                Rectangle {
-                    width: 26px;
-                    height: 26px;
-                    border-radius: 8px;
-                    border-width: 1px;
-                    border-color: Theme.ln;
-                    Text { text: "✕"; font-size: 12px; color: Theme.t2; }
-                    TouchArea { clicked => { AppState.hop-drop(idx); } }
-                }
+        if !hop.is-exit: VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            ReorderBtn { kind: "chev-up"; enabled: hop.can-up; clicked => { AppState.hop-up(idx); } }
+            ReorderBtn { kind: "chev-down"; enabled: hop.can-down; clicked => { AppState.hop-down(idx); } }
+        }
+        if !hop.is-exit: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 30px;
+                height: 30px;
+                border-radius: 8px;
+                Ic { kind: "close"; size: 13px; tint: Theme.dg; }
+                TouchArea { clicked => { AppState.hop-drop(idx); } }
             }
         }
-        if hop.is-exit: VerticalLayout { alignment: center; Chev {} }
+        if hop.is-exit: VerticalLayout { alignment: center; Ic { kind: "chev-right"; size: 12px; tint: Theme.t2; } }
     }
 }
 
@@ -174,48 +150,26 @@ component ExtraExitCard inherits Rectangle {
     in property <ExtraExit> item;
     border-radius: 14px;
     background: Theme.sf2;
+    min-height: 56px;
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 4px;
-        spacing: 12px;
-        alignment: stretch;
-        VerticalLayout {
-            alignment: center;
-            Rectangle { width: 22px; height: 22px; border-radius: 11px; background: Theme.a1; }
-        }
-        VerticalLayout {
+        padding-right: 6px;
+        spacing: 4px;
+        Rectangle {
             horizontal-stretch: 1;
-            padding-top: 10px;
-            padding-bottom: 10px;
-            spacing: 4px;
-            alignment: center;
-            HorizontalLayout {
-                spacing: 7px;
-                Text { text: item.label; font-size: 14px; font-weight: 600; color: Theme.t; overflow: elide; }
-                Text {
-                    text: "EXIT";
-                    font-size: 9px;
-                    font-weight: 600;
-                    letter-spacing: 0.8px;
-                    font-family: "IBM Plex Mono";
-                    color: Theme.a1;
-                    vertical-alignment: center;
-                }
-                Rectangle {}
-            }
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: start;
-                Text { text: item.code; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; }
-                Text { text: item.lat; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+            HopBody {
+                label: item.label;
+                code: item.code;
+                rtt: item.lat;
+                is-exit: true;
+                mark: "";
             }
         }
         VerticalLayout {
             alignment: center;
             Rectangle {
-                width: 44px;
-                height: 44px;
-                Text { text: "✕"; font-size: 13px; color: Theme.t2; }
+                width: 40px;
+                height: 40px;
+                Ic { kind: "close"; size: 13px; tint: Theme.t2; }
                 TouchArea { clicked => { AppState.drop-exit(item.id); } }
             }
         }
@@ -229,16 +183,17 @@ component AddRow inherits Rectangle {
     border-radius: 14px;
     border-width: 1px;
     border-color: Theme.ln;
+    background: t.pressed ? Theme.sf2 : transparent;
     HorizontalLayout {
         padding: 12px;
         padding-left: 13px;
         padding-right: 13px;
         spacing: 11px;
-        Text { text: "+"; width: 18px; font-size: 14px; font-weight: 600; color: Theme.a1; horizontal-alignment: center; vertical-alignment: center; }
+        VerticalLayout { alignment: center; Ic { kind: "plus"; size: 14px; tint: Theme.a1; sw: 2px; } }
         Text { text: root.label; font-size: 12px; font-weight: 600; color: Theme.a1; vertical-alignment: center; horizontal-stretch: 1; }
         Text { text: root.count; font-size: 10px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
     }
-    TouchArea { clicked => { root.clicked(); } }
+    t := TouchArea { clicked => { root.clicked(); } }
 }
 
 component Divider inherits Rectangle {
@@ -367,7 +322,10 @@ export component RouteView inherits VerticalLayout {
             Divider {}
 
             Text { text: Str.route-graph-title; font-size: 12.5px; font-weight: 700; color: Theme.t; }
-            HorizontalLayout { alignment: center; GlobeView {} }
+            Rectangle {
+                height: globe.height;
+                globe := GlobeView { width: min(parent.width, 560px); x: (parent.width - self.width) / 2; }
+            }
             Text { text: Str.map-legend; font-size: 10px; color: Theme.t2; wrap: word-wrap; }
         }
     }

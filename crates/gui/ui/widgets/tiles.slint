@@ -1,6 +1,7 @@
 import { Theme } from "../theme.slint";
 import { Card, Chevron } from "card.slint";
 import { PillToggle } from "pill_toggle.slint";
+import { Ic } from "icons.slint";
 
 export component ScreenTitle inherits Text {
     font-size: 26px;
@@ -13,6 +14,46 @@ export component SectionLabel inherits Text {
     font-size: 12px;
     font-weight: 600;
     color: Theme.t2;
+}
+
+// v4 group caption above a grouped card (inset 16px, 7px bottom gap).
+export component MenuLabel inherits HorizontalLayout {
+    in property <string> text;
+    in property <string> count;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 7px;
+    Text { text: root.text; font-size: 11px; font-weight: 500; letter-spacing: 0.2px; color: Theme.t2; horizontal-stretch: 1; }
+    if root.count != "": Text { text: root.count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: bottom; }
+}
+
+// v4 row inside a grouped card: min-height 52, no vertical padding, inset separator.
+export component MenuRow inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+    in property <bool> value-mono;
+    in property <bool> top-border;
+    in property <string> trail: "chev";
+    callback clicked();
+    min-height: 52px;
+    background: t.pressed ? Theme.sf2 : transparent;
+    if root.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 10px;
+        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        if root.value != "": Text {
+            text: root.value;
+            font-size: root.value-mono ? 11.5px : 12.5px;
+            font-family: root.value-mono ? "IBM Plex Mono" : "";
+            color: Theme.t2;
+            vertical-alignment: center;
+        }
+        if root.trail == "chev": VerticalLayout { alignment: center; Ic { kind: "chev-right"; size: 12px; } }
+        if root.trail == "ext": VerticalLayout { alignment: center; Ic { kind: "ext"; size: 13px; } }
+    }
+    t := TouchArea { clicked => { root.clicked(); } }
 }
 
 export component LinkRow inherits Card {

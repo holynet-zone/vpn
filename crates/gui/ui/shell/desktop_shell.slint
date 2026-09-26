@@ -64,7 +64,10 @@ export component DesktopShell inherits Rectangle {
                         padding-left: 11px;
                         padding-right: 11px;
                         spacing: 9px;
-                        Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.a1; }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.a1; }
+                        }
                         VerticalLayout {
                             alignment: center;
                             spacing: 3px;
