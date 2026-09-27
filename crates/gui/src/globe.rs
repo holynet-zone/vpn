@@ -2,6 +2,8 @@ use crate::land::LAND;
 use crate::{GlobeArc, GlobeDot};
 use crate::{Lang, domain};
 use slint::{ModelRc, SharedString, VecModel};
+use std::fmt::Write;
+use std::sync::OnceLock;
 
 pub const W: f32 = 300.0;
 pub const H: f32 = 280.0;
@@ -22,18 +24,119 @@ fn project(lon: f32, lat: f32, lon0: f32, lat0: f32, r: f32) -> (f32, f32, bool)
     (x, y, cosc >= 0.0)
 }
 
+// Предвычисленная ротация кадра: тригонометрия центра (lon0/lat0) считается один
+// раз, дальше на точку только умножения/сложения (без sin/cos).
+struct Rot {
+    clon0: f32,
+    slon0: f32,
+    clat0: f32,
+    slat0: f32,
+    r: f32,
+}
+
+impl Rot {
+    fn new(lon0: f32, lat0: f32, r: f32) -> Self {
+        let lon0r = lon0.to_radians();
+        let lat0r = lat0.to_radians();
+        Self {
+            clon0: lon0r.cos(),
+            slon0: lon0r.sin(),
+            clat0: lat0r.cos(),
+            slat0: lat0r.sin(),
+            r,
+        }
+    }
+
+    // Ортографическая проекция из предвычисленного 3D-вектора точки на сфере.
+    // Тождественна project(): X1=cos(lat)cos(dlon), Y1=cos(lat)sin(dlon), pz=sin(lat).
+    #[inline]
+    fn proj(&self, v: (f32, f32, f32)) -> (f32, f32, bool) {
+        let x1 = v.0 * self.clon0 + v.1 * self.slon0;
+        let y1 = v.1 * self.clon0 - v.0 * self.slon0;
+        let vis = self.slat0 * v.2 + self.clat0 * x1 >= 0.0;
+        let x = CX + self.r * y1;
+        let y = CY - self.r * (self.clat0 * v.2 - self.slat0 * x1);
+        (x, y, vis)
+    }
+}
+
+fn latlon_vec(lon: f32, lat: f32) -> (f32, f32, f32) {
+    let lonr = lon.to_radians();
+    let latr = lat.to_radians();
+    (latr.cos() * lonr.cos(), latr.cos() * lonr.sin(), latr.sin())
+}
+
+fn polyline_vec(vecs: &[(f32, f32, f32)], rot: &Rot, out: &mut String) {
+    let mut pen = false;
+    for &v in vecs {
+        let (x, y, vis) = rot.proj(v);
+        if vis {
+            let _ = if pen {
+                write!(out, "L {:.1} {:.1} ", x, y)
+            } else {
+                pen = true;
+                write!(out, "M {:.1} {:.1} ", x, y)
+            };
+        } else {
+            pen = false;
+        }
+    }
+}
+
+// 3D-векторы точек материков — считаются один раз (данные неизменны).
+fn land_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
+    static V: OnceLock<Vec<Vec<(f32, f32, f32)>>> = OnceLock::new();
+    V.get_or_init(|| {
+        LAND.iter()
+            .map(|ring| ring.iter().map(|&(lon, lat)| latlon_vec(lon, lat)).collect())
+            .collect()
+    })
+}
+
+// 3D-векторы сетки (меридианы/параллели) — сетка фиксирована, считаем один раз.
+fn graticule_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
+    static V: OnceLock<Vec<Vec<(f32, f32, f32)>>> = OnceLock::new();
+    V.get_or_init(|| {
+        let mut lines = Vec::new();
+        let mut lon = -180;
+        while lon < 180 {
+            let mut line = Vec::new();
+            let mut lat = -80;
+            while lat <= 80 {
+                line.push(latlon_vec(lon as f32, lat as f32));
+                lat += 4;
+            }
+            lines.push(line);
+            lon += 30;
+        }
+        let mut lat = -60;
+        while lat <= 60 {
+            let mut line = Vec::new();
+            let mut lon = -180;
+            while lon <= 180 {
+                line.push(latlon_vec(lon as f32, lat as f32));
+                lon += 4;
+            }
+            lines.push(line);
+            lat += 30;
+        }
+        lines
+    })
+}
+
 fn polyline(points: &[(f32, f32)], lon0: f32, lat0: f32, r: f32) -> String {
+    let rot = Rot::new(lon0, lat0, r);
     let mut out = String::new();
     let mut pen = false;
     for &(lon, lat) in points {
-        let (x, y, vis) = project(lon, lat, lon0, lat0, r);
+        let (x, y, vis) = rot.proj(latlon_vec(lon, lat));
         if vis {
-            if pen {
-                out.push_str(&format!("L {:.1} {:.1} ", x, y));
+            let _ = if pen {
+                write!(out, "L {:.1} {:.1} ", x, y)
             } else {
-                out.push_str(&format!("M {:.1} {:.1} ", x, y));
                 pen = true;
-            }
+                write!(out, "M {:.1} {:.1} ", x, y)
+            };
         } else {
             pen = false;
         }
@@ -42,36 +145,19 @@ fn polyline(points: &[(f32, f32)], lon0: f32, lat0: f32, r: f32) -> String {
 }
 
 fn graticule(lon0: f32, lat0: f32, r: f32) -> String {
+    let rot = Rot::new(lon0, lat0, r);
     let mut out = String::new();
-    let mut lon = -180;
-    while lon < 180 {
-        let mut line = Vec::new();
-        let mut lat = -80;
-        while lat <= 80 {
-            line.push((lon as f32, lat as f32));
-            lat += 4;
-        }
-        out.push_str(&polyline(&line, lon0, lat0, r));
-        lon += 30;
-    }
-    let mut lat = -60;
-    while lat <= 60 {
-        let mut line = Vec::new();
-        let mut lon = -180;
-        while lon <= 180 {
-            line.push((lon as f32, lat as f32));
-            lon += 4;
-        }
-        out.push_str(&polyline(&line, lon0, lat0, r));
-        lat += 30;
+    for line in graticule_vecs() {
+        polyline_vec(line, &rot, &mut out);
     }
     out
 }
 
 fn land_path(lon0: f32, lat0: f32, r: f32) -> String {
+    let rot = Rot::new(lon0, lat0, r);
     let mut out = String::new();
-    for ring in LAND {
-        out.push_str(&polyline(ring, lon0, lat0, r));
+    for ring in land_vecs() {
+        polyline_vec(ring, &rot, &mut out);
     }
     out
 }
