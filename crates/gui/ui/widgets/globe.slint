@@ -3,6 +3,51 @@ import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
 import { GlobeArc, GlobeDot } from "../models.slint";
 
+// Одна горизонтальная полоса-хорда круглой зоны захвата. Набор таких полос
+// повторяет окружность шара: палец в круге попадает на полосу (вращение/тап),
+// палец в углу — полос нет, касание проваливается сквозь оверлей к скроллу.
+// Палец, начавший на полосе, дальше трекается глобально, поэтому одной полосы
+// под точкой нажатия достаточно на весь жест.
+component GlobeHit inherits TouchArea {
+    in property <float> sc;
+    // Смещение полосы внутри GlobeView (для абсолютных координат тапа).
+    in property <length> off-x;
+    in property <length> off-y;
+    property <length> lx;
+    property <length> ly;
+    property <length> dnx;
+    property <length> dny;
+    property <bool> moved-far;
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.down) {
+            self.lx = self.mouse-x;
+            self.ly = self.mouse-y;
+            self.dnx = self.mouse-x;
+            self.dny = self.mouse-y;
+            self.moved-far = false;
+        }
+    }
+    moved => {
+        if (self.pressed && self.sc > 0) {
+            if (abs(self.mouse-x - self.dnx) > 6px || abs(self.mouse-y - self.dny) > 6px) {
+                self.moved-far = true;
+            }
+            AppState.globe-drag((self.mouse-x - self.lx) / self.sc / 1px, (self.mouse-y - self.ly) / self.sc / 1px);
+            self.lx = self.mouse-x;
+            self.ly = self.mouse-y;
+        }
+    }
+    clicked => {
+        if (self.sc > 0 && !self.moved-far) {
+            AppState.globe-tap((self.off-x + self.mouse-x) / self.sc / 1px, (self.off-y + self.mouse-y) / self.sc / 1px);
+        }
+    }
+    scroll-event(e) => {
+        AppState.globe-zoom(e.delta-y / 1px);
+        return accept;
+    }
+}
+
 export component GlobeView inherits Rectangle {
     // Внутреннее пространство проекции — 300x280 (см. globe.rs). Виджет тянется по
     // ширине родителя и масштабирует это пространство коэффициентом sc, поэтому шар
@@ -21,6 +66,10 @@ export component GlobeView inherits Rectangle {
     function dot-stroke(kind: int) -> brush {
         kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.t : kind == 4 ? Theme.t2 : Theme.a1
     }
+    // Геометрия круга шара в px (центр проекции 150x140, радиус globe-radius).
+    property <length> cx: 150 * root.sc * 1px;
+    property <length> cy: 140 * root.sc * 1px;
+    property <length> rad: AppState.globe-radius * root.sc * 1px;
 
     Rectangle {
         x: (150 - AppState.globe-radius) * root.sc * 1px;
@@ -93,8 +142,7 @@ export component GlobeView inherits Rectangle {
 
     // Двупальцевый жест: масштаб + поворот. Движок отдаёт PinchGesture/RotationGesture
     // жест-хендлеру мимо арбитража внешнего скролла, поэтому зум и вращение двумя
-    // пальцами всегда потребляются здесь. Одиночный палец идёт к вложенной TouchArea
-    // (вращение перетаскиванием / тап-выбор узла).
+    // пальцами всегда потребляются здесь. Одиночный палец — на полосы-хорды ниже.
     ScaleRotateGestureHandler {
         started => {
             Screen.lock-scroll = true;
@@ -110,48 +158,20 @@ export component GlobeView inherits Rectangle {
             Screen.lock-scroll = false;
         }
 
-        ta := TouchArea {
-            property <length> lx;
-            property <length> ly;
-            property <length> down-x;
-            property <length> down-y;
-            property <bool> dragging;
-            property <bool> moved-far;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    ta.lx = ta.mouse-x;
-                    ta.ly = ta.mouse-y;
-                    ta.down-x = ta.mouse-x;
-                    ta.down-y = ta.mouse-y;
-                    ta.dragging = true;
-                    ta.moved-far = false;
-                    // Намеренно НЕ трогаем lock-scroll: одиночный палец не воюет со
-                    // скроллом. Горизонтальный сдвиг движок отдаёт нам (скролл
-                    // вертикальный) → вращаем; вертикальный → страница скроллится.
-                }
-                if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
-                    ta.dragging = false;
-                }
-            }
-            moved => {
-                if (ta.dragging && root.sc > 0) {
-                    if (abs(ta.mouse-x - ta.down-x) > 6px || abs(ta.mouse-y - ta.down-y) > 6px) {
-                        ta.moved-far = true;
-                    }
-                    AppState.globe-drag((ta.mouse-x - ta.lx) / root.sc / 1px, (ta.mouse-y - ta.ly) / root.sc / 1px);
-                    ta.lx = ta.mouse-x;
-                    ta.ly = ta.mouse-y;
-                }
-            }
-            clicked => {
-                if (root.sc > 0 && !ta.moved-far) {
-                    AppState.globe-tap(ta.mouse-x / root.sc / 1px, ta.mouse-y / root.sc / 1px);
-                }
-            }
-            scroll-event(e) => {
-                AppState.globe-zoom(e.delta-y / 1px);
-                return accept;
-            }
+        // Круглая зона захвата из 16 горизонтальных полос-хорд. Доли полуширины
+        // хорды на каждом уровне (sqrt(1 - dy^2)) захардкожены, т.к. в Slint нет sqrt.
+        // Углы вне полос — касание проходит сквозь оверлей к скроллу.
+        for f[i] in [
+            0.348, 0.583, 0.726, 0.827, 0.899, 0.950, 0.982, 0.998,
+            0.998, 0.982, 0.950, 0.899, 0.827, 0.726, 0.583, 0.348,
+        ]: GlobeHit {
+            sc: root.sc;
+            width: 2 * f * root.rad;
+            height: root.rad / 8;
+            x: root.cx - f * root.rad;
+            y: root.cy - root.rad + i * (root.rad / 8);
+            off-x: self.x;
+            off-y: self.y;
         }
     }
 }
