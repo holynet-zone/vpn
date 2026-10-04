@@ -1,6 +1,8 @@
 package dev.holynet.gui;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.view.Display;
 import android.view.View;
@@ -40,6 +42,23 @@ public final class HolyNetAndroid {
                         flags &= ~(statusFlag | navFlag);
                     }
                     decor.setSystemUiVisibility(flags);
+                }
+            }
+        });
+    }
+
+    public static void openUrl(final Activity activity, final String url) {
+        if (activity == null || url == null) {
+            return;
+        }
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    activity.startActivity(i);
+                } catch (Exception e) {
                 }
             }
         });

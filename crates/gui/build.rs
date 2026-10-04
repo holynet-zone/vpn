@@ -7,9 +7,29 @@ fn main() {
 
     generate_licenses();
 
+    println!("cargo:rustc-env=HN_BUILD_YM={}", build_ym());
+
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
         build_android_dex();
     }
+}
+
+fn build_ym() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as i64;
+    let z = secs / 86400 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{:04}.{:02}", y, m)
 }
 
 fn generate_licenses() {

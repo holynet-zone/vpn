@@ -195,6 +195,10 @@ fn fmt_bytes(v: f64, lang: Lang) -> String {
 }
 
 fn open_url(url: &str) {
+    #[cfg(target_os = "android")]
+    {
+        crate::android_ext::open_url(url);
+    }
     #[cfg(target_os = "linux")]
     {
         let _ = std::process::Command::new("xdg-open").arg(url).spawn();
@@ -209,7 +213,12 @@ fn open_url(url: &str) {
             .args(["/C", "start", "", url])
             .spawn();
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )))]
     {
         let _ = url;
     }
@@ -229,6 +238,8 @@ fn render_all(app: &AppWindow, c: &Core) {
     let st = app.global::<AppState>();
     let lang = c.lang;
     let dark = app.global::<Theme>().get_dark();
+
+    st.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     #[cfg(target_os = "android")]
     crate::android_ext::set_light_system_bars(!dark);

@@ -189,7 +189,7 @@ export component MoreView inherits VerticalLayout {
         border-radius: 16px;
         MenuRow {
             title: Str.about-app;
-            value: "4.0.0";
+            value: AppState.app-version;
             clicked => { AppState.about-open(); }
         }
     }

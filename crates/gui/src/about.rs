@@ -159,19 +159,17 @@ pub fn doc_url(idx: usize) -> String {
     format!("{}/blob/main/legal/{}.md", GH, DOCS[idx].key)
 }
 
-// order of the legal-group rows: privacy, terms, aup, licenses.
-const LEGAL_ORDER: &[usize] = &[0, 1, 2, 3];
+const LEGAL_ORDER: &[usize] = &[0, 1, 2];
 
 pub fn render(st: &AppState, lang: Lang, about_doc: Option<usize>, upd: i32) {
     st.set_about_doc_open(about_doc.is_some());
+    let ver = env!("CARGO_PKG_VERSION");
+    let build_ym = env!("HN_BUILD_YM");
     st.set_about_version_line(
-        p2(
-            lang,
-            (
-                "Version 4.0.0 · build 2026.09",
-                "Версия 4.0.0 · сборка 2026.09",
-            ),
-        )
+        match lang {
+            Lang::Ru => format!("Версия {} · сборка {}", ver, build_ym),
+            _ => format!("Version {} · build {}", ver, build_ym),
+        }
         .into(),
     );
     st.set_about_pitch(
