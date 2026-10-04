@@ -164,7 +164,7 @@ export component AboutView inherits VerticalLayout {
         VerticalLayout {
             spacing: 8px;
             ScreenTitle { text: AppState.doc-title; font-size: 26px; }
-            Text { text: AppState.doc-updated; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
+            if AppState.doc-updated != "": Text { text: AppState.doc-updated; font-size: 11px; font-family: "IBM Plex Mono"; color: Theme.t2; }
         }
 
         Rectangle {
@@ -172,8 +172,6 @@ export component AboutView inherits VerticalLayout {
             background: Theme.sf2;
             VerticalLayout {
                 padding: 18px;
-                spacing: 8px;
-                Text { text: Str.about-tldr; font-size: 10px; font-weight: 700; font-family: "IBM Plex Mono"; color: Theme.a1; }
                 Text { text: AppState.doc-tldr; font-size: 14.5px; font-weight: 600; color: Theme.t; wrap: word-wrap; }
             }
         }

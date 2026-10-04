@@ -144,7 +144,7 @@ static DOCS: &[Doc] = &[
     Doc {
         key: "licenses",
         title: ("Open-source licenses", "Лицензии открытого ПО"),
-        updated: ("Generated at build", "Сгенерировано при сборке"),
+        updated: ("", ""),
         tldr: (
             "HolyNet is released under GPL-3.0 and builds on these projects.",
             "HolyNet распространяется по GPL-3.0 и опирается на эти проекты.",
