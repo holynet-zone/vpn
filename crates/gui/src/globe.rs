@@ -88,7 +88,11 @@ fn land_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
     static V: OnceLock<Vec<Vec<(f32, f32, f32)>>> = OnceLock::new();
     V.get_or_init(|| {
         LAND.iter()
-            .map(|ring| ring.iter().map(|&(lon, lat)| latlon_vec(lon, lat)).collect())
+            .map(|ring| {
+                ring.iter()
+                    .map(|&(lon, lat)| latlon_vec(lon, lat))
+                    .collect()
+            })
             .collect()
     })
 }

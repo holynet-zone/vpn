@@ -4,7 +4,7 @@ import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
 import { Page, ProtoRow, ProtoOpt } from "../models.slint";
 import { Card } from "../widgets/card.slint";
-import { ScreenTitle, SectionLabel, BackButton } from "../widgets/tiles.slint";
+import { ScreenTitle, SectionLabel, BackButton, MenuRow } from "../widgets/tiles.slint";
 import { Ic } from "../widgets/icons.slint";
 
 component Spinner inherits Rectangle {
@@ -33,37 +33,6 @@ component Spinner inherits Rectangle {
     }
 }
 
-component PRow inherits Rectangle {
-    in property <ProtoRow> item;
-    callback go();
-    background: t.pressed ? Theme.sf2 : transparent;
-    opacity: item.disabled ? 0.5 : 1.0;
-    min-height: 52px;
-    if item.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
-    HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        spacing: 8px;
-        Text { text: item.name; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
-        if item.modified: Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Theme.a1; y: parent.height / 2 - 3px; }
-        Rectangle { horizontal-stretch: 1; }
-        Text { text: item.val; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; overflow: elide; }
-        VerticalLayout {
-            alignment: center;
-            Path {
-                width: 7px;
-                height: 12px;
-                viewbox-width: 7;
-                viewbox-height: 12;
-                stroke: Theme.t2;
-                stroke-width: 1.5px;
-                commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
-            }
-        }
-    }
-    t := TouchArea { clicked => { if (!root.item.disabled) { root.go(); } } }
-}
-
 component GroupCard inherits VerticalLayout {
     in property <string> caption;
     in property <[ProtoRow]> rows;
@@ -73,9 +42,13 @@ component GroupCard inherits VerticalLayout {
         elevated: false;
         border-radius: 16px;
         VerticalLayout {
-            for r in root.rows: PRow {
-                item: r;
-                go => { AppState.proto-open(r.key); }
+            for r in root.rows: MenuRow {
+                title: r.name;
+                value: r.val;
+                modified: r.modified;
+                disabled: r.disabled;
+                top-border: r.top-border;
+                clicked => { AppState.proto-open(r.key); }
             }
         }
     }

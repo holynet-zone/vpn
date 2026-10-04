@@ -4,37 +4,7 @@ import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
 import { Page } from "../models.slint";
 import { Card } from "../widgets/card.slint";
-import { ScreenTitle, SectionLabel } from "../widgets/tiles.slint";
-
-component NavRow inherits Rectangle {
-    in property <string> title;
-    in property <string> value;
-    in property <bool> top-border;
-    callback go();
-    background: t.pressed ? Theme.sf2 : transparent;
-    min-height: 52px;
-    if root.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
-    HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        spacing: 10px;
-        Text { text: root.title; font-size: 14px; font-weight: 600; color: Theme.t; vertical-alignment: center; horizontal-stretch: 1; }
-        Text { text: root.value; font-size: 12.5px; color: Theme.t2; vertical-alignment: center; overflow: elide; }
-        VerticalLayout {
-            alignment: center;
-            Path {
-                width: 7px;
-                height: 12px;
-                viewbox-width: 7;
-                viewbox-height: 12;
-                stroke: Theme.t2;
-                stroke-width: 1.5px;
-                commands: "M 1.5 1.5 L 5.5 6 L 1.5 10.5";
-            }
-        }
-    }
-    t := TouchArea { clicked => { root.go(); } }
-}
+import { ScreenTitle, SectionLabel, MenuRow } from "../widgets/tiles.slint";
 
 component GroupLabel inherits HorizontalLayout {
     in property <string> text;
@@ -56,16 +26,16 @@ export component MoreView inherits VerticalLayout {
             elevated: false;
             border-radius: 16px;
             VerticalLayout {
-                NavRow {
+                MenuRow {
                     title: Str.proto-settings;
                     value: AppState.proto-summary;
-                    go => { Screen.go(Page.proto); }
+                    clicked => { Screen.go(Page.proto); }
                 }
-                NavRow {
+                MenuRow {
                     title: Str.devices;
                     value: AppState.dev-summary;
                     top-border: true;
-                    go => { Screen.go(Page.devices); }
+                    clicked => { Screen.go(Page.devices); }
                 }
             }
         }
@@ -217,10 +187,10 @@ export component MoreView inherits VerticalLayout {
     Card {
         elevated: false;
         border-radius: 16px;
-        NavRow {
+        MenuRow {
             title: Str.about-app;
             value: "4.0.0";
-            go => { AppState.about-open(); }
+            clicked => { AppState.about-open(); }
         }
     }
 }
