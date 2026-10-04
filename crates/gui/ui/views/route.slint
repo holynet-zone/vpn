@@ -86,10 +86,6 @@ component HopBody inherits HorizontalLayout {
     }
 }
 
-// Строка черновика маршрута. Жесты повторяют дизайн v4: тап — заменить узел,
-// зажатие (320мс) и протяжка вверх/вниз — reorder, свайп влево — удалить. Reorder
-// хранит родитель (drag-idx/drag-dy), свайп — локально (swipe-dx). TouchArea
-// статична (не двигается вместе с карточкой), поэтому координаты жеста стабильны.
 component DraftHopCard inherits Rectangle {
     in property <RouteHop> hop;
     in property <int> idx;
@@ -106,7 +102,6 @@ component DraftHopCard inherits Rectangle {
     property <length> pressed-x: 0px;
     property <length> pressed-y: 0px;
     property <bool> pressing: false;
-    // 0 — ось не выбрана, 1 — горизонталь (свайп), 2 — вертикаль (скролл)
     property <int> axis: 0;
     property <length> swipe-dx: 0px;
     property <bool> swipe-anim: false;
@@ -133,7 +128,6 @@ component DraftHopCard inherits Rectangle {
         }
     }
 
-    // Красный фон удаления, проявляется по мере свайпа.
     Rectangle {
         background: Theme.dg;
         border-radius: 14px;
@@ -152,7 +146,6 @@ component DraftHopCard inherits Rectangle {
         }
     }
 
-    // Видимая карточка: смещается по x при свайпе, приподнимается при drag.
     fg := Rectangle {
         x: root.swipe-dx;
         border-radius: 14px;
@@ -226,8 +219,6 @@ component DraftHopCard inherits Rectangle {
         }
         moved => {
             if (root.dragging) {
-                // Ограничиваем протяжку пределами списка релеев, чтобы карточку
-                // нельзя было вытянуть выше первого или ниже последнего хопа.
                 root.move-drag(max(-root.idx * root.row-h, min((root.n-relays - 1 - root.idx) * root.row-h, self.mouse-y - root.pressed-y)));
             } else {
                 if (root.axis == 0 && (abs(self.mouse-x - root.pressed-x) > 8px || abs(self.mouse-y - root.pressed-y) > 8px)) {
@@ -303,11 +294,7 @@ export component RouteView inherits VerticalLayout {
     spacing: 16px;
     property <int> drag-idx: -1;
     property <length> drag-dy: 0px;
-    // На мобильном граф выносится в интерактивный оверлей ВНЕ скролла (см.
-    // mobile_shell), поэтому здесь рисуем только заглушку-место. На desktop мышь
-    // работает в скролле, там граф инлайн.
     in property <bool> overlay-globe: false;
-    // Позиция и ширина места графа внутри контента (для позиционирования оверлея).
     out property <length> globe-x: card.x + gph.x;
     out property <length> globe-y: card.y + gph.y;
     out property <length> globe-w: gph.width;
@@ -467,8 +454,6 @@ export component RouteView inherits VerticalLayout {
             Text { text: Str.route-graph-title; font-size: 12.5px; font-weight: 700; color: Theme.t; }
             gph := Rectangle {
                 height: min(self.width, 560px) * 280 / 300;
-                // Desktop: инлайн-граф прямо тут (мышь в скролле работает).
-                // Mobile: пусто — граф рисует оверлей поверх этого места.
                 if !root.overlay-globe: GlobeView {
                     width: min(parent.width, 560px);
                     x: (parent.width - self.width) / 2;
@@ -479,11 +464,6 @@ export component RouteView inherits VerticalLayout {
     }
 }
 
-// Страница маршрута для мобильного: скролл с карточками + ИНТЕРАКТИВНЫЙ граф
-// оверлеем ПОВЕРХ скролла (вне Flickable), позиция которого привязана к месту-
-// заглушке в потоке. Так граф скроллится вместе с контентом, не является sticky,
-// и его TouchArea вне арбитража Flickable — забирает ВСЕ касания (в т.ч. один
-// палец) без «зажатия». Мимо графа касания проходят к скроллу.
 export component RoutePage inherits Rectangle {
     clip: true;
     scr := BouncyScroll {

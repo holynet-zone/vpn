@@ -29,7 +29,6 @@ export component MobileShell inherits Rectangle {
     }
 
     if !AppState.cold: VerticalLayout {
-        // Маршрут — отдельная страница: интерактивный граф оверлеем вне скролла.
         if Screen.page == Page.route: RoutePage {
             vertical-stretch: 1;
         }

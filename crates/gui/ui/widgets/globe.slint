@@ -3,14 +3,8 @@ import { AppState } from "../state.slint";
 import { Screen } from "../screen.slint";
 import { GlobeArc, GlobeDot } from "../models.slint";
 
-// Одна горизонтальная полоса-хорда круглой зоны захвата. Набор таких полос
-// повторяет окружность шара: палец в круге попадает на полосу (вращение/тап),
-// палец в углу — полос нет, касание проваливается сквозь оверлей к скроллу.
-// Палец, начавший на полосе, дальше трекается глобально, поэтому одной полосы
-// под точкой нажатия достаточно на весь жест.
 component GlobeHit inherits TouchArea {
     in property <float> sc;
-    // Смещение полосы внутри GlobeView (для абсолютных координат тапа).
     in property <length> off-x;
     in property <length> off-y;
     property <length> lx;
@@ -49,13 +43,8 @@ component GlobeHit inherits TouchArea {
 }
 
 export component GlobeView inherits Rectangle {
-    // Внутреннее пространство проекции — 300x280 (см. globe.rs). Виджет тянется по
-    // ширине родителя и масштабирует это пространство коэффициентом sc, поэтому шар
-    // заполняет доступную область, а не сидит в фиксированной рамке.
     property <float> sc: self.width / 300px;
     height: self.width * 280 / 300;
-    // Намеренно НЕ clip: при зуме шар выходит за рамки компонентов (обрезается лишь
-    // на краю экрана внешним скроллом) — это фишка визуала.
 
     function arc-color(kind: int) -> brush {
         kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.ln : Theme.t2
@@ -66,7 +55,6 @@ export component GlobeView inherits Rectangle {
     function dot-stroke(kind: int) -> brush {
         kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.t : kind == 4 ? Theme.t2 : Theme.a1
     }
-    // Геометрия круга шара в px (центр проекции 150x140, радиус globe-radius).
     property <length> cx: 150 * root.sc * 1px;
     property <length> cy: 140 * root.sc * 1px;
     property <length> rad: AppState.globe-radius * root.sc * 1px;
@@ -140,9 +128,6 @@ export component GlobeView inherits Rectangle {
         color: Theme.t;
     }
 
-    // Двупальцевый жест: масштаб + поворот. Движок отдаёт PinchGesture/RotationGesture
-    // жест-хендлеру мимо арбитража внешнего скролла, поэтому зум и вращение двумя
-    // пальцами всегда потребляются здесь. Одиночный палец — на полосы-хорды ниже.
     ScaleRotateGestureHandler {
         started => {
             Screen.lock-scroll = true;
@@ -158,9 +143,6 @@ export component GlobeView inherits Rectangle {
             Screen.lock-scroll = false;
         }
 
-        // Круглая зона захвата из 16 горизонтальных полос-хорд. Доли полуширины
-        // хорды на каждом уровне (sqrt(1 - dy^2)) захардкожены, т.к. в Slint нет sqrt.
-        // Углы вне полос — касание проходит сквозь оверлей к скроллу.
         for f[i] in [
             0.348, 0.583, 0.726, 0.827, 0.899, 0.950, 0.982, 0.998,
             0.998, 0.982, 0.950, 0.899, 0.827, 0.726, 0.583, 0.348,

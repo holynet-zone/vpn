@@ -24,8 +24,6 @@ fn project(lon: f32, lat: f32, lon0: f32, lat0: f32, r: f32) -> (f32, f32, bool)
     (x, y, cosc >= 0.0)
 }
 
-// Предвычисленная ротация кадра: тригонометрия центра (lon0/lat0) считается один
-// раз, дальше на точку только умножения/сложения (без sin/cos).
 struct Rot {
     clon0: f32,
     slon0: f32,
@@ -47,8 +45,6 @@ impl Rot {
         }
     }
 
-    // Ортографическая проекция из предвычисленного 3D-вектора точки на сфере.
-    // Тождественна project(): X1=cos(lat)cos(dlon), Y1=cos(lat)sin(dlon), pz=sin(lat).
     #[inline]
     fn proj(&self, v: (f32, f32, f32)) -> (f32, f32, bool) {
         let x1 = v.0 * self.clon0 + v.1 * self.slon0;
@@ -83,7 +79,6 @@ fn polyline_vec(vecs: &[(f32, f32, f32)], rot: &Rot, out: &mut String) {
     }
 }
 
-// 3D-векторы точек материков — считаются один раз (данные неизменны).
 fn land_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
     static V: OnceLock<Vec<Vec<(f32, f32, f32)>>> = OnceLock::new();
     V.get_or_init(|| {
@@ -97,7 +92,6 @@ fn land_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
     })
 }
 
-// 3D-векторы сетки (меридианы/параллели) — сетка фиксирована, считаем один раз.
 fn graticule_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
     static V: OnceLock<Vec<Vec<(f32, f32, f32)>>> = OnceLock::new();
     V.get_or_init(|| {

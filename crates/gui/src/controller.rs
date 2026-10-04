@@ -1750,8 +1750,6 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
     {
         let w = window.as_weak();
         let cc = core.clone();
-        // Двупальцевый жест: масштаб → зум, угол поворота → долгота. Настоящий
-        // ре-рендер проекции на каждый кадр (без scale-костыля).
         st.on_globe_transform(move |scale: f32, rot_deg: f32| {
             if let Some(app) = w.upgrade() {
                 {

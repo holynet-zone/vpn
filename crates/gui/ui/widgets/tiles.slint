@@ -27,9 +27,6 @@ export component MenuLabel inherits HorizontalLayout {
     if root.count != "": Text { text: root.count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: bottom; }
 }
 
-// Единая строка внутри сгруппированной карточки (v4): min-height 52, без вертикальных
-// паддингов, inset-разделитель. Покрывает простые пункты меню, строки протокола
-// (modified-точка, disabled) и ссылки (trail ext). Один источник для правок высот.
 export component MenuRow inherits Rectangle {
     in property <string> title;
     in property <string> value;
