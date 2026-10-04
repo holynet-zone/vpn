@@ -2234,6 +2234,7 @@ dependencies = [
  "android-build",
  "jni 0.21.1",
  "rand 0.8.8",
+ "serde_json",
  "slint",
  "slint-build",
  "sys-locale",

@@ -3,6 +3,8 @@ use slint::{ModelRc, SharedString, VecModel};
 use crate::Lang;
 use crate::{AppState, DocSection, LegalDocRow};
 
+include!(concat!(env!("OUT_DIR"), "/licenses.rs"));
+
 type L2 = (&'static str, &'static str);
 type Sec = (L2, L2); // (heading, paragraph)
 
@@ -142,43 +144,12 @@ static DOCS: &[Doc] = &[
     Doc {
         key: "licenses",
         title: ("Open-source licenses", "Лицензии открытого ПО"),
-        updated: ("Build 2026.09", "Сборка 2026.09"),
+        updated: ("Generated at build", "Сгенерировано при сборке"),
         tldr: (
             "HolyNet is released under GPL-3.0 and builds on these projects.",
             "HolyNet распространяется по GPL-3.0 и опирается на эти проекты.",
         ),
-        sections: &[
-            (
-                ("wireguard-go", "wireguard-go"),
-                ("MIT · WireGuard LLC", "MIT · WireGuard LLC"),
-            ),
-            (
-                ("quic-go", "quic-go"),
-                ("MIT · The quic-go authors", "MIT · The quic-go authors"),
-            ),
-            (
-                ("snow (Noise Protocol)", "snow (Noise Protocol)"),
-                ("Apache-2.0 · mcginty", "Apache-2.0 · mcginty"),
-            ),
-            (
-                (
-                    "RustCrypto ChaCha20-Poly1305",
-                    "RustCrypto ChaCha20-Poly1305",
-                ),
-                ("Apache-2.0 / MIT", "Apache-2.0 / MIT"),
-            ),
-            (
-                ("Manrope", "Manrope"),
-                (
-                    "SIL OFL 1.1 · Mikhail Sharanda",
-                    "SIL OFL 1.1 · Mikhail Sharanda",
-                ),
-            ),
-            (
-                ("IBM Plex Mono", "IBM Plex Mono"),
-                ("SIL OFL 1.1 · IBM Corp.", "SIL OFL 1.1 · IBM Corp."),
-            ),
-        ],
+        sections: &[],
     },
 ];
 
@@ -253,16 +224,27 @@ pub fn render(st: &AppState, lang: Lang, about_doc: Option<usize>, upd: i32) {
         st.set_doc_updated(p2(lang, d.updated).into());
         st.set_doc_tldr(p2(lang, d.tldr).into());
         st.set_doc_url(doc_url(idx).into());
-        let secs: Vec<DocSection> = d
-            .sections
-            .iter()
-            .enumerate()
-            .map(|(i, (h, p))| DocSection {
-                n: format!("{:02}", i + 1).into(),
-                h: p2(lang, *h).into(),
-                p: p2(lang, *p).into(),
-            })
-            .collect();
+        let secs: Vec<DocSection> = if d.key == "licenses" {
+            LICENSES
+                .iter()
+                .enumerate()
+                .map(|(i, (name, version, license))| DocSection {
+                    n: format!("{:02}", i + 1).into(),
+                    h: (*name).into(),
+                    p: format!("v{} · {}", version, license).into(),
+                })
+                .collect()
+        } else {
+            d.sections
+                .iter()
+                .enumerate()
+                .map(|(i, (h, p))| DocSection {
+                    n: format!("{:02}", i + 1).into(),
+                    h: p2(lang, *h).into(),
+                    p: p2(lang, *p).into(),
+                })
+                .collect()
+        };
         st.set_doc_sections(ModelRc::new(VecModel::from(secs)));
     } else {
         st.set_doc_sections(ModelRc::new(VecModel::from(Vec::<DocSection>::new())));
