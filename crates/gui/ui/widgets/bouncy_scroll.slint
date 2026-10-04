@@ -21,16 +21,14 @@ export component BouncyScroll inherits Rectangle {
     property <length> max-scroll: max(0px, root.content-h - root.vh);
     // Позиция для индикатора (без учёта натяжения за край).
     property <length> scroll: max(0px, min(root.max-scroll, -fl.content-y));
-    property <length> eff-content-h: max(root.content-h, root.vh + 1px);
 
     fl := Flickable {
         overshoot-enabled: true;
         interactive: !Screen.lock-scroll;
-        content-height: root.eff-content-h;
+        content-height: root.content-h;
         inner := VerticalLayout {
             width: fl.width;
-            height: root.eff-content-h;
-            alignment: start;
+            height: root.content-h;
             @children
         }
     }
