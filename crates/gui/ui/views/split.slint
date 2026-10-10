@@ -69,6 +69,17 @@ component AppLine inherits Rectangle {
     touch := TouchArea { clicked => { root.flip(); } }
 }
 
+component ModeMeasure inherits VerticalLayout {
+    in property <string> name;
+    in property <string> hint;
+    in property <length> w;
+    padding-top: 13px;
+    padding-bottom: 13px;
+    spacing: 3px;
+    Text { width: root.w; text: root.name; font-size: 14px; font-weight: 600; wrap: word-wrap; }
+    Text { width: root.w; text: root.hint; font-size: 11.5px; wrap: word-wrap; }
+}
+
 export component SplitView inherits VerticalLayout {
     spacing: 16px;
 
@@ -132,6 +143,7 @@ export component SplitView inherits VerticalLayout {
                 border-radius: 16px;
                 VerticalLayout {
                     for m in AppState.split-modes: Rectangle {
+                        height: mode-measure.preferred-height;
                         background: mtouch.pressed ? Theme.sf2 : transparent;
                         if m.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
                         HorizontalLayout {
@@ -161,6 +173,16 @@ export component SplitView inherits VerticalLayout {
                         mtouch := TouchArea { clicked => { AppState.split-set-mode(m.key); } }
                     }
                 }
+                mode-measure := GridLayout {
+                    opacity: 0;
+                    for m in AppState.split-modes: ModeMeasure {
+                        row: 0;
+                        col: 0;
+                        w: mode-measure.width - 67px;
+                        name: m.name;
+                        hint: m.hint;
+                    }
+                }
             }
         }
 
@@ -187,27 +209,34 @@ export component SplitView inherits VerticalLayout {
                         TouchArea { clicked => { AppState.split-sug-dismiss(); } }
                     }
                 }
-                HorizontalLayout {
-                    spacing: 6px;
-                    alignment: start;
-                    // chips wrap manually is not available; show inline
-                    for chip in AppState.split-sug: Rectangle {
-                        border-radius: 999px;
-                        background: Theme.sf;
-                        HorizontalLayout {
-                            padding-left: 5px;
-                            padding-right: 10px;
-                            padding-top: 5px;
-                            padding-bottom: 5px;
-                            spacing: 7px;
-                            Rectangle {
-                                width: 20px;
-                                height: 20px;
-                                border-radius: 6px;
-                                background: chip.color;
-                                Text { text: chip.letter; font-size: 10px; font-weight: 800; color: #ffffff; }
+                Flickable {
+                    height: chips.preferred-height;
+                    viewport-width: chips.preferred-width;
+                    viewport-height: self.height;
+                    chips := HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for chip in AppState.split-sug: Rectangle {
+                            border-radius: 999px;
+                            background: Theme.sf;
+                            HorizontalLayout {
+                                padding-left: 5px;
+                                padding-right: 10px;
+                                padding-top: 5px;
+                                padding-bottom: 5px;
+                                spacing: 7px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 6px;
+                                        background: chip.color;
+                                        Text { text: chip.letter; font-size: 10px; font-weight: 800; color: #ffffff; }
+                                    }
+                                }
+                                Text { text: chip.name; font-size: 11.5px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
                             }
-                            Text { text: chip.name; font-size: 11.5px; font-weight: 600; color: Theme.t; vertical-alignment: center; }
                         }
                     }
                 }
