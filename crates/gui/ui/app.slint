@@ -18,6 +18,7 @@ export component AppWindow inherits Window {
     background: Theme.page;
 
     property <bool> wide: self.width >= 900px;
+    out property <image> app-icon: @image-url("../assets/logo-desktop.png");
 
     function push-insets() {
         Screen.safe-top = self.safe-area-insets.top;

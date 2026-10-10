@@ -47,26 +47,11 @@ export component AboutView inherits VerticalLayout {
             spacing: 14px;
             HorizontalLayout {
                 alignment: center;
-                Rectangle {
-                    width: 84px;
-                    height: 84px;
-                    border-radius: 24px;
-                    background: @linear-gradient(145deg, Theme.a1, Theme.a2);
-                    Rectangle {
-                        width: 40px;
-                        height: 40px;
-                        border-radius: 20px;
-                        border-width: 3.5px;
-                        border-color: Theme.on;
-                        y: parent.height / 2 - self.height / 2 - 3px;
-                    }
-                    Rectangle {
-                        width: 10px;
-                        height: 10px;
-                        border-radius: 5px;
-                        background: Theme.on;
-                        y: parent.height / 2 - self.height / 2 - 13px;
-                    }
+                Image {
+                    source: @image-url("../../assets/logo-about.png");
+                    width: 92px;
+                    height: 92px;
+                    image-fit: contain;
                 }
             }
             VerticalLayout {
