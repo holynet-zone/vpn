@@ -71,7 +71,7 @@ export component ShieldView inherits VerticalLayout {
             border-radius: 16px;
             VerticalLayout {
                 for iss in AppState.sh-issues: Rectangle {
-                    if iss.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+                    if iss.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
                     HorizontalLayout {
                         padding-left: 16px;
                         padding-right: 12px;

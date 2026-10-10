@@ -21,7 +21,7 @@ component AppLine inherits Rectangle {
     in property <SplitAppRow> item;
     callback flip();
     background: touch.pressed ? Theme.sf2 : transparent;
-    if root.item.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+    if root.item.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 14px;
@@ -133,7 +133,7 @@ export component SplitView inherits VerticalLayout {
                 VerticalLayout {
                     for m in AppState.split-modes: Rectangle {
                         background: mtouch.pressed ? Theme.sf2 : transparent;
-                        if m.top-border: Rectangle { y: 0; height: 1px; background: Theme.ln; }
+                        if m.top-border: Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
                         HorizontalLayout {
                             padding-left: 16px;
                             padding-right: 16px;
