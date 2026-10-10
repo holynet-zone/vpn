@@ -1,0 +1,77 @@
+import { Theme } from "../theme.slint";
+
+export component BottomSheet inherits Rectangle {
+    in property <bool> open;
+    in property <length> max-sheet-height: min(root.height * 0.82, 560px);
+    in property <bool> hug-content: false;
+    in property <length> grab-height: 76px;
+    callback close();
+
+    property <length> drag-y: 0px;
+    property <bool> dragging: false;
+    property <length> sheet-height: root.hug-content
+        ? min(root.max-sheet-height, chrome.preferred-height)
+        : root.max-sheet-height;
+    property <float> close-progress: root.dragging
+        ? min(1.0, root.drag-y / root.sheet-height)
+        : (root.open ? 0.0 : 1.0);
+    animate close-progress {
+        duration: root.dragging ? 0ms : 260ms;
+        easing: cubic-bezier(0.2, 0.85, 0.25, 1);
+    }
+
+    visible: root.open || root.close-progress < 0.999;
+
+    Rectangle {
+        background: #080a0e70;
+        opacity: 1.0 - root.close-progress;
+        TouchArea { clicked => { root.close(); } }
+    }
+
+    sheet := Rectangle {
+        width: 100%;
+        height: root.sheet-height;
+        y: parent.height - root.sheet-height + root.close-progress * root.sheet-height;
+        background: Theme.sf;
+        border-top-left-radius: 28px;
+        border-top-right-radius: 28px;
+        border-width: 1px;
+        border-color: Theme.ln;
+        clip: true;
+
+        chrome := VerticalLayout {
+            padding-top: 12px;
+            padding-bottom: 16px;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle { width: 38px; height: 4px; border-radius: 2px; background: Theme.ln; }
+            }
+            @children
+        }
+    }
+
+    grab := TouchArea {
+        enabled: root.open;
+        x: 0;
+        width: 100%;
+        y: root.height - root.sheet-height;
+        height: root.grab-height;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) {
+                root.dragging = true;
+            }
+            if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
+                root.dragging = false;
+                if (root.drag-y > root.sheet-height * 0.28) {
+                    root.close();
+                }
+                root.drag-y = 0px;
+            }
+        }
+        moved => {
+            if (root.dragging) {
+                root.drag-y = max(0px, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+}
