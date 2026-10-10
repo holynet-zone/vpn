@@ -3,6 +3,7 @@ import { Theme } from "../theme.slint";
 export component Card inherits Rectangle {
     in property <bool> elevated: true;
     in property <brush> stroke: Theme.ln;
+    clip: true;
     background: Theme.sf;
     border-radius: Theme.radius-md;
     border-width: 1px;
