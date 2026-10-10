@@ -20,6 +20,17 @@ component RadioDot inherits Rectangle {
     }
 }
 
+component TransportMeasure inherits VerticalLayout {
+    in property <string> title;
+    in property <string> desc;
+    in property <length> w;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    spacing: 3px;
+    Text { width: root.w; text: root.title; font-size: 12.5px; font-weight: 600; wrap: word-wrap; }
+    Text { width: root.w; text: root.desc; font-size: 10.5px; wrap: word-wrap; }
+}
+
 export component TransportSheet inherits BottomSheet {
     open: Screen.transport-sheet;
     close => { Screen.close-transport-sheet(); }
@@ -57,49 +68,65 @@ export component TransportSheet inherits BottomSheet {
         }
     }
 
-    Flickable {
+    Rectangle {
         vertical-stretch: 1;
-        content-height: list.preferred-height;
-        list := VerticalLayout {
-            padding-top: 6px;
-            padding-bottom: 6px;
-            spacing: 7px;
-            for tr in AppState.transports: Rectangle {
-                border-radius: 16px;
-                background: tr.selected ? Theme.sf2 : transparent;
-                border-width: 1px;
-                border-color: tr.selected ? Theme.a1 : Theme.ln;
-                HorizontalLayout {
-                    padding: 12px;
-                    spacing: 12px;
-                    Rectangle {
-                        width: 44px;
-                        height: 30px;
-                        border-radius: 9px;
-                        background: Theme.sf2;
-                        Text {
-                            text: tr.name;
-                            font-size: 10px;
-                            font-weight: 600;
-                            color: tr.selected ? Theme.a1 : Theme.t2;
-                            font-family: "IBM Plex Mono";
+        Flickable {
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 7px;
+                for tr in AppState.transports: Rectangle {
+                    height: tmeas.preferred-height;
+                    border-radius: 16px;
+                    background: tr.selected ? Theme.sf2 : transparent;
+                    border-width: 1px;
+                    border-color: tr.selected ? Theme.a1 : Theme.ln;
+                    HorizontalLayout {
+                        padding: 12px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 44px;
+                                height: 30px;
+                                border-radius: 9px;
+                                background: Theme.sf2;
+                                Text {
+                                    text: tr.name;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    color: tr.selected ? Theme.a1 : Theme.t2;
+                                    font-family: "IBM Plex Mono";
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            Text { text: tr.title; font-size: 12.5px; font-weight: 600; color: Theme.t; }
+                            Text { text: tr.desc; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
+                        }
+                        VerticalLayout { alignment: center; RadioDot { on: tr.selected; } }
+                    }
+                    TouchArea {
+                        clicked => {
+                            AppState.select-transport(tr.id);
+                            Screen.close-transport-sheet();
                         }
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 3px;
-                        Text { text: tr.title; font-size: 12.5px; font-weight: 600; color: Theme.t; }
-                        Text { text: tr.desc; font-size: 10.5px; color: Theme.t2; wrap: word-wrap; }
-                    }
-                    Rectangle {}
-                    VerticalLayout { alignment: center; RadioDot { on: tr.selected; } }
                 }
-                TouchArea {
-                    clicked => {
-                        AppState.select-transport(tr.id);
-                        Screen.close-transport-sheet();
-                    }
-                }
+            }
+        }
+        tmeas := GridLayout {
+            opacity: 0;
+            for tr in AppState.transports: TransportMeasure {
+                row: 0;
+                col: 0;
+                w: tmeas.width - 109px;
+                title: tr.title;
+                desc: tr.desc;
             }
         }
     }
