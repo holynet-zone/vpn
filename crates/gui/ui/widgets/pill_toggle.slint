@@ -10,7 +10,9 @@ export component PillToggle inherits Rectangle {
     height: track-height;
     border-radius: track-height / 2;
     background: on ? Theme.ok : Theme.sf2;
-    animate background { duration: 180ms; easing: ease; }
+    border-width: 1px;
+    border-color: on ? Theme.ok : Theme.ln;
+    animate background, border-color { duration: 180ms; easing: ease; }
 
     knob := Rectangle {
         width: parent.height - 6px;
