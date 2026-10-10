@@ -17,16 +17,20 @@ component KvRow inherits HorizontalLayout {
 }
 
 component SpacesContent inherits VerticalLayout {
-    padding-left: 18px;
-    padding-right: 18px;
-    spacing: 12px;
+    spacing: 10px;
 
     if !AppState.add-open: VerticalLayout {
         spacing: 12px;
         HorizontalLayout {
+            padding-left: 18px;
+            padding-right: 18px;
             Text { text: Str.spaces; font-size: 18px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; horizontal-stretch: 1; }
             Text { text: AppState.space-count; font-size: 10.5px; font-family: "IBM Plex Mono"; color: Theme.t2; vertical-alignment: center; }
         }
+        VerticalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            spacing: 12px;
         for sp in AppState.space-rows: Rectangle {
             border-radius: 17px;
             background: sp.current ? Theme.sf2 : Theme.sf;
@@ -53,17 +57,24 @@ component SpacesContent inherits VerticalLayout {
             GhostBtn { label: Str.space-leave; tint: Theme.wn; stroke: Theme.wn; clicked => { AppState.leave-space(); } }
             GhostBtn { label: Str.back; clicked => { AppState.close-spaces(); } }
         }
+        }
     }
 
     if AppState.add-open: VerticalLayout {
         spacing: 12px;
         HorizontalLayout {
+            padding-left: 18px;
+            padding-right: 18px;
             Text { text: Str.add-title; font-size: 18px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; horizontal-stretch: 1; }
             Rectangle {
                 Text { text: Str.back; font-size: 11px; font-weight: 600; color: Theme.t2; }
                 TouchArea { clicked => { AppState.close-add-space(); } }
             }
         }
+        VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 12px;
         if AppState.add-step == AddStep.idle: VerticalLayout {
             spacing: 11px;
             Text { text: Str.add-lead; font-size: 11.5px; color: Theme.t2; wrap: word-wrap; }
@@ -140,6 +151,7 @@ component SpacesContent inherits VerticalLayout {
                 }
             }
             GhostBtn { label: Str.cfg-retry; tint: Theme.a1; stroke: Theme.a1; clicked => { AppState.reset-cfg(); } }
+        }
         }
     }
 }
