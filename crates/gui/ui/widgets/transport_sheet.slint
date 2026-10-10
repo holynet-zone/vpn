@@ -26,9 +26,6 @@ export component TransportSheet inherits BottomSheet {
 
     VerticalLayout {
         vertical-stretch: 0;
-        padding-left: 18px;
-        padding-right: 18px;
-        padding-top: 12px;
         padding-bottom: 10px;
         spacing: 4px;
         Text { text: Str.transport; font-size: 19px; font-weight: 800; letter-spacing: -0.4px; color: Theme.t; }
@@ -40,8 +37,6 @@ export component TransportSheet inherits BottomSheet {
         height: 62px;
         border-radius: 16px;
         background: Theme.sf2;
-        x: 14px;
-        width: parent.width - 28px;
         HorizontalLayout {
             padding: 14px;
             spacing: 12px;
@@ -66,7 +61,8 @@ export component TransportSheet inherits BottomSheet {
         vertical-stretch: 1;
         content-height: list.preferred-height;
         list := VerticalLayout {
-            padding: 14px;
+            padding-top: 6px;
+            padding-bottom: 6px;
             spacing: 7px;
             for tr in AppState.transports: Rectangle {
                 border-radius: 16px;

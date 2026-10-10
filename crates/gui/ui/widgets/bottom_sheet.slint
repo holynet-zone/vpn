@@ -1,9 +1,11 @@
 import { Theme } from "../theme.slint";
+import { Screen } from "../screen.slint";
 
 export component BottomSheet inherits Rectangle {
     in property <bool> open;
     in property <length> max-sheet-height: min(root.height * 0.82, 560px);
     in property <bool> hug-content: false;
+    in property <length> content-padding: 16px;
     in property <length> grab-height: 76px;
     callback close();
 
@@ -30,7 +32,7 @@ export component BottomSheet inherits Rectangle {
 
     sheet := Rectangle {
         width: 100%;
-        height: root.sheet-height;
+        height: root.sheet-height + 80px;
         y: parent.height - root.sheet-height + root.close-progress * root.sheet-height;
         background: Theme.sf;
         border-top-left-radius: 28px;
@@ -40,10 +42,16 @@ export component BottomSheet inherits Rectangle {
         clip: true;
 
         chrome := VerticalLayout {
+            width: 100%;
+            height: root.sheet-height;
+            y: 0;
             padding-top: 12px;
-            padding-bottom: 16px;
+            padding-bottom: 16px + Screen.safe-bottom;
+            padding-left: root.content-padding;
+            padding-right: root.content-padding;
             HorizontalLayout {
                 alignment: center;
+                padding-bottom: 12px;
                 Rectangle { width: 38px; height: 4px; border-radius: 2px; background: Theme.ln; }
             }
             @children
