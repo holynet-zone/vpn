@@ -32,6 +32,26 @@ component Spinner inherits Rectangle {
     }
 }
 
+component DocSectionView inherits Rectangle {
+    in property <string> n;
+    in property <string> h;
+    in property <string> p;
+    height: hmeas.preferred-height + 6px + pmeas.preferred-height;
+
+    VerticalLayout {
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 14px;
+            Text { text: root.n; width: 20px; font-size: 14.5px; font-weight: 700; font-family: "IBM Plex Mono"; color: Theme.t2; }
+            Text { text: root.h; font-size: 14.5px; font-weight: 700; color: Theme.t; wrap: word-wrap; horizontal-stretch: 1; }
+        }
+        Text { text: root.p; font-size: 13px; color: Theme.t2; wrap: word-wrap; }
+    }
+
+    hmeas := Text { opacity: 0; width: root.width - 34px; text: root.h; font-size: 14.5px; font-weight: 700; wrap: word-wrap; }
+    pmeas := Text { opacity: 0; width: root.width; text: root.p; font-size: 13px; wrap: word-wrap; }
+}
+
 export component AboutView inherits VerticalLayout {
     spacing: 22px;
 
@@ -163,14 +183,10 @@ export component AboutView inherits VerticalLayout {
 
         VerticalLayout {
             spacing: 22px;
-            for sec in AppState.doc-sections: VerticalLayout {
-                spacing: 6px;
-                HorizontalLayout {
-                    spacing: 14px;
-                    Text { text: sec.n; width: 20px; font-size: 14.5px; font-weight: 700; font-family: "IBM Plex Mono"; color: Theme.t2; }
-                    Text { text: sec.h; font-size: 14.5px; font-weight: 700; color: Theme.t; wrap: word-wrap; horizontal-stretch: 1; }
-                }
-                Text { text: sec.p; font-size: 13px; color: Theme.t2; wrap: word-wrap; }
+            for sec in AppState.doc-sections: DocSectionView {
+                n: sec.n;
+                h: sec.h;
+                p: sec.p;
             }
         }
 
