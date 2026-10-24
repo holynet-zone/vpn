@@ -1745,8 +1745,8 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                     let (sr, cr) = c.globe_roll.to_radians().sin_cos();
                     let gx = dx * cr + dy * sr;
                     let gy = -dx * sr + dy * cr;
-                    c.globe_rot_x += gx * 0.32;
-                    c.globe_rot_y = (c.globe_rot_y - gy * 0.32).clamp(-78.0, 78.0);
+                    c.globe_rot_x = (c.globe_rot_x + gx * 0.32).rem_euclid(360.0);
+                    c.globe_rot_y = (c.globe_rot_y - gy * 0.32).rem_euclid(360.0);
                 }
                 render_globe(&app, &cc.borrow());
             }
