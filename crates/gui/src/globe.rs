@@ -14,14 +14,8 @@ pub fn radius(zoom: f32) -> f32 {
     (H.min(W) / 2.0) * 0.92 * zoom
 }
 
-fn project(lon: f32, lat: f32, lon0: f32, lat0: f32, r: f32) -> (f32, f32, bool) {
-    let dlon = (lon - lon0).to_radians();
-    let latr = lat.to_radians();
-    let lat0r = lat0.to_radians();
-    let cosc = lat0r.sin() * latr.sin() + lat0r.cos() * latr.cos() * dlon.cos();
-    let x = CX + r * latr.cos() * dlon.sin();
-    let y = CY - r * (lat0r.cos() * latr.sin() - lat0r.sin() * latr.cos() * dlon.cos());
-    (x, y, cosc >= 0.0)
+fn project(lon: f32, lat: f32, lon0: f32, lat0: f32, roll: f32, r: f32) -> (f32, f32, bool) {
+    Rot::new(lon0, lat0, roll, r).proj(latlon_vec(lon, lat))
 }
 
 struct Rot {
@@ -29,18 +23,23 @@ struct Rot {
     slon0: f32,
     clat0: f32,
     slat0: f32,
+    croll: f32,
+    sroll: f32,
     r: f32,
 }
 
 impl Rot {
-    fn new(lon0: f32, lat0: f32, r: f32) -> Self {
+    fn new(lon0: f32, lat0: f32, roll: f32, r: f32) -> Self {
         let lon0r = lon0.to_radians();
         let lat0r = lat0.to_radians();
+        let rollr = roll.to_radians();
         Self {
             clon0: lon0r.cos(),
             slon0: lon0r.sin(),
             clat0: lat0r.cos(),
             slat0: lat0r.sin(),
+            croll: rollr.cos(),
+            sroll: rollr.sin(),
             r,
         }
     }
@@ -50,8 +49,10 @@ impl Rot {
         let x1 = v.0 * self.clon0 + v.1 * self.slon0;
         let y1 = v.1 * self.clon0 - v.0 * self.slon0;
         let vis = self.slat0 * v.2 + self.clat0 * x1 >= 0.0;
-        let x = CX + self.r * y1;
-        let y = CY - self.r * (self.clat0 * v.2 - self.slat0 * x1);
+        let px = self.r * y1;
+        let py = -self.r * (self.clat0 * v.2 - self.slat0 * x1);
+        let x = CX + px * self.croll - py * self.sroll;
+        let y = CY + px * self.sroll + py * self.croll;
         (x, y, vis)
     }
 }
@@ -122,8 +123,8 @@ fn graticule_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
     })
 }
 
-fn polyline(points: &[(f32, f32)], lon0: f32, lat0: f32, r: f32) -> String {
-    let rot = Rot::new(lon0, lat0, r);
+fn polyline(points: &[(f32, f32)], lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
+    let rot = Rot::new(lon0, lat0, roll, r);
     let mut out = String::new();
     let mut pen = false;
     for &(lon, lat) in points {
@@ -142,8 +143,8 @@ fn polyline(points: &[(f32, f32)], lon0: f32, lat0: f32, r: f32) -> String {
     out
 }
 
-fn graticule(lon0: f32, lat0: f32, r: f32) -> String {
-    let rot = Rot::new(lon0, lat0, r);
+fn graticule(lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
+    let rot = Rot::new(lon0, lat0, roll, r);
     let mut out = String::new();
     for line in graticule_vecs() {
         polyline_vec(line, &rot, &mut out);
@@ -151,8 +152,8 @@ fn graticule(lon0: f32, lat0: f32, r: f32) -> String {
     out
 }
 
-fn land_path(lon0: f32, lat0: f32, r: f32) -> String {
-    let rot = Rot::new(lon0, lat0, r);
+fn land_path(lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
+    let rot = Rot::new(lon0, lat0, roll, r);
     let mut out = String::new();
     for ring in land_vecs() {
         polyline_vec(ring, &rot, &mut out);
@@ -179,14 +180,14 @@ fn slerp(a: (f32, f32), b: (f32, f32), t: f32) -> (f32, f32) {
     (y.atan2(x).to_degrees(), z.asin().to_degrees())
 }
 
-fn arc_path(a: (f32, f32), b: (f32, f32), lon0: f32, lat0: f32, r: f32) -> String {
+fn arc_path(a: (f32, f32), b: (f32, f32), lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
     let steps = 28;
     let mut pts = Vec::with_capacity(steps + 1);
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
         pts.push(slerp(a, b, t));
     }
-    polyline(&pts, lon0, lat0, r)
+    polyline(&pts, lon0, lat0, roll, r)
 }
 
 pub struct Frame {
@@ -203,6 +204,7 @@ pub fn render(
     lang: Lang,
     rot_x: f32,
     rot_y: f32,
+    roll: f32,
     zoom: f32,
     probing: bool,
 ) -> Frame {
@@ -245,7 +247,7 @@ pub fn render(
             0
         };
         arcs.push(GlobeArc {
-            d: arc_path((a.lon, a.lat), (b.lon, b.lat), lon0, lat0, r).into(),
+            d: arc_path((a.lon, a.lat), (b.lon, b.lat), lon0, lat0, roll, r).into(),
             kind,
             width: if act { 2.4 } else { 1.1 },
             dash,
@@ -257,7 +259,15 @@ pub fn render(
         path.first().and_then(|id| find(id)),
     ) {
         arcs.push(GlobeArc {
-            d: arc_path((me.lon, me.lat), (first.lon, first.lat), lon0, lat0, r).into(),
+            d: arc_path(
+                (me.lon, me.lat),
+                (first.lon, first.lat),
+                lon0,
+                lat0,
+                roll,
+                r,
+            )
+            .into(),
             kind: 1,
             width: 2.0,
             dash: 2,
@@ -266,7 +276,7 @@ pub fn render(
 
     let mut dots: Vec<GlobeDot> = Vec::new();
     for n in &nodes {
-        let (x, y, vis) = project(n.lon, n.lat, lon0, lat0, r);
+        let (x, y, vis) = project(n.lon, n.lat, lon0, lat0, roll, r);
         if !vis {
             continue;
         }
@@ -331,8 +341,8 @@ pub fn render(
     }
 
     Frame {
-        graticule: graticule(lon0, lat0, r).into(),
-        land: land_path(lon0, lat0, r).into(),
+        graticule: graticule(lon0, lat0, roll, r).into(),
+        land: land_path(lon0, lat0, roll, r).into(),
         arcs: ModelRc::new(VecModel::from(arcs)),
         dots: ModelRc::new(VecModel::from(dots)),
         radius: r,
@@ -344,6 +354,7 @@ pub fn hit_test(
     lang: Lang,
     rot_x: f32,
     rot_y: f32,
+    roll: f32,
     zoom: f32,
     tx: f32,
     ty: f32,
@@ -356,7 +367,7 @@ pub fn hit_test(
         if n.is_me || n.rtt < 0 {
             continue;
         }
-        let (x, y, vis) = project(n.lon, n.lat, lon0, lat0, r);
+        let (x, y, vis) = project(n.lon, n.lat, lon0, lat0, roll, r);
         if !vis {
             continue;
         }

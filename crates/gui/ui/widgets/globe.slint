@@ -42,7 +42,7 @@ component GlobeHit inherits TouchArea {
     }
 }
 
-export component GlobeView inherits Rectangle {
+export component GlobeVisual inherits Rectangle {
     property <float> sc: self.width / 300px;
     height: self.width * 280 / 300;
 
@@ -55,9 +55,6 @@ export component GlobeView inherits Rectangle {
     function dot-stroke(kind: int) -> brush {
         kind == 1 ? Theme.a1 : kind == 2 ? Theme.wn : kind == 3 ? Theme.t : kind == 4 ? Theme.t2 : Theme.a1
     }
-    property <length> cx: 150 * root.sc * 1px;
-    property <length> cy: 140 * root.sc * 1px;
-    property <length> rad: AppState.globe-radius * root.sc * 1px;
 
     Rectangle {
         x: (150 - AppState.globe-radius) * root.sc * 1px;
@@ -127,9 +124,29 @@ export component GlobeView inherits Rectangle {
         font-family: "IBM Plex Mono";
         color: Theme.t;
     }
+}
+
+export component GlobeInput inherits Rectangle {
+    property <float> sc: self.width / 300px;
+    height: self.width * 280 / 300;
+    property <length> cx: 150 * root.sc * 1px;
+    property <length> cy: 140 * root.sc * 1px;
+    property <length> rad: AppState.globe-radius * root.sc * 1px;
+
+    property <bool> cooling: false;
+    cool-timer := Timer {
+        interval: 180ms;
+        running: root.cooling;
+        triggered => {
+            root.cooling = false;
+            Screen.globe-gesture = false;
+        }
+    }
 
     ScaleRotateGestureHandler {
         started => {
+            root.cooling = false;
+            Screen.globe-gesture = true;
             Screen.lock-scroll = true;
             AppState.globe-pinch-start();
         }
@@ -138,9 +155,11 @@ export component GlobeView inherits Rectangle {
         }
         ended => {
             Screen.lock-scroll = false;
+            root.cooling = true;
         }
         cancelled => {
             Screen.lock-scroll = false;
+            root.cooling = true;
         }
 
         for f[i] in [
@@ -156,4 +175,10 @@ export component GlobeView inherits Rectangle {
             off-y: self.y;
         }
     }
+}
+
+export component GlobeView inherits Rectangle {
+    height: self.width * 280 / 300;
+    GlobeVisual { width: 100%; }
+    GlobeInput { width: 100%; }
 }

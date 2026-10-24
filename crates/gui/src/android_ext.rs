@@ -61,6 +61,21 @@ pub fn request_high_refresh_rate() {
     }
 }
 
+pub fn haptic_detent() {
+    let r = with_helper(|env, activity, class| {
+        env.call_static_method(
+            class,
+            jni_str!("hapticDetent"),
+            jni_sig!("(Landroid/app/Activity;)V"),
+            &[JValue::Object(activity)],
+        )
+        .map(|_| ())
+    });
+    if let Err(e) = r {
+        eprintln!("[holynet] haptic_detent: {e:?}");
+    }
+}
+
 fn with_helper<F>(f: F) -> Result<(), jni::errors::Error>
 where
     F: FnOnce(&mut Env, &JObject, &JClass) -> Result<(), jni::errors::Error>,

@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.view.Display;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsetsController;
@@ -43,6 +44,28 @@ public final class HolyNetAndroid {
                     }
                     decor.setSystemUiVisibility(flags);
                 }
+            }
+        });
+    }
+
+    public static void hapticDetent(final Activity activity) {
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Window w = activity.getWindow();
+                View v = (w != null) ? w.getDecorView() : null;
+                if (v == null) {
+                    return;
+                }
+                int flags = HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+                          | HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING;
+                int effect = (Build.VERSION.SDK_INT >= 30)
+                        ? HapticFeedbackConstants.CONFIRM
+                        : HapticFeedbackConstants.LONG_PRESS;
+                v.performHapticFeedback(effect, flags);
             }
         });
     }

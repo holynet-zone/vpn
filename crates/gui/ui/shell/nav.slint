@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { Screen } from "../screen.slint";
 
 export component NavIcon inherits Rectangle {
     in property <int> kind;
@@ -130,7 +131,7 @@ export component BottomNavItem inherits Rectangle {
             Text { text: root.label; font-size: 9.5px; font-weight: 600; color: root.tint; }
         }
     }
-    TouchArea { clicked => { root.clicked(); } }
+    TouchArea { clicked => { if (!Screen.globe-gesture) { root.clicked(); } } }
 }
 
 export component SideNavItem inherits Rectangle {

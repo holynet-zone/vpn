@@ -49,9 +49,11 @@ struct Core {
     qr_shown: bool,
     globe_rot_x: f32,
     globe_rot_y: f32,
+    globe_roll: f32,
     globe_zoom: f32,
     globe_zoom_start: f32,
-    globe_rot_start_x: f32,
+    globe_roll_start: f32,
+    globe_expanded: bool,
     about_doc: Option<usize>,
     about_upd: i32,
     _upd_timer: Timer,
@@ -108,9 +110,11 @@ impl Core {
             qr_shown: false,
             globe_rot_x: -15.0,
             globe_rot_y: -18.0,
+            globe_roll: 0.0,
             globe_zoom: 1.0,
             globe_zoom_start: 1.0,
-            globe_rot_start_x: 0.0,
+            globe_roll_start: 0.0,
+            globe_expanded: false,
             about_doc: None,
             about_upd: 0,
             _upd_timer: Timer::default(),
@@ -221,6 +225,13 @@ fn open_url(url: &str) {
     )))]
     {
         let _ = url;
+    }
+}
+
+fn haptic_detent() {
+    #[cfg(target_os = "android")]
+    {
+        crate::android_ext::haptic_detent();
     }
 }
 
@@ -517,6 +528,7 @@ fn render_globe(app: &AppWindow, c: &Core) {
         c.lang,
         c.globe_rot_x,
         c.globe_rot_y,
+        c.globe_roll,
         c.globe_zoom,
         c.probing,
     );
@@ -525,6 +537,7 @@ fn render_globe(app: &AppWindow, c: &Core) {
     st.set_globe_arcs(f.arcs);
     st.set_globe_dots(f.dots);
     st.set_globe_radius(f.radius);
+    st.set_globe_expanded(c.globe_expanded);
 }
 
 fn render_spaces(app: &AppWindow, c: &Core) {
@@ -1729,8 +1742,11 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 {
                     let mut c = cc.borrow_mut();
-                    c.globe_rot_x += dx * 0.32;
-                    c.globe_rot_y = (c.globe_rot_y - dy * 0.32).clamp(-78.0, 78.0);
+                    let (sr, cr) = c.globe_roll.to_radians().sin_cos();
+                    let gx = dx * cr + dy * sr;
+                    let gy = -dx * sr + dy * cr;
+                    c.globe_rot_x += gx * 0.32;
+                    c.globe_rot_y = (c.globe_rot_y - gy * 0.32).clamp(-78.0, 78.0);
                 }
                 render_globe(&app, &cc.borrow());
             }
@@ -1755,7 +1771,7 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
         st.on_globe_pinch_start(move || {
             let mut c = cc.borrow_mut();
             c.globe_zoom_start = c.globe_zoom;
-            c.globe_rot_start_x = c.globe_rot_x;
+            c.globe_roll_start = c.globe_roll;
         });
     }
     {
@@ -1763,17 +1779,29 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
         let cc = core.clone();
         st.on_globe_transform(move |scale: f32, rot_deg: f32| {
             if let Some(app) = w.upgrade() {
-                {
+                let detent = {
                     let mut c = cc.borrow_mut();
                     let s = if scale.is_finite() && scale > 0.0 {
                         scale
                     } else {
                         1.0
                     };
-                    c.globe_zoom = (c.globe_zoom_start * s).clamp(0.82, 1.9);
+                    let raw = c.globe_zoom_start * s;
+                    let cap = if c.globe_expanded { 1.9 } else { 1.16 };
+                    c.globe_zoom = raw.clamp(0.82, cap);
                     if rot_deg.is_finite() {
-                        c.globe_rot_x = c.globe_rot_start_x + rot_deg;
+                        c.globe_roll = c.globe_roll_start + rot_deg;
                     }
+                    let was = c.globe_expanded;
+                    if !c.globe_expanded && raw > 1.16 * 1.08 {
+                        c.globe_expanded = true;
+                    } else if c.globe_expanded && raw < 1.16 * 0.95 {
+                        c.globe_expanded = false;
+                    }
+                    c.globe_expanded != was
+                };
+                if detent {
+                    haptic_detent();
                 }
                 render_globe(&app, &cc.borrow());
             }
@@ -1791,6 +1819,7 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                         c.lang,
                         c.globe_rot_x,
                         c.globe_rot_y,
+                        c.globe_roll,
                         c.globe_zoom,
                         x,
                         y,

@@ -18,11 +18,13 @@ export global Screen {
     in-out property <bool> transport-sheet: false;
     in-out property <bool> desk-transport-open: false;
     in-out property <bool> lock-scroll: false;
+    in-out property <bool> globe-gesture: false;
 
     public function go(p: Page) {
         self.page = p;
         self.transport-sheet = false;
         self.lock-scroll = false;
+        self.globe-gesture = false;
     }
     // Обработка системной кнопки/жеста «назад» (Android форвардит её как Key.Back).
     // Возвращает true, если навигация обработана внутри приложения; false — если

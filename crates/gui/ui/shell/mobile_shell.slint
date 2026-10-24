@@ -9,12 +9,54 @@ import { TransportSheet } from "../widgets/transport_sheet.slint";
 import { SpacesSheet } from "../widgets/spaces_sheet.slint";
 import { ColdView } from "../views/cold.slint";
 import { RoutePage } from "../views/route.slint";
+import { GlobeVisual, GlobeInput } from "../widgets/globe.slint";
 import { BouncyScroll } from "../widgets/bouncy_scroll.slint";
+
+component BottomNav inherits Rectangle {
+    property <bool> more-active: Screen.page == Page.more || Screen.page == Page.proto
+        || Screen.page == Page.devices || Screen.page == Page.about;
+    height: 74px + Screen.safe-bottom;
+    background: Theme.sf;
+    Rectangle {
+        y: 0;
+        width: 100%;
+        height: 1px;
+        background: Theme.ln;
+    }
+    HorizontalLayout {
+        padding-left: 12px + Screen.safe-left;
+        padding-right: 12px + Screen.safe-right;
+        padding-bottom: Screen.safe-bottom;
+        BottomNavItem {
+            kind: 10;
+            label: Str.nav-home;
+            active: Screen.page == Page.home;
+            clicked => { Screen.go(Page.home); }
+        }
+        BottomNavItem {
+            kind: 11;
+            label: Str.nav-route;
+            active: Screen.page == Page.route || Screen.page == Page.nodes;
+            clicked => { Screen.go(Page.route); }
+        }
+        BottomNavItem {
+            kind: 12;
+            label: Str.nav-shield;
+            active: Screen.page == Page.shield || Screen.page == Page.split;
+            clicked => { Screen.go(Page.shield); }
+        }
+        BottomNavItem {
+            kind: 13;
+            label: Str.nav-settings;
+            active: root.more-active;
+            clicked => { Screen.go(Page.more); }
+        }
+    }
+}
 
 export component MobileShell inherits Rectangle {
     background: @linear-gradient(180deg, Theme.bg 0%, Theme.page 100%);
-    property <bool> more-active: Screen.page == Page.more || Screen.page == Page.proto
-        || Screen.page == Page.devices || Screen.page == Page.about;
+    property <length> nav-h: 74px + Screen.safe-bottom;
 
     if AppState.cold: BouncyScroll {
         show-scrollbar: !Screen.mobile-target;
@@ -28,12 +70,42 @@ export component MobileShell inherits Rectangle {
         }
     }
 
-    if !AppState.cold: VerticalLayout {
-        if Screen.page == Page.route: RoutePage {
-            vertical-stretch: 1;
+    if !AppState.cold && Screen.page == Page.route: rw := Rectangle {
+        rp := RoutePage {
+            width: 100%;
+            height: parent.height - root.nav-h;
         }
 
-        if Screen.page != Page.route: BouncyScroll {
+        property <length> globe-gx: rp.globe-abs.x - rw.absolute-position.x
+            + (rp.globe-ow - min(rp.globe-ow, 560px)) / 2;
+        property <length> globe-gy: rp.globe-abs.y - rw.absolute-position.y;
+
+        if !AppState.globe-expanded: GlobeVisual {
+            width: min(rp.globe-ow, 560px);
+            x: rw.globe-gx;
+            y: rw.globe-gy;
+        }
+
+        BottomNav {
+            y: parent.height - root.nav-h;
+            width: 100%;
+        }
+
+        if AppState.globe-expanded: GlobeVisual {
+            width: min(rp.globe-ow, 560px);
+            x: rw.globe-gx;
+            y: rw.globe-gy;
+        }
+
+        GlobeInput {
+            width: min(rp.globe-ow, 560px);
+            x: rw.globe-gx;
+            y: rw.globe-gy;
+        }
+    }
+
+    if !AppState.cold && Screen.page != Page.route: VerticalLayout {
+        BouncyScroll {
             vertical-stretch: 1;
             show-scrollbar: !Screen.mobile-target;
             VerticalLayout {
@@ -48,47 +120,7 @@ export component MobileShell inherits Rectangle {
             }
         }
 
-        Rectangle {
-            // фон навигации заходит в зону жестовой навигации, но иконки
-            // остаются в верхних 74px за счёт нижнего padding.
-            height: 74px + Screen.safe-bottom;
-            background: Theme.glass;
-            Rectangle {
-                y: 0;
-                width: 100%;
-                height: 1px;
-                background: Theme.ln;
-            }
-            HorizontalLayout {
-                padding-left: 12px + Screen.safe-left;
-                padding-right: 12px + Screen.safe-right;
-                padding-bottom: Screen.safe-bottom;
-                BottomNavItem {
-                    kind: 10;
-                    label: Str.nav-home;
-                    active: Screen.page == Page.home;
-                    clicked => { Screen.go(Page.home); }
-                }
-                BottomNavItem {
-                    kind: 11;
-                    label: Str.nav-route;
-                    active: Screen.page == Page.route || Screen.page == Page.nodes;
-                    clicked => { Screen.go(Page.route); }
-                }
-                BottomNavItem {
-                    kind: 12;
-                    label: Str.nav-shield;
-                    active: Screen.page == Page.shield || Screen.page == Page.split;
-                    clicked => { Screen.go(Page.shield); }
-                }
-                BottomNavItem {
-                    kind: 13;
-                    label: Str.nav-settings;
-                    active: root.more-active;
-                    clicked => { Screen.go(Page.more); }
-                }
-            }
-        }
+        BottomNav {}
     }
 
     TransportSheet {

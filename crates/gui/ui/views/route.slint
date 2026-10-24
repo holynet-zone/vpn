@@ -295,8 +295,7 @@ export component RouteView inherits VerticalLayout {
     property <int> drag-idx: -1;
     property <length> drag-dy: 0px;
     in property <bool> overlay-globe: false;
-    out property <length> globe-x: card.x + gph.x;
-    out property <length> globe-y: card.y + gph.y;
+    out property <Point> globe-abs: gph.absolute-position;
     out property <length> globe-w: gph.width;
     out property <length> globe-h: gph.height;
 
@@ -466,6 +465,9 @@ export component RouteView inherits VerticalLayout {
 
 export component RoutePage inherits Rectangle {
     clip: true;
+    out property <length> globe-ow: rv.globe-w;
+    out property <Point> globe-abs: rv.globe-abs;
+
     scr := BouncyScroll {
         width: 100%;
         height: 100%;
@@ -480,11 +482,5 @@ export component RoutePage inherits Rectangle {
                 overlay-globe: true;
             }
         }
-    }
-
-    GlobeView {
-        width: min(rv.globe-w, 560px);
-        x: (20px + Screen.safe-left) + rv.globe-x + (rv.globe-w - self.width) / 2;
-        y: (22px + Screen.safe-top) + rv.globe-y + scr.offset-y;
     }
 }
