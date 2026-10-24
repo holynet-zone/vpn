@@ -14,46 +14,107 @@ pub fn radius(zoom: f32) -> f32 {
     (H.min(W) / 2.0) * 0.92 * zoom
 }
 
-fn project(lon: f32, lat: f32, lon0: f32, lat0: f32, roll: f32, r: f32) -> (f32, f32, bool) {
-    Rot::new(lon0, lat0, roll, r).proj(latlon_vec(lon, lat))
+pub type Mat3 = [[f32; 3]; 3];
+
+#[inline]
+fn dot3(a: &[f32; 3], v: (f32, f32, f32)) -> f32 {
+    a[0] * v.0 + a[1] * v.1 + a[2] * v.2
+}
+
+pub fn mat_mul(a: &Mat3, b: &Mat3) -> Mat3 {
+    let mut o = [[0.0f32; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            o[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+        }
+    }
+    o
+}
+
+// Ориентация глобуса: строки — экранный базис (вправо, вверх, к зрителю) в
+// мировых координатах. Экран: x = CX + r·(right·v), y = CY − r·(up·v);
+// видимость: depth·v ≥ 0.
+pub fn orient_from_angles(lon0: f32, lat0: f32, roll: f32) -> Mat3 {
+    let (slon, clon) = lon0.to_radians().sin_cos();
+    let (slat, clat) = lat0.to_radians().sin_cos();
+    let right = [-slon, clon, 0.0];
+    let up = [-slat * clon, -slat * slon, clat];
+    let depth = [clat * clon, clat * slon, slat];
+    let (sr, cr) = roll.to_radians().sin_cos();
+    [
+        [
+            cr * right[0] + sr * up[0],
+            cr * right[1] + sr * up[1],
+            cr * right[2] + sr * up[2],
+        ],
+        [
+            -sr * right[0] + cr * up[0],
+            -sr * right[1] + cr * up[1],
+            -sr * right[2] + cr * up[2],
+        ],
+        depth,
+    ]
+}
+
+// Поворот на theta_deg вокруг единичной оси (ax, ay, az), заданной в экранном
+// базисе (вправо, вверх, к зрителю) — формула Родрига.
+pub fn rot_about(ax: f32, ay: f32, az: f32, theta_deg: f32) -> Mat3 {
+    let (s, c) = theta_deg.to_radians().sin_cos();
+    let t = 1.0 - c;
+    [
+        [c + t * ax * ax, t * ax * ay - s * az, t * ax * az + s * ay],
+        [t * ax * ay + s * az, c + t * ay * ay, t * ay * az - s * ax],
+        [t * ax * az - s * ay, t * ay * az + s * ax, c + t * az * az],
+    ]
+}
+
+fn norm3(v: [f32; 3]) -> [f32; 3] {
+    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if l > 1e-6 {
+        [v[0] / l, v[1] / l, v[2] / l]
+    } else {
+        v
+    }
+}
+
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+// Грам-Шмидт: держим матрицу ортонормированной, чтобы за много поворотов не
+// накапливался дрейф.
+pub fn orthonormalize(m: &Mat3) -> Mat3 {
+    let depth = norm3(m[2]);
+    let d = m[1][0] * depth[0] + m[1][1] * depth[1] + m[1][2] * depth[2];
+    let up = norm3([
+        m[1][0] - d * depth[0],
+        m[1][1] - d * depth[1],
+        m[1][2] - d * depth[2],
+    ]);
+    let right = cross3(up, depth);
+    [right, up, depth]
 }
 
 struct Rot {
-    clon0: f32,
-    slon0: f32,
-    clat0: f32,
-    slat0: f32,
-    croll: f32,
-    sroll: f32,
+    m: Mat3,
     r: f32,
 }
 
 impl Rot {
-    fn new(lon0: f32, lat0: f32, roll: f32, r: f32) -> Self {
-        let lon0r = lon0.to_radians();
-        let lat0r = lat0.to_radians();
-        let rollr = roll.to_radians();
-        Self {
-            clon0: lon0r.cos(),
-            slon0: lon0r.sin(),
-            clat0: lat0r.cos(),
-            slat0: lat0r.sin(),
-            croll: rollr.cos(),
-            sroll: rollr.sin(),
-            r,
-        }
+    fn new(m: &Mat3, r: f32) -> Self {
+        Self { m: *m, r }
     }
 
     #[inline]
     fn proj(&self, v: (f32, f32, f32)) -> (f32, f32, bool) {
-        let x1 = v.0 * self.clon0 + v.1 * self.slon0;
-        let y1 = v.1 * self.clon0 - v.0 * self.slon0;
-        let vis = self.slat0 * v.2 + self.clat0 * x1 >= 0.0;
-        let px = self.r * y1;
-        let py = -self.r * (self.clat0 * v.2 - self.slat0 * x1);
-        let x = CX + px * self.croll - py * self.sroll;
-        let y = CY + px * self.sroll + py * self.croll;
-        (x, y, vis)
+        let rx = dot3(&self.m[0], v);
+        let uy = dot3(&self.m[1], v);
+        let dz = dot3(&self.m[2], v);
+        (CX + self.r * rx, CY - self.r * uy, dz >= 0.0)
     }
 }
 
@@ -123,8 +184,7 @@ fn graticule_vecs() -> &'static Vec<Vec<(f32, f32, f32)>> {
     })
 }
 
-fn polyline(points: &[(f32, f32)], lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
-    let rot = Rot::new(lon0, lat0, roll, r);
+fn polyline(points: &[(f32, f32)], rot: &Rot) -> String {
     let mut out = String::new();
     let mut pen = false;
     for &(lon, lat) in points {
@@ -143,20 +203,18 @@ fn polyline(points: &[(f32, f32)], lon0: f32, lat0: f32, roll: f32, r: f32) -> S
     out
 }
 
-fn graticule(lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
-    let rot = Rot::new(lon0, lat0, roll, r);
+fn graticule(rot: &Rot) -> String {
     let mut out = String::new();
     for line in graticule_vecs() {
-        polyline_vec(line, &rot, &mut out);
+        polyline_vec(line, rot, &mut out);
     }
     out
 }
 
-fn land_path(lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
-    let rot = Rot::new(lon0, lat0, roll, r);
+fn land_path(rot: &Rot) -> String {
     let mut out = String::new();
     for ring in land_vecs() {
-        polyline_vec(ring, &rot, &mut out);
+        polyline_vec(ring, rot, &mut out);
     }
     out
 }
@@ -180,14 +238,14 @@ fn slerp(a: (f32, f32), b: (f32, f32), t: f32) -> (f32, f32) {
     (y.atan2(x).to_degrees(), z.asin().to_degrees())
 }
 
-fn arc_path(a: (f32, f32), b: (f32, f32), lon0: f32, lat0: f32, roll: f32, r: f32) -> String {
+fn arc_path(a: (f32, f32), b: (f32, f32), rot: &Rot) -> String {
     let steps = 28;
     let mut pts = Vec::with_capacity(steps + 1);
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
         pts.push(slerp(a, b, t));
     }
-    polyline(&pts, lon0, lat0, roll, r)
+    polyline(&pts, rot)
 }
 
 pub struct Frame {
@@ -202,15 +260,12 @@ pub fn render(
     space: &str,
     path: &[&str],
     lang: Lang,
-    rot_x: f32,
-    rot_y: f32,
-    roll: f32,
+    orient: &Mat3,
     zoom: f32,
     probing: bool,
 ) -> Frame {
-    let lon0 = -rot_x;
-    let lat0 = -rot_y;
     let r = radius(zoom);
+    let rot = Rot::new(orient, r);
 
     let nodes = domain::globe_points(space, lang);
     let mut active = std::collections::HashSet::new();
@@ -247,7 +302,7 @@ pub fn render(
             0
         };
         arcs.push(GlobeArc {
-            d: arc_path((a.lon, a.lat), (b.lon, b.lat), lon0, lat0, roll, r).into(),
+            d: arc_path((a.lon, a.lat), (b.lon, b.lat), &rot).into(),
             kind,
             width: if act { 2.4 } else { 1.1 },
             dash,
@@ -259,15 +314,7 @@ pub fn render(
         path.first().and_then(|id| find(id)),
     ) {
         arcs.push(GlobeArc {
-            d: arc_path(
-                (me.lon, me.lat),
-                (first.lon, first.lat),
-                lon0,
-                lat0,
-                roll,
-                r,
-            )
-            .into(),
+            d: arc_path((me.lon, me.lat), (first.lon, first.lat), &rot).into(),
             kind: 1,
             width: 2.0,
             dash: 2,
@@ -276,7 +323,7 @@ pub fn render(
 
     let mut dots: Vec<GlobeDot> = Vec::new();
     for n in &nodes {
-        let (x, y, vis) = project(n.lon, n.lat, lon0, lat0, roll, r);
+        let (x, y, vis) = rot.proj(latlon_vec(n.lon, n.lat));
         if !vis {
             continue;
         }
@@ -341,8 +388,8 @@ pub fn render(
     }
 
     Frame {
-        graticule: graticule(lon0, lat0, roll, r).into(),
-        land: land_path(lon0, lat0, roll, r).into(),
+        graticule: graticule(&rot).into(),
+        land: land_path(&rot).into(),
         arcs: ModelRc::new(VecModel::from(arcs)),
         dots: ModelRc::new(VecModel::from(dots)),
         radius: r,
@@ -352,22 +399,18 @@ pub fn render(
 pub fn hit_test(
     space: &str,
     lang: Lang,
-    rot_x: f32,
-    rot_y: f32,
-    roll: f32,
+    orient: &Mat3,
     zoom: f32,
     tx: f32,
     ty: f32,
 ) -> Option<String> {
-    let lon0 = -rot_x;
-    let lat0 = -rot_y;
-    let r = radius(zoom);
+    let rot = Rot::new(orient, radius(zoom));
     let mut best: Option<(f32, String)> = None;
     for n in domain::globe_points(space, lang) {
         if n.is_me || n.rtt < 0 {
             continue;
         }
-        let (x, y, vis) = project(n.lon, n.lat, lon0, lat0, roll, r);
+        let (x, y, vis) = rot.proj(latlon_vec(n.lon, n.lat));
         if !vis {
             continue;
         }

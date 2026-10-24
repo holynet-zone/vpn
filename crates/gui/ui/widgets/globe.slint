@@ -132,6 +132,7 @@ export component GlobeInput inherits Rectangle {
     property <length> cx: 150 * root.sc * 1px;
     property <length> cy: 140 * root.sc * 1px;
     property <length> rad: AppState.globe-radius * root.sc * 1px;
+    in property <length> active-max-y: 100000px;
 
     property <bool> cooling: false;
     cool-timer := Timer {
@@ -173,6 +174,7 @@ export component GlobeInput inherits Rectangle {
             y: root.cy - root.rad + i * (root.rad / 8);
             off-x: self.x;
             off-y: self.y;
+            enabled: self.y + self.height <= root.active-max-y;
         }
     }
 }

@@ -47,12 +47,10 @@ struct Core {
     space_sheet: bool,
     qr_parsed: bool,
     qr_shown: bool,
-    globe_rot_x: f32,
-    globe_rot_y: f32,
-    globe_roll: f32,
+    globe_orient: globe::Mat3,
+    globe_orient_start: globe::Mat3,
     globe_zoom: f32,
     globe_zoom_start: f32,
-    globe_roll_start: f32,
     globe_expanded: bool,
     about_doc: Option<usize>,
     about_upd: i32,
@@ -108,12 +106,10 @@ impl Core {
             space_sheet: false,
             qr_parsed: false,
             qr_shown: false,
-            globe_rot_x: -15.0,
-            globe_rot_y: -18.0,
-            globe_roll: 0.0,
+            globe_orient: globe::orient_from_angles(15.0, 18.0, 0.0),
+            globe_orient_start: globe::orient_from_angles(15.0, 18.0, 0.0),
             globe_zoom: 1.0,
             globe_zoom_start: 1.0,
-            globe_roll_start: 0.0,
             globe_expanded: false,
             about_doc: None,
             about_upd: 0,
@@ -522,16 +518,7 @@ fn render_globe(app: &AppWindow, c: &Core) {
         domain::plan(space, exit, c.prio)
     };
     let pv: Vec<&str> = path.to_vec();
-    let f = globe::render(
-        space,
-        &pv,
-        c.lang,
-        c.globe_rot_x,
-        c.globe_rot_y,
-        c.globe_roll,
-        c.globe_zoom,
-        c.probing,
-    );
+    let f = globe::render(space, &pv, c.lang, &c.globe_orient, c.globe_zoom, c.probing);
     st.set_globe_graticule(f.graticule);
     st.set_globe_land(f.land);
     st.set_globe_arcs(f.arcs);
@@ -1742,11 +1729,16 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 {
                     let mut c = cc.borrow_mut();
-                    let (sr, cr) = c.globe_roll.to_radians().sin_cos();
-                    let gx = dx * cr + dy * sr;
-                    let gy = -dx * sr + dy * cr;
-                    c.globe_rot_x = (c.globe_rot_x + gx * 0.32).rem_euclid(360.0);
-                    c.globe_rot_y = (c.globe_rot_y - gy * 0.32).rem_euclid(360.0);
+                    let len = (dx * dx + dy * dy).sqrt();
+                    if len > 1e-4 {
+                        // Трекбол: поворот вокруг оси в плоскости экрана,
+                        // перпендикулярной движению пальца (тянем точку за собой
+                        // в любом направлении, без инверсии у полюсов).
+                        let (ax, ay) = (dy / len, dx / len);
+                        let step = globe::rot_about(ax, ay, 0.0, len * 0.32);
+                        c.globe_orient =
+                            globe::orthonormalize(&globe::mat_mul(&step, &c.globe_orient));
+                    }
                 }
                 render_globe(&app, &cc.borrow());
             }
@@ -1771,7 +1763,7 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
         st.on_globe_pinch_start(move || {
             let mut c = cc.borrow_mut();
             c.globe_zoom_start = c.globe_zoom;
-            c.globe_roll_start = c.globe_roll;
+            c.globe_orient_start = c.globe_orient;
         });
     }
     {
@@ -1790,7 +1782,11 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
                     let cap = if c.globe_expanded { 1.9 } else { 1.16 };
                     c.globe_zoom = raw.clamp(0.82, cap);
                     if rot_deg.is_finite() {
-                        c.globe_roll = c.globe_roll_start + rot_deg;
+                        // Крен от двухпальцевого твиста — поворот вокруг оси
+                        // зрителя относительно ориентации на старте жеста.
+                        let twist = globe::rot_about(0.0, 0.0, 1.0, -rot_deg);
+                        c.globe_orient =
+                            globe::orthonormalize(&globe::mat_mul(&twist, &c.globe_orient_start));
                     }
                     let was = c.globe_expanded;
                     if !c.globe_expanded && raw > 1.16 * 1.08 {
@@ -1814,16 +1810,7 @@ fn wire(window: &AppWindow, core: &Rc<RefCell<Core>>) {
             if let Some(app) = w.upgrade() {
                 let hit = {
                     let c = cc.borrow();
-                    globe::hit_test(
-                        &c.space_id,
-                        c.lang,
-                        c.globe_rot_x,
-                        c.globe_rot_y,
-                        c.globe_roll,
-                        c.globe_zoom,
-                        x,
-                        y,
-                    )
+                    globe::hit_test(&c.space_id, c.lang, &c.globe_orient, c.globe_zoom, x, y)
                 };
                 if let Some(id) = hit {
                     cc.borrow_mut().exit_id = id;

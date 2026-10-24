@@ -101,6 +101,9 @@ export component MobileShell inherits Rectangle {
             width: min(rp.globe-ow, 560px);
             x: rw.globe-gx;
             y: rw.globe-gy;
+            active-max-y: AppState.globe-expanded
+                ? 100000px
+                : (parent.height - root.nav-h) - rw.globe-gy;
         }
     }
 
