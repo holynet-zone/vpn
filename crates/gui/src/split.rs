@@ -1,130 +1,167 @@
-use slint::{Color, ModelRc, SharedString, VecModel};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use slint::{Color, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 use crate::Lang;
 use crate::{AppState, SplitAppRow, SplitChip, SplitDomainRow, SplitModeRow};
 
 struct App {
-    id: &'static str,
-    name: &'static str,
-    cat_ru: &'static str,
-    cat_en: &'static str,
+    id: String,
+    name: String,
+    cat_ru: String,
+    cat_en: String,
     h: f32,
     vpn: bool,
     sys: bool,
 }
 
-const fn app(
-    id: &'static str,
-    name: &'static str,
-    cat_ru: &'static str,
-    cat_en: &'static str,
+const ICON_PX: i32 = 96;
+
+static APPS: OnceLock<Vec<App>> = OnceLock::new();
+static ICON_RGBA: OnceLock<HashMap<String, Vec<u8>>> = OnceLock::new();
+
+thread_local! {
+    static ICON_IMG: RefCell<HashMap<String, Option<Image>>> = RefCell::new(HashMap::new());
+}
+
+fn apps() -> &'static [App] {
+    APPS.get_or_init(|| {
+        let (list, icons) = load_apps();
+        let _ = ICON_RGBA.set(icons);
+        list
+    })
+}
+
+fn load_apps() -> (Vec<App>, HashMap<String, Vec<u8>>) {
+    #[cfg(target_os = "android")]
+    {
+        let raw = crate::android_ext::list_apps();
+        if !raw.is_empty() {
+            let mut list: Vec<App> = raw
+                .into_iter()
+                .map(|(pkg, name, cat, sys)| App {
+                    h: hue(&pkg),
+                    vpn: vpn_hint(&pkg, &name),
+                    id: pkg,
+                    name,
+                    cat_ru: cat.clone(),
+                    cat_en: cat,
+                    sys,
+                })
+                .collect();
+            list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+            let ids: Vec<String> = list.iter().map(|a| a.id.clone()).collect();
+            let icons = crate::android_ext::app_icons(&ids, ICON_PX);
+            let mut map = HashMap::new();
+            for (id, rgba) in ids.into_iter().zip(icons) {
+                if let Some(bytes) = rgba {
+                    map.insert(id, bytes);
+                }
+            }
+            return (list, map);
+        }
+    }
+    (builtin_apps(), HashMap::new())
+}
+
+fn mk(
+    id: &str,
+    name: &str,
+    cat_ru: &str,
+    cat_en: &str,
     h: f32,
     vpn: bool,
     sys: bool,
 ) -> App {
     App {
-        id,
-        name,
-        cat_ru,
-        cat_en,
+        id: id.into(),
+        name: name.into(),
+        cat_ru: cat_ru.into(),
+        cat_en: cat_en.into(),
         h,
         vpn,
         sys,
     }
 }
 
-static APPS: &[App] = &[
-    app("sber", "СберБанк", "Финансы", "Finance", 150.0, true, false),
-    app("tbank", "Т-Банк", "Финансы", "Finance", 95.0, true, false),
-    app(
-        "gos",
-        "Госуслуги",
-        "Госсервисы",
-        "Government",
-        250.0,
-        true,
-        false,
-    ),
-    app("ozon", "Ozon", "Покупки", "Shopping", 255.0, true, false),
-    app(
-        "wb",
-        "Wildberries",
-        "Покупки",
-        "Shopping",
-        330.0,
-        false,
-        false,
-    ),
-    app(
-        "ymaps",
-        "Яндекс Карты",
-        "Навигация",
-        "Navigation",
-        25.0,
-        false,
-        false,
-    ),
-    app("tg", "Telegram", "Общение", "Social", 225.0, false, false),
-    app("wa", "WhatsApp", "Общение", "Social", 150.0, false, false),
-    app("chrome", "Chrome", "Браузер", "Browser", 60.0, false, false),
-    app("yt", "YouTube", "Видео", "Video", 25.0, false, false),
-    app("spot", "Spotify", "Музыка", "Music", 150.0, false, false),
-    app("steam", "Steam", "Игры", "Games", 250.0, false, false),
-    app(
-        "teams",
-        "Microsoft Teams",
-        "Работа",
-        "Work",
-        275.0,
-        false,
-        false,
-    ),
-    app(
-        "anyc",
-        "Cisco AnyConnect",
-        "Работа · VPN",
-        "Work · VPN",
-        220.0,
-        true,
-        false,
-    ),
-    app(
-        "cast",
-        "Google Home",
-        "Устройства",
-        "Devices",
-        200.0,
-        false,
-        false,
-    ),
-    app(
-        "play",
-        "Google Play",
-        "Системное",
-        "System",
-        165.0,
-        false,
-        true,
-    ),
-    app(
-        "upd",
-        "Обновление системы",
-        "Системное",
-        "System",
-        240.0,
-        false,
-        true,
-    ),
-    app(
-        "dl",
-        "Диспетчер загрузок",
-        "Системное",
-        "System",
-        200.0,
-        false,
-        true,
-    ),
-];
+fn builtin_apps() -> Vec<App> {
+    vec![
+        mk("sber", "СберБанк", "Финансы", "Finance", 150.0, true, false),
+        mk("tbank", "Т-Банк", "Финансы", "Finance", 95.0, true, false),
+        mk("gos", "Госуслуги", "Госсервисы", "Government", 250.0, true, false),
+        mk("ozon", "Ozon", "Покупки", "Shopping", 255.0, true, false),
+        mk("wb", "Wildberries", "Покупки", "Shopping", 330.0, false, false),
+        mk("ymaps", "Яндекс Карты", "Навигация", "Navigation", 25.0, false, false),
+        mk("tg", "Telegram", "Общение", "Social", 225.0, false, false),
+        mk("wa", "WhatsApp", "Общение", "Social", 150.0, false, false),
+        mk("chrome", "Chrome", "Браузер", "Browser", 60.0, false, false),
+        mk("yt", "YouTube", "Видео", "Video", 25.0, false, false),
+        mk("spot", "Spotify", "Музыка", "Music", 150.0, false, false),
+        mk("steam", "Steam", "Игры", "Games", 250.0, false, false),
+        mk("teams", "Microsoft Teams", "Работа", "Work", 275.0, false, false),
+        mk("anyc", "Cisco AnyConnect", "Работа · VPN", "Work · VPN", 220.0, true, false),
+        mk("cast", "Google Home", "Устройства", "Devices", 200.0, false, false),
+        mk("play", "Google Play", "Системное", "System", 165.0, false, true),
+        mk("upd", "Обновление системы", "Системное", "System", 240.0, false, true),
+        mk("dl", "Диспетчер загрузок", "Системное", "System", 200.0, false, true),
+    ]
+}
+
+#[allow(dead_code)]
+fn hue(s: &str) -> f32 {
+    let mut h: u32 = 2_166_136_261;
+    for b in s.bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(16_777_619);
+    }
+    (h % 360) as f32
+}
+
+#[allow(dead_code)]
+fn vpn_hint(pkg: &str, name: &str) -> bool {
+    let p = pkg.to_lowercase();
+    let n = name.to_lowercase();
+    const KEYS: &[&str] = &[
+        "sberbank",
+        "tinkoff",
+        "tbank",
+        "gosuslugi",
+        "ozon",
+        "wildberries",
+        "alfabank",
+        "vtb",
+        "anyconnect",
+        "cisco",
+    ];
+    KEYS.iter().any(|k| p.contains(k) || n.contains(k))
+}
+
+fn app_image(id: &str) -> Option<Image> {
+    ICON_IMG.with(|cache| {
+        if let Some(v) = cache.borrow().get(id) {
+            return v.clone();
+        }
+        let img = ICON_RGBA
+            .get()
+            .and_then(|m| m.get(id))
+            .and_then(|rgba| build_image(rgba));
+        cache.borrow_mut().insert(id.to_string(), img.clone());
+        img
+    })
+}
+
+fn build_image(rgba: &[u8]) -> Option<Image> {
+    let px = ICON_PX as usize;
+    if rgba.len() != px * px * 4 {
+        return None;
+    }
+    let mut buf = SharedPixelBuffer::<Rgba8Pixel>::new(ICON_PX as u32, ICON_PX as u32);
+    buf.make_mut_bytes().copy_from_slice(rgba);
+    Some(Image::from_rgba8(buf))
+}
 
 fn t2(lang: Lang, en: &'static str, ru: &'static str) -> &'static str {
     match lang {
@@ -163,6 +200,13 @@ fn oklch(l: f32, c: f32, h_deg: f32) -> Color {
 
 fn icon(a: &App) -> Color {
     oklch(0.62, 0.14, a.h)
+}
+
+fn cat(lang: Lang, a: &App) -> &str {
+    match lang {
+        Lang::Ru => &a.cat_ru,
+        _ => &a.cat_en,
+    }
 }
 
 #[derive(Clone)]
@@ -223,9 +267,9 @@ impl SplitState {
     }
 
     pub fn sug_apply(&mut self) {
-        for a in APPS.iter().filter(|a| a.vpn) {
-            if !self.ex.iter().any(|x| x == a.id) {
-                self.ex.push(a.id.to_string());
+        for a in apps().iter().filter(|a| a.vpn) {
+            if !self.ex.iter().any(|x| x == &a.id) {
+                self.ex.push(a.id.clone());
             }
         }
     }
@@ -306,24 +350,27 @@ pub fn render(st: &AppState, lang: Lang, s: &SplitState) {
     let q = s.query.trim().to_lowercase();
 
     let matches = |a: &App| {
-        (s.sys || !a.sys || sel.iter().any(|x| x == a.id))
+        (s.sys || !a.sys || sel.iter().any(|x| x == &a.id))
             && (q.is_empty()
                 || a.name.to_lowercase().contains(&q)
-                || t2(lang, a.cat_en, a.cat_ru).to_lowercase().contains(&q))
+                || cat(lang, a).to_lowercase().contains(&q))
     };
-    let vis: Vec<&App> = APPS.iter().filter(|a| matches(a)).collect();
+    let vis: Vec<&App> = apps().iter().filter(|a| matches(a)).collect();
 
     let row = |a: &App, i: usize, on: bool| -> SplitAppRow {
         let blocks = a.vpn && ex && !on;
+        let img = app_image(&a.id);
         SplitAppRow {
-            id: a.id.into(),
-            name: a.name.into(),
+            id: a.id.as_str().into(),
+            name: a.name.as_str().into(),
             letter: a.name.chars().next().unwrap_or(' ').to_string().into(),
             color: icon(a).into(),
+            icon: img.clone().unwrap_or_default(),
+            has_icon: img.is_some(),
             sub: if blocks {
                 t2(lang, "Often blocks VPNs", "Часто блокирует VPN").into()
             } else {
-                t2(lang, a.cat_en, a.cat_ru).into()
+                cat(lang, a).into()
             },
             sub_warn: blocks,
             selected: on,
@@ -333,20 +380,20 @@ pub fn render(st: &AppState, lang: Lang, s: &SplitState) {
 
     let sel_a: Vec<SplitAppRow> = vis
         .iter()
-        .filter(|a| sel.iter().any(|x| x == a.id))
+        .filter(|a| sel.iter().any(|x| x == &a.id))
         .enumerate()
         .map(|(i, a)| row(a, i, true))
         .collect();
     let rest_a: Vec<SplitAppRow> = vis
         .iter()
-        .filter(|a| !sel.iter().any(|x| x == a.id))
+        .filter(|a| !sel.iter().any(|x| x == &a.id))
         .enumerate()
         .map(|(i, a)| row(a, i, false))
         .collect();
 
-    let sug: Vec<&App> = APPS
+    let sug: Vec<&App> = apps()
         .iter()
-        .filter(|a| a.vpn && !s.ex.iter().any(|x| x == a.id))
+        .filter(|a| a.vpn && !s.ex.iter().any(|x| x == &a.id))
         .collect();
 
     let modes = vec![
@@ -383,10 +430,15 @@ pub fn render(st: &AppState, lang: Lang, s: &SplitState) {
 
     let sug_chips: Vec<SplitChip> = sug
         .iter()
-        .map(|a| SplitChip {
-            name: a.name.into(),
-            letter: a.name.chars().next().unwrap_or(' ').to_string().into(),
-            color: icon(a).into(),
+        .map(|a| {
+            let img = app_image(&a.id);
+            SplitChip {
+                name: a.name.as_str().into(),
+                letter: a.name.chars().next().unwrap_or(' ').to_string().into(),
+                color: icon(a).into(),
+                icon: img.clone().unwrap_or_default(),
+                has_icon: img.is_some(),
+            }
         })
         .collect();
 

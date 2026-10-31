@@ -141,6 +141,7 @@ export component ShieldView inherits VerticalLayout {
                     toggled => { AppState.flip-toggle(tg.id); }
                 }
                 Rectangle {
+                    min-height: 62px;
                     Rectangle { x: 16px; y: 0; width: parent.width - 16px; height: 1px; background: Theme.ln; }
                     background: split-t.pressed ? Theme.sf2 : transparent;
                     HorizontalLayout {

@@ -2,6 +2,12 @@ package dev.holynet.gui;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.view.Display;
@@ -10,6 +16,8 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import java.util.HashSet;
+import java.util.List;
 
 
 public final class HolyNetAndroid {
@@ -68,6 +76,99 @@ public final class HolyNetAndroid {
                 v.performHapticFeedback(effect, flags);
             }
         });
+    }
+
+    public static String listApps(final Activity activity) {
+        if (activity == null) {
+            return "";
+        }
+        try {
+            PackageManager pm = activity.getPackageManager();
+            Intent main = new Intent(Intent.ACTION_MAIN, null);
+            main.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> ris = pm.queryIntentActivities(main, 0);
+            StringBuilder sb = new StringBuilder();
+            HashSet<String> seen = new HashSet<String>();
+            String self = activity.getPackageName();
+            for (ResolveInfo ri : ris) {
+                if (ri.activityInfo == null) {
+                    continue;
+                }
+                ApplicationInfo ai = ri.activityInfo.applicationInfo;
+                if (ai == null || ai.packageName == null) {
+                    continue;
+                }
+                String pkg = ai.packageName;
+                if (pkg.equals(self) || !seen.add(pkg)) {
+                    continue;
+                }
+                String label = String.valueOf(ri.loadLabel(pm));
+                boolean sys = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                        && (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
+                String cat = "";
+                if (Build.VERSION.SDK_INT >= 26) {
+                    CharSequence ct = ApplicationInfo.getCategoryTitle(activity, ai.category);
+                    if (ct != null) {
+                        cat = ct.toString();
+                    }
+                }
+                label = label.replace('\t', ' ').replace('\n', ' ').trim();
+                cat = cat.replace('\t', ' ').replace('\n', ' ').trim();
+                sb.append(pkg).append('\t').append(label).append('\t')
+                  .append(cat).append('\t').append(sys ? '1' : '0').append('\n');
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public static byte[] appIcons(final Activity activity, final String pkgsJoined, final int size) {
+        if (activity == null || pkgsJoined == null || size <= 0) {
+            return new byte[0];
+        }
+        try {
+            PackageManager pm = activity.getPackageManager();
+            String[] pkgs = pkgsJoined.split("\t", -1);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            int[] px = new int[size * size];
+            byte[] header = new byte[4];
+            for (String pkg : pkgs) {
+                byte[] rgba = null;
+                try {
+                    Drawable d = pm.getApplicationIcon(pkg);
+                    Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+                    Canvas canvas = new Canvas(bmp);
+                    d.setBounds(0, 0, size, size);
+                    d.draw(canvas);
+                    bmp.getPixels(px, 0, size, 0, 0, size, size);
+                    bmp.recycle();
+                    rgba = new byte[size * size * 4];
+                    for (int i = 0; i < px.length; i++) {
+                        int p = px[i];
+                        int o = i * 4;
+                        rgba[o] = (byte) ((p >> 16) & 0xff);
+                        rgba[o + 1] = (byte) ((p >> 8) & 0xff);
+                        rgba[o + 2] = (byte) (p & 0xff);
+                        rgba[o + 3] = (byte) ((p >> 24) & 0xff);
+                    }
+                } catch (Exception e) {
+                    rgba = null;
+                }
+                int len = (rgba == null) ? 0 : rgba.length;
+                header[0] = (byte) ((len >> 24) & 0xff);
+                header[1] = (byte) ((len >> 16) & 0xff);
+                header[2] = (byte) ((len >> 8) & 0xff);
+                header[3] = (byte) (len & 0xff);
+                bos.write(header, 0, 4);
+                if (rgba != null) {
+                    bos.write(rgba, 0, rgba.length);
+                }
+            }
+            return bos.toByteArray();
+        } catch (Exception e) {
+            return new byte[0];
+        }
     }
 
     public static void openUrl(final Activity activity, final String url) {

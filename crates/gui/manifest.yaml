@@ -1,5 +1,7 @@
 icon: ../../docs/icons/icon.png
 android:
   manifest:
+    uses_permission:
+      - name: android.permission.QUERY_ALL_PACKAGES
     application:
       label: Holynet VPN
